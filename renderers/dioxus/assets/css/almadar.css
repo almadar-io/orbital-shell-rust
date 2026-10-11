@@ -1,0 +1,194 @@
+/* Baseline structural stylesheet for the Dioxus backend (`@almadar/ui-wasm`).
+ *
+ * Not a design system: layout + spacing + primitive-control defaults + the
+ * approximation colors so DOM renderers are not naked browser defaults. Every
+ * value is a CSS custom property with a default, so a theme (Tailwind or
+ * otherwise) is a later override — never a renderer change. Loaded by the
+ * catalog; consumable externally via `@almadar/ui-wasm/almadar.css`. */
+
+:root {
+  --almadar-font: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+  --almadar-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  --almadar-fg: #111827;
+  --almadar-muted: #6b7280;
+  --almadar-line: #d1d5db;
+  --almadar-bg: #ffffff;
+  --almadar-accent: #2563eb;
+  --almadar-accent-bg: rgba(37, 99, 235, 0.08);
+  --almadar-danger: #dc2626;
+  --almadar-warn: #b45309;
+  --almadar-ok: #15803d;
+  --almadar-radius: 8px;
+  --almadar-gap: 12px;
+  --almadar-pad: 12px;
+}
+
+.almadar-orbital-dioxus {
+  font-family: var(--almadar-font);
+  color: var(--almadar-fg);
+  font-size: 14px;
+  line-height: 1.5;
+}
+.almadar-slot { display: contents; }
+.almadar-fallback {
+  font-family: var(--almadar-mono);
+  font-size: 12px;
+  color: var(--almadar-warn);
+  border: 1px dashed var(--almadar-warn);
+  border-radius: var(--almadar-radius);
+  padding: 6px 10px;
+  background: rgba(180, 83, 9, 0.06);
+}
+
+/* primitives */
+.almadar-button {
+  font: inherit;
+  padding: 6px 12px;
+  border-radius: var(--almadar-radius);
+  border: 1px solid var(--almadar-line);
+  background: var(--almadar-bg);
+  color: var(--almadar-fg);
+  cursor: pointer;
+}
+.almadar-button:hover { background: var(--almadar-fg); color: var(--almadar-bg); border-color: var(--almadar-fg); }
+.almadar-input {
+  font: inherit;
+  padding: 6px 10px;
+  border-radius: var(--almadar-radius);
+  border: 1px solid var(--almadar-line);
+  background: var(--almadar-bg);
+  color: var(--almadar-fg);
+  min-width: 180px;
+}
+.almadar-typography { color: var(--almadar-fg); }
+.almadar-stack { display: flex; gap: var(--almadar-gap); }
+.almadar-stack--v { flex-direction: column; }
+.almadar-stack--h { flex-direction: row; align-items: center; }
+
+/* animated counter */
+.almadar-animated-counter__value { font-size: 28px; font-weight: 700; color: var(--almadar-fg); }
+.almadar-animated-counter__label { display: block; color: var(--almadar-muted); font-size: 13px; }
+
+/* Tier S — structural */
+.almadar-icon { display: inline-block; line-height: 1; }
+.almadar-divider { height: 1px; background: var(--almadar-line); margin: 8px 0; border: 0; }
+.almadar-spacer { display: block; }
+.almadar-spinner {
+  display: inline-block; width: 16px; height: 16px; border-radius: 50%;
+  border: 2px solid var(--almadar-line); border-top-color: var(--almadar-accent);
+  animation: almadar-spin 0.8s linear infinite; vertical-align: middle;
+}
+@keyframes almadar-spin { to { transform: rotate(360deg); } }
+.almadar-alert { padding: var(--almadar-pad); border-radius: var(--almadar-radius); border: 1px solid var(--almadar-line); background: var(--almadar-accent-bg); }
+.almadar-alert--error { border-color: var(--almadar-danger); background: rgba(220, 38, 38, 0.07); color: var(--almadar-danger); }
+.almadar-alert--warn { border-color: var(--almadar-warn); background: rgba(180, 83, 9, 0.07); }
+.almadar-badge {
+  display: inline-block; font-size: 12px; padding: 2px 8px; border-radius: 999px;
+  background: rgba(60, 80, 120, 0.14); color: var(--almadar-fg); border: 1px solid var(--almadar-line);
+}
+.almadar-card, .almadar-box, .almadar-form-section, .almadar-section, .almadar-container {
+  border: 1px solid var(--almadar-line); border-radius: var(--almadar-radius);
+  padding: var(--almadar-pad); background: var(--almadar-bg);
+}
+.almadar-card__title, .almadar-section-header, .almadar-page-header { font-weight: 600; margin-bottom: 8px; }
+.almadar-label { font-weight: 600; }
+.almadar-muted { color: var(--almadar-muted); }
+.almadar-status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--almadar-ok); vertical-align: middle; }
+.almadar-avatar {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 32px; height: 32px; border-radius: 50%; background: var(--almadar-accent-bg);
+  font-weight: 700; color: var(--almadar-accent);
+}
+.almadar-flex { display: flex; gap: var(--almadar-gap); }
+.almadar-grid, .almadar-simple-grid { display: grid; gap: var(--almadar-gap); }
+.almadar-hstack { display: flex; flex-direction: row; gap: var(--almadar-gap); align-items: center; }
+.almadar-vstack { display: flex; flex-direction: column; gap: var(--almadar-gap); }
+.almadar-center { display: flex; align-items: center; justify-content: center; }
+.almadar-empty-state, .almadar-loading-state, .almadar-error-state { color: var(--almadar-muted); padding: var(--almadar-pad); }
+.almadar-error-state { color: var(--almadar-danger); }
+
+/* Tier I — interactive / data */
+.almadar-progress-bar { height: 8px; border-radius: 999px; background: var(--almadar-line); overflow: hidden; }
+.almadar-progress-bar > span { display: block; height: 100%; background: var(--almadar-accent); }
+.almadar-data-grid, .almadar-table-view { border-collapse: collapse; width: 100%; font-size: 13px; }
+.almadar-data-grid th, .almadar-data-grid td, .almadar-table-view th, .almadar-table-view td {
+  border: 1px solid var(--almadar-line); padding: 6px 8px; text-align: left;
+}
+.almadar-data-grid th, .almadar-table-view th { background: rgba(0,0,0,0.03); font-weight: 600; }
+.almadar-data-list { list-style: none; margin: 0; padding: 0; }
+.almadar-data-list li { padding: 6px 0; border-bottom: 1px solid var(--almadar-line); }
+.almadar-select, .almadar-textarea { font: inherit; padding: 6px 10px; border: 1px solid var(--almadar-line); border-radius: var(--almadar-radius); background: var(--almadar-bg); }
+.almadar-range-slider { width: 100%; }
+
+/* Tier C — canvas / svg approximations */
+.almadar-map-view, .almadar-signature-pad, .almadar-chart, .almadar-qr-scanner, .almadar-calendar-grid {
+  border: 1px solid var(--almadar-line); border-radius: var(--almadar-radius); background: var(--almadar-bg);
+}
+.almadar-map-view { background: #1e3228; color: #cde; min-height: 200px; position: relative; }
+.almadar-signature-pad { background: #fff; min-height: 120px; }
+.almadar-qr-scanner { background: #141414; min-height: 200px; }
+.almadar-svg { display: block; }
+
+/* Tier M — content / media */
+.almadar-code-block, .almadar-markdown-content pre {
+  font-family: var(--almadar-mono); font-size: 12px; background: rgba(0,0,0,0.04);
+  border: 1px solid var(--almadar-line); border-radius: var(--almadar-radius); padding: var(--almadar-pad); overflow: auto;
+}
+.almadar-document-viewer { padding: var(--almadar-pad); }
+.almadar-atlas-image { max-width: 100%; border-radius: var(--almadar-radius); }
+
+/* Batch 4 — SVG/canvas/chart/learning structural baseline */
+.almadar-svg-node, .almadar-svg-ring, .almadar-svg-pulse, .almadar-svg-shield,
+.almadar-svg-stack, .almadar-svg-branch, .almadar-svg-connection, .almadar-svg-flow,
+.almadar-svg-grid, .almadar-svg-lobe, .almadar-svg-mesh, .almadar-svg-morph,
+.almadar-sparkline, .almadar-orbital-visualization { display: block; }
+
+.almadar-line-chart, .almadar-chart, .almadar-map-view, .almadar-positioned-canvas,
+.almadar-scaled-diagram, .almadar-jazari-state-machine, .almadar-state-machine-view,
+.almadar-graph-canvas, .almadar-graph-view { display: block; width: 100%; max-width: 520px; }
+.almadar-chart__title, .almadar-graph-canvas__title, .almadar-graph-view__title,
+.almadar-jazari-state-machine__title, .almadar-state-machine-view__title {
+  font-weight: 600; margin-bottom: 4px;
+}
+.almadar-chart-legend { margin-top: 4px; font-size: 12px; }
+.almadar-chart-legend__item { display: inline-flex; align-items: center; gap: 6px; }
+.almadar-chart-legend__dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+
+.almadar-confetti-effect, .almadar-game-icon { display: inline-block; }
+.almadar-signature-pad__label { font-weight: 600; margin-bottom: 4px; }
+.almadar-qr-scanner svg, .almadar-map-view svg, .almadar-chart svg,
+.almadar-line-chart svg, .almadar-positioned-canvas svg, .almadar-scaled-diagram svg,
+.almadar-graph-canvas svg, .almadar-graph-view svg, .almadar-jazari-state-machine svg,
+.almadar-state-machine-view svg, .almadar-signature-pad svg { display: block; }
+
+.almadar-activation-block, .almadar-reflection-block, .almadar-connection-block,
+.almadar-bloom-quiz-block, .almadar-code-runner-panel, .almadar-segment-renderer,
+.almadar-form-layout, .almadar-chat-bar, .almadar-subagent-trace-panel,
+.almadar-dashboard-layout { margin-bottom: var(--almadar-gap); }
+.almadar-dashboard-layout__head { display: flex; align-items: center; justify-content: space-between; gap: var(--almadar-gap); margin-bottom: var(--almadar-gap); }
+.almadar-dashboard-layout__body { display: flex; flex-direction: column; gap: var(--almadar-gap); }
+.almadar-subagent-trace-panel__item { padding: 4px 0; border-bottom: 1px solid var(--almadar-line); font-size: 13px; }
+.almadar-chat-bar__row .almadar-input { flex: 1; }
+
+/* Calendar grid (native week derivation) */
+.almadar-calendar-grid { display: block; width: 100%; padding: var(--almadar-pad); }
+.almadar-calendar-grid__title { font-weight: 600; margin-bottom: 6px; }
+.almadar-calendar-grid__table { font-size: 12px; }
+.almadar-calendar-grid__day-head {
+  font: inherit; font-weight: 600; font-size: 11px; text-align: center;
+  border: 1px solid var(--almadar-line); border-radius: var(--almadar-radius);
+  background: rgba(0,0,0,0.03); padding: 4px 2px; cursor: pointer; width: 100%;
+}
+.almadar-calendar-grid__slot-label { color: var(--almadar-muted); font-size: 11px; padding: 4px 4px 4px 0; text-align: right; }
+.almadar-calendar-grid__cell {
+  border: 1px solid var(--almadar-line); border-radius: var(--almadar-radius);
+  min-height: 26px; padding: 2px; display: flex; flex-direction: column; gap: 2px;
+}
+.almadar-calendar-grid__event {
+  font: inherit; font-size: 11px; text-align: left; background: rgba(70,120,220,0.08);
+  border: none; border-radius: 3px; padding: 1px 4px; cursor: pointer;
+}
+.almadar-calendar-grid__slot-btn {
+  font: inherit; font-size: 11px; color: var(--almadar-muted); background: none;
+  border: none; cursor: pointer; text-align: left; padding: 0 2px;
+}

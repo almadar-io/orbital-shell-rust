@@ -21,9 +21,7 @@ impl RustShell {
     /// Find the `rust-shell` template directory at runtime.
     fn find_template_path() -> PathBuf {
         // The one template lookup (`ORBITAL_SHELLS_DIR` → beside the binary → the checkout).
-        orbital_core::renderer_packs::find_template_dir("rust-shell").unwrap_or_else(|| {
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("template")
-        })
+        orbital_core::renderer_packs::shell_template("rust-shell", std::path::Path::new(env!("CARGO_MANIFEST_DIR")))
     }
 
     /// Create with an explicit template path.

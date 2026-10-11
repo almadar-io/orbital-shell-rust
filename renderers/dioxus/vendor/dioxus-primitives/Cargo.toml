@@ -1,0 +1,28 @@
+[package]
+name = "dioxus-primitives"
+version = "0.0.1"
+edition = "2021"
+rust-version = "1.80.0"
+description = "Headless UI primitives for Dioxus — vendored from DioxusLabs/dioxus-components (unpublished on crates.io beyond a 0.0.0 stub). Vendoring changes: build.rs + lazy-js-bundle removed (src/js/focus-trap.js is prebuilt upstream); workspace deps pinned explicitly; default features off (no router). MIT OR Apache-2.0 — see LICENSE-*."
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+dioxus = { version = "0.7", default-features = false }
+dioxus-attributes = { path = "../dioxus-attributes" }
+dioxus-sdk-time = "0.7.0"
+time = { version = "0.3.44", features = ["std", "macros", "parsing", "local-offset"] }
+num-integer = "0.1.46"
+tracing = { version = "0.1", default-features = false }
+serde = { version = "1.0", features = ["derive"] }
+palette = "0.7.6"
+
+[features]
+default = []
+router = ["dioxus/router"]
+web = ["time/wasm-bindgen"]
+
+[dev-dependencies]
+# Render-to-string harness for the crate's own component tests
+# (calendar/color_picker/date_picker call `dioxus_ssr::render`). Tracks the
+# resolved dioxus-core (0.7.9), so VirtualDom types match.
+dioxus-ssr = "0.7"

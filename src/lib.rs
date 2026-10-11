@@ -6,6 +6,10 @@
 mod backend;
 pub mod codegen;
 mod shell;
+pub mod shell_program;
 
 pub use backend::RustBackend;
 pub use shell::RustShell;
+
+#[cfg(feature = "desktop")]
+pub mod desktop;

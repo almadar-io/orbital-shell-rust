@@ -1,0 +1,6 @@
+# Standalone builds of this repo (CI, a fresh clone): the Dioxus renderer's
+# upstream patches. Inside the orbital-rust workspace its root Cargo.toml
+# carries the same [patch] and this file is not read.
+[patch.crates-io]
+dioxus-native = { path = "renderers/dioxus/vendor/dioxus-native" }
+blitz-dom = { path = "renderers/dioxus/vendor/blitz-dom" }

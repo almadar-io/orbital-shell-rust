@@ -1,7 +1,7 @@
 //! Terminal client code generation for the Rust shell.
 //!
 //! Emits the `src/bin/terminal.rs` entry point that launches the native ratatui
-//! terminal client using `orbital_client::run_tui`.
+//! terminal client this shell ships (`renderers/tui`).
 
 /// Generate the `src/bin/terminal.rs` source for the generated application.
 pub fn generate_tui_bin() -> String {
@@ -20,7 +20,7 @@ fn main() -> anyhow::Result<()> {
         .ok()
         .or_else(|| Some("http://127.0.0.1:3030".to_string()));
 
-    orbital_client::run_tui(Path::new("resolved.orb"), server_url.as_deref())
+    orbital_client_tui::run(Path::new("resolved.orb"), server_url.as_deref())
 }
 "#
     .to_string()

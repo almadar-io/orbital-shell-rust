@@ -1,0 +1,149 @@
+[package]
+name = "orbital-client-dioxus"
+version = "18.0.0"
+edition = "2021"
+license = "BUSL-1.1"
+repository = "https://github.com/almadar-io/orbital-shell-rust"
+description = "Dioxus renderer for Orbital, over the shared client circuit in orbital_core::client."
+
+[lib]
+# `cdylib` so the wasm32 build can be loaded by `wasm-bindgen` in the browser;
+# `rlib` keeps native dependents linking as before.
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = []
+# Native (Blitz) shell: the SAME kernel circuit (`ClientCore` + `KernelBridge`,
+# offline, no HTTP) + renderers, painted through Blitz (Stylo CSS + Taffy +
+# wgpu) instead of browser DOM. On desktop the shell uses
+# `dioxus_native::launch_cfg`; on wasm32 blitz-shell's winit event loop is
+# cfg'd out upstream, so `src/wasm.rs` runs the crate's own canvas/rAF glue
+# over blitz-dom + anyrender-vello (the egui-shell model: GPU into <canvas>).
+# dioxus-native is a DIRECT dep with default features off — its defaults
+# (`net`, `accessibility`, `hot-reload`, `file_dialog`) pull tokio/reqwest/
+# accesskit trees that have no wasm32 build.
+native = [
+    "dep:dioxus-native",
+    "dep:tracing-subscriber",
+    # Blitz paint stack for the wasm32 canvas glue.
+    "dep:blitz-dom",
+    "dep:blitz-paint",
+    "dep:blitz-traits",
+    "dep:anyrender_vello",
+    "dep:anyrender_vello_cpu",
+    "dep:anyrender",
+    "dep:vello",
+    "dep:parley",
+    "dep:fontique",
+    "dep:wgpu_context",
+    "dep:keyboard-types",
+    "dep:dioxus-document",
+    "dep:dioxus-core",
+    # wasm32 bridge (target-gated below — not built on desktop).
+    "dep:wasm-bindgen",
+    "dep:wasm-bindgen-futures",
+    "dep:web-sys",
+    "dep:js-sys",
+    "dep:console_error_panic_hook",
+    "dep:log",
+    # Game renderers (canvas / canvas-2d / game-hud) — desktop-only: the GPU
+    # renderer uses std threads + ureq, no wasm32 build.
+    "dep:orbital-canvas",
+    "dep:png",
+]
+
+[dependencies]
+# `Instant` that works on wasm32 (performance.now); std's panics there.
+web-time = "1.1"
+orbital-core = { git = "https://github.com/almadar-io/orbital-core", branch = "main" }
+# GPU game renderer substrate (SharedDeviceRenderer + drawable mapper). The
+# dioxus game renderers share the window's wgpu device — versions unify with
+# anyrender_vello's wgpu 26 through the shared lockfile.
+orbital-canvas = { git = "https://github.com/almadar-io/orbital-canvas", branch = "main", optional = true }
+# `minimal` turns on the `rsx`/`component` macros + html/signals/hooks/launch
+# (the VDOM core) without any native renderer; `document` adds the head-element
+# integration (`document::Style`) the Blitz shells use for CSS injection.
+# We never enable `web` or `desktop` here.
+dioxus = { version = "0.7", default-features = false, features = ["minimal", "document"] }
+# Headless primitives (accordion/tabs/select/switch/…) — vendored under
+# vendor/ beside this crate (unpublished upstream). NOT optional: generated
+# renderers in `components/` use them on every target, so it must build on
+# wasm32 too (`web` feature = time/wasm-bindgen, inert on desktop).
+dioxus-primitives = { path = "vendor/dioxus-primitives", default-features = false, features = ["web"] }
+serde_json = "1.0"
+thiserror = "1.0"
+tracing = "0.1"
+
+# Native (Blitz) shell — feature-gated, only compiled with `--features native`.
+# Direct dep (not `dioxus/native`) so we control features: default-features off
+# keeps tokio/reqwest/accesskit out of the wasm32 build. `system-fonts` stays
+# off too (fontique system enumeration is meaningless in a browser sandbox).
+# Resolved through the vendored `[patch.crates-io]` copy (workspace root) which
+# guards an upstream unguarded `dioxus_cli_config` reference that breaks
+# default-features-off builds.
+dioxus-native = { version = "0.7.9", default-features = false, optional = true }
+tracing-subscriber = { version = "0.3", optional = true, features = ["fmt", "env-filter"] }
+
+# Blitz paint stack for the wasm32 canvas glue (`src/wasm.rs`) — the same
+# crates dioxus-native drives on desktop, used directly because blitz-shell's
+# winit event loop has no wasm32 target. Versions unify with dioxus-native's
+# own deps (same lockfile entries).
+# `incremental`: without it `resolve()` restyles + relayouts the WHOLE document
+# on every dirty frame — against the 26KB tailwind sheet that's ~100ms per event
+# in wasm. (Do NOT enable `log_phase_times`: its debug_timer uses std::time
+# Instant, which panics on wasm32-unknown-unknown.)
+blitz-dom = { version = "0.2.4", default-features = false, features = ["incremental"], optional = true }
+blitz-paint = { version = "0.2.1", default-features = false, optional = true }
+blitz-traits = { version = "0.2.0", default-features = false, optional = true }
+anyrender_vello = { version = "0.6.2", default-features = false, optional = true }
+# CPU rasterizer fallback for browsers without WebGPU: same blitz-paint scene,
+# painted by vello_cpu into an RGBA buffer and blitted with putImageData.
+anyrender_vello_cpu = { version = "0.8", default-features = false, optional = true }
+anyrender = { version = "0.6.2", optional = true }
+vello = { version = "0.6.0", default-features = false, optional = true }
+# Parley/fontique direct deps so the wasm glue can register EMBEDDED fonts —
+# there are no system fonts in a browser sandbox, and without a registered
+# typeface Parley shapes zero-width text (every control collapses).
+parley = { version = "0.6.0", default-features = false, optional = true }
+fontique = { version = "0.6.0", default-features = false, optional = true }
+wgpu_context = { version = "0.1.2", optional = true }
+keyboard-types = { version = "0.7.0", optional = true }
+dioxus-document = { version = "0.7.9", optional = true }
+# Explicit core dep so the glue can name `VirtualDom`/`ScopeId`/`provide_context`
+# without depending on the meta crate's prelude re-export surface.
+dioxus-core = { version = "0.7.9", optional = true }
+
+# Native-only game-renderer transports: `http` (ureq → ring) and `system-fonts`
+# (filesystem font scan) do not build for wasm32-unknown-unknown.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+orbital-canvas = { git = "https://github.com/almadar-io/orbital-canvas", branch = "main", features = ["http", "system-fonts"], optional = true }
+# PNG encoding for the offscreen capture (`offscreen::capture_png`).
+png = { version = "0.17", optional = true }
+
+# wasm32 bridge — only built for the browser target even though the `native`
+# feature enables them (desktop builds skip this table).
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = { version = "0.2", optional = true }
+wasm-bindgen-futures = { version = "0.4", optional = true }
+js-sys = { version = "0.3", optional = true }
+web-sys = { version = "0.3", optional = true, features = ["Window", "Document", "Element", "Node", "Location", "HtmlCanvasElement", "CanvasRenderingContext2d", "ImageData", "MouseEvent", "EventTarget", "CssStyleDeclaration", "Performance"] }
+console_error_panic_hook = { version = "0.1", optional = true }
+log = { version = "0.4", optional = true }
+
+[[bin]]
+name = "orbital-native-preview"
+path = "src/bin/orbital-native-preview.rs"
+required-features = ["native"]
+
+[[bin]]
+name = "orbital-native-catalog"
+path = "src/bin/orbital-native-catalog.rs"
+required-features = ["native"]
+
+[[bin]]
+name = "orbital-native-swapstress"
+path = "src/bin/orbital-native-swapstress.rs"
+required-features = ["native"]
+
+[dev-dependencies]
+pretty_assertions = "1.4"

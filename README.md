@@ -9,7 +9,8 @@ Depends on [`orbital-core`](https://github.com/almadar-io/orbital-core).
 ## Layout
 
 - `src/` — the crate.
-- `template/` — the project scaffold the shell copies into every generated app.
+- `templates/rust-shell/` — the project scaffold the shell copies into every generated app.
+- `renderers/dioxus/`, `renderers/tui/` — the GUI (Dioxus/Blitz) and terminal (ratatui) renderers a generated app and `orb-desktop` run; the Dioxus renderer carries its upstream patches in `vendor/`.
 
 ## Build and test
 

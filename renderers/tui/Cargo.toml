@@ -1,0 +1,18 @@
+[package]
+name = "orbital-client-tui"
+version = "18.0.0"
+edition = "2021"
+license = "BUSL-1.1"
+repository = "https://github.com/almadar-io/orbital-shell-rust"
+description = "Terminal (ratatui) renderer for Orbital, over the shared client circuit in orbital_core::client."
+
+[dependencies]
+orbital-core = { git = "https://github.com/almadar-io/orbital-core", branch = "main", features = ["client-http"] }
+ratatui = "0.29"
+crossterm = "0.28"
+anyhow = "1.0"
+thiserror = "1.0"
+tracing = "0.1"
+serde_json = "1.0"
+chrono = "0.4"
+web-time = "1.1"
