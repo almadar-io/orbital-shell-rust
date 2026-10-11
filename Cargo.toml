@@ -1,6 +1,6 @@
 [package]
 name = "orbital-shell-rust"
-version = "18.0.0"
+version = "18.0.1"
 edition = "2021"
 license = "BUSL-1.1"
 repository = "https://github.com/almadar-io/orbital-shell-rust"
