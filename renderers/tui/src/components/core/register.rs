@@ -67,6 +67,7 @@ use crate::components::core::atoms::typography::TypographyRenderer as Typography
 use crate::components::core::atoms::vstack::VStackRenderer as VstackRenderer;
 use crate::components::core::molecules::accordion::AccordionRenderer as AccordionRenderer;
 use crate::components::core::molecules::activation_block::ActivationBlockRenderer as ActivationBlockRenderer;
+use crate::components::core::molecules::activity_rail::ActivityRailRenderer as ActivityRailRenderer;
 use crate::components::core::molecules::agent_activity_feed::AgentActivityFeedRenderer as AgentActivityFeedRenderer;
 use crate::components::core::molecules::agent_activity_row::AgentActivityRowRenderer as AgentActivityRowRenderer;
 use crate::components::core::molecules::agent_chat_feed::AgentChatFeedRenderer as AgentChatFeedRenderer;
@@ -74,6 +75,7 @@ use crate::components::core::molecules::alert::AlertRenderer as AlertRenderer;
 use crate::components::core::molecules::animated_counter::AnimatedCounterRenderer as AnimatedCounterRenderer;
 use crate::components::core::molecules::avl_glyph::AvlGlyphRenderer as AvlGlyphRenderer;
 use crate::components::core::molecules::avl_state_machine::AvlStateMachineRenderer as AvlStateMachineRenderer;
+use crate::components::core::molecules::avl_transition_detail::AvlTransitionDetailRenderer as AvlTransitionDetailRenderer;
 use crate::components::core::molecules::avl_transition_explainer::AvlTransitionExplainerRenderer as AvlTransitionExplainerRenderer;
 use crate::components::core::molecules::behavior_view::BehaviorViewRenderer as BehaviorViewRenderer;
 use crate::components::core::molecules::bloom_quiz_block::BloomQuizBlockRenderer as BloomQuizBlockRenderer;
@@ -286,6 +288,7 @@ pub fn register_terminal(registry: &mut crate::PatternRegistry) {
     registry.register(Box::new(VstackRenderer));
     registry.register(Box::new(AccordionRenderer));
     registry.register(Box::new(ActivationBlockRenderer));
+    registry.register(Box::new(ActivityRailRenderer));
     registry.register(Box::new(AgentActivityFeedRenderer));
     registry.register(Box::new(AgentActivityRowRenderer));
     registry.register(Box::new(AgentChatFeedRenderer));
@@ -293,6 +296,7 @@ pub fn register_terminal(registry: &mut crate::PatternRegistry) {
     registry.register(Box::new(AnimatedCounterRenderer));
     registry.register(Box::new(AvlGlyphRenderer));
     registry.register(Box::new(AvlStateMachineRenderer));
+    registry.register(Box::new(AvlTransitionDetailRenderer));
     registry.register(Box::new(AvlTransitionExplainerRenderer));
     registry.register(Box::new(BehaviorViewRenderer));
     registry.register(Box::new(BloomQuizBlockRenderer));

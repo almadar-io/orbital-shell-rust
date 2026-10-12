@@ -2,6 +2,7 @@
 
 pub mod accordion;
 pub mod activation_block;
+pub mod activity_rail;
 pub mod agent_activity_feed;
 pub mod agent_activity_row;
 pub mod agent_chat_feed;
@@ -9,6 +10,7 @@ pub mod alert;
 pub mod animated_counter;
 pub mod avl_glyph;
 pub mod avl_state_machine;
+pub mod avl_transition_detail;
 pub mod avl_transition_explainer;
 pub mod behavior_view;
 pub mod bloom_quiz_block;
