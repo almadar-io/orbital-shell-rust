@@ -61,4 +61,5 @@ pub mod trait_frame;
 pub mod trend_indicator;
 pub mod typewriter_text;
 pub mod typography;
+pub mod video_embed;
 pub mod vstack;

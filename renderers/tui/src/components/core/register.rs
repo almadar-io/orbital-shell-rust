@@ -64,6 +64,7 @@ use crate::components::core::atoms::trait_frame::TraitFrameRenderer as TraitFram
 use crate::components::core::atoms::trend_indicator::TrendIndicatorRenderer as TrendIndicatorRenderer;
 use crate::components::core::atoms::typewriter_text::TypewriterTextRenderer as TypewriterTextRenderer;
 use crate::components::core::atoms::typography::TypographyRenderer as TypographyRenderer;
+use crate::components::core::atoms::video_embed::VideoEmbedRenderer as VideoEmbedRenderer;
 use crate::components::core::atoms::vstack::VStackRenderer as VstackRenderer;
 use crate::components::core::molecules::accordion::AccordionRenderer as AccordionRenderer;
 use crate::components::core::molecules::activation_block::ActivationBlockRenderer as ActivationBlockRenderer;
@@ -285,6 +286,7 @@ pub fn register_terminal(registry: &mut crate::PatternRegistry) {
     registry.register(Box::new(TrendIndicatorRenderer));
     registry.register(Box::new(TypewriterTextRenderer));
     registry.register(Box::new(TypographyRenderer));
+    registry.register(Box::new(VideoEmbedRenderer));
     registry.register(Box::new(VstackRenderer));
     registry.register(Box::new(AccordionRenderer));
     registry.register(Box::new(ActivationBlockRenderer));
