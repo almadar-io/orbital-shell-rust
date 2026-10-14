@@ -202,20 +202,6 @@ impl TargetTypeRenderer for RustRenderer<'_> {
     fn json(&self) -> TokenStream {
         quote!(serde_json::Value)
     }
-    fn scalar(&self) -> TokenStream {
-        // The closed `string | number | boolean | null` union as a named
-        // hoisted `#[serde(untagged)]` enum (the Phase-2 union hoisting
-        // pattern): the field references `{Name}Scalar` by bare name, the
-        // declaration hoists before the entity struct. `untagged` because
-        // the four members are primitives serde discriminates by shape.
-        let name = format_ident!("{}Scalar", self.context_name);
-        self.hoisted.borrow_mut().push(quote! {
-            #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-            #[serde(untagged)]
-            pub enum #name { Str(String), Num(f64), Bool(bool), Null }
-        });
-        quote!(#name)
-    }
     fn enum_ty(&self, _name: &str, enum_values: Option<&[String]>) -> TokenStream {
         self.enum_ident_or_string(enum_values)
     }
@@ -321,8 +307,7 @@ impl TargetTypeRenderer for RustRenderer<'_> {
     // json arm (the carrier is exact); Number→f64 and the String-carried
     // domains/date are Widening; Struct/Union/File are Faithful (named
     // hoisted `pub struct` / `enum` — declared + referenced by name, not
-    // erased); Scalar is the named hoisted untagged enum — Faithful (the
-    // pair decision with `scalar`, Phase 3); TypeRef is the bare hoisted name
+    // erased); TypeRef is the bare hoisted name
     // — Faithful (Phase 3D: the recursion-bearing declaration is hoisted from
     // `named_types` at the top of the entities module, same as TS, so neither
     // the name nor the recursion is lost); SExpr is the PERMANENT deliberate
@@ -344,12 +329,6 @@ impl TargetTypeRenderer for RustRenderer<'_> {
         TypeMappingClass::Widening
     }
     fn classify_json(&self) -> TypeMappingClass {
-        TypeMappingClass::Faithful
-    }
-    fn classify_scalar(&self) -> TypeMappingClass {
-        // Pair decision with `scalar`: the named hoisted untagged enum
-        // carries the closed `string | number | boolean | null` union —
-        // Faithful (Phase 3).
         TypeMappingClass::Faithful
     }
     fn classify_node(&self) -> TypeMappingClass {
@@ -574,14 +553,6 @@ mod tests {
         assert_eq!(rust_ty(&OirType::Date, None), "String");
         assert_eq!(rust_ty(&OirType::DateTime, None), "String");
         assert_eq!(rust_ty(&OirType::Json, None), "serde_json::Value");
-        // Scalar: named hoisted `#[serde(untagged)]` enum over the closed
-        // primitive union (Phase 3) — bare name at the field position.
-        let (ty, hoisted) = rust_render(&OirType::Scalar, None);
-        assert_eq!(ty, "PostStatusScalar");
-        assert_eq!(
-            hoisted,
-            vec!["#[derive(Debug,Clone,PartialEq,Serialize,Deserialize)]#[serde(untagged)]pubenumPostStatusScalar{Str(String),Num(f64),Bool(bool),Null}"]
-        );
         assert_eq!(rust_ty(&OirType::reference("Author"), None), "String");
         assert_eq!(rust_ty(&OirType::Trait, None), "String");
         assert_eq!(rust_ty(&OirType::SExpr, None), "serde_json::Value");

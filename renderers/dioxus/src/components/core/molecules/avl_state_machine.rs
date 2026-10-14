@@ -122,7 +122,7 @@ impl DioxusPatternRenderer for AvlStateMachineRenderer {
                                         aria_current: if *is_active { "true" } else { "false" },
                                         onclick: move |_| {
                                             if let (Some(s), Some(e)) = (sink, ev.clone()) {
-                                                let mut payload = std::collections::HashMap::new();
+                                                let mut payload = orbital_core::ValueMap::new();
                                                 payload.insert("stateId".to_string(), Value::String(name_for_click.clone()));
                                                 s.call((e, Value::Object(payload)));
                                             }
@@ -155,7 +155,7 @@ impl DioxusPatternRenderer for AvlStateMachineRenderer {
                                         role: if clickable { "button" } else { "presentation" },
                                         onclick: move |_| {
                                             if let (Some(s), Some(e)) = (sink, click_event.clone()) {
-                                                let mut payload = std::collections::HashMap::new();
+                                                let mut payload = orbital_core::ValueMap::new();
                                                 payload.insert("index".to_string(), Value::Number(payload_index));
                                                 payload.insert("event".to_string(), Value::String(payload_event.clone()));
                                                 payload.insert("from".to_string(), Value::String(payload_from.clone()));

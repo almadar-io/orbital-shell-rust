@@ -32,7 +32,7 @@ impl DioxusPatternRenderer for AvlGlyphRenderer {
         let __cn_merged = merge_class_name("inline-flex flex-col items-center gap-1", props); fn field_shape(kind: &str) -> Element {
             match kind {
                 "string" | "email" | "url" | "phone" | "uuid" => rsx! { circle { cx: "0", cy: "0", r: "9", fill: "currentColor" } },
-                "number" | "money" | "scalar" => rsx! { polygon { points: "0,-9 9,6.3 -9,6.3", fill: "currentColor" } },
+                "number" | "money" => rsx! { polygon { points: "0,-9 9,6.3 -9,6.3", fill: "currentColor" } },
                 "boolean" => rsx! { rect { x: "-7.2", y: "-7.2", width: "14.4", height: "14.4", fill: "currentColor" } },
                 "date" | "timestamp" | "datetime" => rsx! { polygon { points: "0,-9 9,0 0,9 -9,0", fill: "currentColor" } },
                 "enum" | "union" => rsx! { circle { cx: "0", cy: "0", r: "9", fill: "none", stroke: "currentColor", stroke_width: "1.5" } },

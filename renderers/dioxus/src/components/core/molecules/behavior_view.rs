@@ -36,14 +36,14 @@ impl DioxusPatternRenderer for BehaviorViewRenderer {
             .filter_map(|t| get_string(t, "name"))
             .filter_map(|n| details_map.as_object().and_then(|d| d.get(&n)).cloned())
             .map(|detail| {
-                let mut m = std::collections::HashMap::new();
+                let mut m = orbital_core::ValueMap::new();
                 m.insert("type".to_string(), Value::String("avl-state-machine".to_string()));
                 m.insert("trait".to_string(), detail);
                 Value::Object(m)
             })
             .collect();
         let empty = {
-            let mut m = std::collections::HashMap::new();
+            let mut m = orbital_core::ValueMap::new();
             m.insert("type".to_string(), Value::String("empty-state".to_string()));
             m.insert("icon".to_string(), Value::String("workflow".to_string()));
             m.insert("title".to_string(), Value::String("No trait data".to_string()));

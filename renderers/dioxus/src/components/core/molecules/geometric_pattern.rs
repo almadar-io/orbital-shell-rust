@@ -32,7 +32,7 @@ impl DioxusPatternRenderer for GeometricPatternRenderer {
         let __cn_merged = merge_class_name("", props); let mode = get_string_or(props, "mode", "background");
         let opacity = get_number_or(props, "opacity", 0.06);
         let scale = get_number_or(props, "scale", 1.0);
-        let mut tile_props = std::collections::HashMap::new();
+        let mut tile_props = orbital_core::ValueMap::new();
         tile_props.insert("type".to_string(), Value::String("pattern-tile".to_string()));
         tile_props.insert("variant".to_string(), Value::String(get_string_or(props, "variant", "star8")));
         tile_props.insert("size".to_string(), Value::Number(60.0 * scale));

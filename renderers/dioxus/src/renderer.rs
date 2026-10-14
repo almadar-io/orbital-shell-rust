@@ -38,7 +38,7 @@ pub struct DioxusView<'a> {
     /// Cached entity data returned by the server.
     pub entities: &'a HashMap<String, Vec<Value>>,
     /// Per-trait current render output, keyed by trait name (for `@trait.X`).
-    pub trait_content: &'a HashMap<String, Value>,
+    pub trait_content: &'a orbital_core::ValueMap,
     /// The trait that authored the content currently being rendered — the source
     /// of any event a control here dispatches.
     pub source_trait: Option<String>,

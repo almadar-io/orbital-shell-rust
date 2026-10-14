@@ -35,8 +35,7 @@ fn seed_singletons(kernel: &KernelBridge, schema: &OrbitalSchema) {
             if !seen.insert(def.name.clone()) {
                 continue;
             }
-            let mut row: std::collections::HashMap<String, Value> =
-                std::collections::HashMap::new();
+            let mut row = orbital_core::ValueMap::new();
             for f in &def.fields {
                 let Some(name) = f.name.as_ref() else {
                     continue;

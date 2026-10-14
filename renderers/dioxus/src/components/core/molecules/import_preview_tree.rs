@@ -84,7 +84,7 @@ impl DioxusPatternRenderer for ImportPreviewTreeRenderer {
         let confirm_event = get_string(props, "onConfirm");
         let cancel_event = get_string(props, "onCancel");
         let action_button = |label: String, variant: &str, action: String| -> Value {
-            let mut m = std::collections::HashMap::new();
+            let mut m = orbital_core::ValueMap::new();
             m.insert("type".to_string(), Value::String("button".to_string()));
             m.insert("label".to_string(), Value::String(label));
             m.insert("variant".to_string(), Value::String(variant.to_string()));
@@ -92,7 +92,7 @@ impl DioxusPatternRenderer for ImportPreviewTreeRenderer {
             Value::Object(m)
         };
         let count_badge = |n: usize| -> Value {
-            let mut m = std::collections::HashMap::new();
+            let mut m = orbital_core::ValueMap::new();
             m.insert("type".to_string(), Value::String("badge".to_string()));
             m.insert("amount".to_string(), Value::Number(n as f64));
             Value::Object(m)

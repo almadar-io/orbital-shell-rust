@@ -59,7 +59,7 @@ impl DioxusPatternRenderer for ImportProgressRenderer {
             None
         };
         let badge = |label: String, variant: &str| -> Value {
-            let mut m = std::collections::HashMap::new();
+            let mut m = orbital_core::ValueMap::new();
             m.insert("type".to_string(), Value::String("badge".to_string()));
             m.insert("label".to_string(), Value::String(label));
             m.insert("variant".to_string(), Value::String(variant.to_string()));
