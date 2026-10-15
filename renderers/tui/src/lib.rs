@@ -221,13 +221,19 @@ impl TuiApp {
             }
             None => ClientCore::new(schema, None),
         };
+        Ok(Self::with_core(core, renderers))
+    }
+
+    /// Build the app over a circuit the caller already wired (its client kernel, seeded rows, viewer) and mount
+    /// the first page.
+    pub fn with_core(core: ClientCore, renderers: Vec<Box<dyn PatternRenderer>>) -> Self {
         let mut pattern_registry = PatternRegistry::new();
         for renderer in renderers {
             pattern_registry.register(renderer);
         }
         let mut app = Self { core, request_history: Vec::new(), pattern_registry };
         app.mount();
-        Ok(app)
+        app
     }
 
     /// The shared circuit this app draws from.
@@ -400,6 +406,11 @@ impl TuiApp {
 
         let orbital_name = self.core.orbital_name();
         let core = &mut self.core;
+        let trait_content: orbital_core::ValueMap = core
+            .trait_content
+            .iter()
+            .map(|(name, content)| (name.clone(), resolve_row_set_markers(content, &|reference| core.resolve_rows(reference))))
+            .collect();
         let areas: Vec<Rect> = Layout::default()
             .direction(Direction::Vertical)
             .constraints(std::iter::repeat_n(Constraint::Min(3), main_contents.len()).collect::<Vec<_>>())
@@ -408,6 +419,7 @@ impl TuiApp {
 
         for (content, area) in main_contents.iter().zip(areas) {
             let renderer = self.pattern_registry.get_renderer(&content.pattern);
+            let painted = resolve_row_set_markers(&content.props, &|reference| core.resolve_rows(reference));
             let mut ctx = RenderContext {
                 trait_name: core.current_trait_name.as_str(),
                 orbital_name: orbital_name.as_str(),
@@ -417,11 +429,11 @@ impl TuiApp {
                 editing_entity: &core.editing_entity,
                 pending_events: &mut core.pending_events,
                 child_render: None,
-                trait_content: &core.trait_content,
+                trait_content: &trait_content,
                 source_trait: content.source_trait.clone(),
                 canvas_theme: None,
             };
-            renderer.render(frame, area, &content.props, content.entity.as_ref(), &mut ctx);
+            renderer.render(frame, area, &painted, content.entity.as_ref(), &mut ctx);
         }
     }
 

@@ -54,3 +54,91 @@ fn edge_an_empty_main_slot_says_so() {
     let mut app = app(vec![orbital("Notes", &serde_json::json!(null))]);
     assert!(app.render_to_text(80, 10).unwrap().contains("No content to display"));
 }
+
+mod rows_by_reference {
+    use super::*;
+    use orbital_core::client::bridge::KernelBridge;
+    use orbital_core::client::client_core::ClientCore;
+    use orbital_core::client::client_kernel::ClientKernel;
+    use orbital_core::runtime::row_query::{row_set_marker, RowSetRef};
+    use serde_json::json;
+
+    fn schema() -> OrbitalSchema {
+        serde_json::from_value(json!({
+            "name": "rows", "orbitals": [{
+                "name": "Main",
+                "entity": {
+                    "name": "Ticket", "persistence": "runtime",
+                    "fields": [{ "name": "id", "type": "string" }, { "name": "title", "type": "string" }, { "name": "owner", "type": "string" }],
+                    "read_policy": ["=", ["object/get", "@entity", "owner"], "@user.id"]
+                },
+                "traits": [{
+                    "name": "Tickets", "linkedEntity": "Ticket",
+                    "stateMachine": {
+                        "states": [{ "name": "idle", "isInitial": true }],
+                        "transitions": [
+                            { "from": "idle", "to": "idle", "event": "INIT", "effects": [["render-ui", "main", { "type": "typography", "content": "no list yet" }]] },
+                            { "from": "idle", "to": "idle", "event": "LISTED", "effects": [["render-ui", "main", { "type": "table-view", "items": "@payload.data" }]] },
+                            { "from": "idle", "to": "idle", "event": "RENAME", "effects": [["persist", "update", "Ticket", { "id": "t1", "title": "renamed" }]] },
+                            { "from": "idle", "to": "idle", "event": "OTHER", "effects": [["render-ui", "main", { "type": "typography", "content": "plain" }]] }
+                        ]
+                    }
+                }],
+                "pages": [{ "name": "Home", "path": "/", "traits": [{ "ref": "Tickets" }] }]
+            }]
+        }))
+        .unwrap()
+    }
+
+    fn row(id: &str, title: &str, owner: &str) -> orbital_core::Value {
+        serde_json::from_value(json!({ "id": id, "title": title, "owner": owner })).unwrap()
+    }
+
+    fn app() -> (TuiApp, Arc<ClientKernel>) {
+        let schema = schema();
+        let server = KernelBridge::new(schema.clone()).unwrap();
+        server.seed("Ticket", vec![row("t1", "alpha-row", "u1")]);
+        let bridge: Arc<dyn ServerBridge> = Arc::new(server);
+        let kernel = Arc::new(ClientKernel::new(schema.clone(), Some(bridge)).unwrap());
+        kernel.set_current_user(serde_json::from_value(json!({ "id": "u1" })).unwrap());
+        kernel.seed("Ticket", vec![row("t1", "alpha-row", "u1"), row("t2", "hidden-row", "u2"), row("t3", "gamma-row", "u1")]);
+        let app = TuiApp::with_core(ClientCore::with_client_kernel(schema, kernel.clone()), Vec::new());
+        (app, kernel)
+    }
+
+    fn list_all(app: &mut TuiApp) {
+        let reference = RowSetRef { entity_type: "Ticket".into(), ids: vec!["t1".into(), "t2".into(), "t3".into()], total: 3, query: Default::default() };
+        let data = serde_json::to_value(row_set_marker(&reference)).unwrap();
+        app.send_event("LISTED", serde_json::from_value(json!({ "data": data, "totalCount": 3 })).unwrap());
+    }
+
+    #[test]
+    fn a_marker_paints_the_rows_the_kernel_resolves_and_a_hidden_row_is_omitted() {
+        let (mut app, _) = app();
+        list_all(&mut app);
+        let text = app.render_to_text(80, 12).unwrap();
+        assert!(text.contains("alpha-row") && text.contains("gamma-row"), "{text}");
+        assert!(!text.contains("hidden-row"), "u2's row is not the viewer's to read: {text}");
+        assert!(!text.contains("$rowSet"), "{text}");
+    }
+
+    #[test]
+    fn a_rows_changed_repaint_re_resolves_the_reference() {
+        let (mut app, kernel) = app();
+        list_all(&mut app);
+        assert!(app.render_to_text(80, 12).unwrap().contains("alpha-row"));
+        // the server runs the persist; the row it wrote reaches the client's rows before the repaint paints
+        kernel.seed("Ticket", vec![row("t1", "renamed", "u1")]);
+        app.send_event("RENAME", orbital_core::Value::Null);
+        let text = app.render_to_text(80, 12).unwrap();
+        assert!(text.contains("renamed") && !text.contains("alpha-row"), "{text}");
+        assert!(text.contains("gamma-row"), "{text}");
+    }
+
+    #[test]
+    fn control_a_slot_without_a_marker_paints_as_before() {
+        let (mut app, _) = app();
+        app.send_event("OTHER", orbital_core::Value::Null);
+        assert!(app.render_to_text(80, 12).unwrap().contains("plain"));
+    }
+}

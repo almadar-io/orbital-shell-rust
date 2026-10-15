@@ -70,10 +70,15 @@ pub fn mount_core(schema_json: &str) -> Result<(usize, usize), String> {
 
 /// [`mount_core`] over a caller's bridge (a live server, or a seeded kernel).
 pub fn mount(schema: OrbitalSchema, bridge: Arc<dyn ServerBridge>) -> (usize, usize) {
-    let trait_count: usize = schema.orbitals.iter().map(|o| o.traits.len()).sum();
-    let orbital_count = schema.orbitals.len();
+    mount_circuit(ClientCore::new(schema, Some(bridge)))
+}
 
-    let mut core = ClientCore::new(schema, Some(bridge));
+/// Mount a circuit the caller already wired. A core built with a client-role kernel
+/// ([`ClientCore::with_client_kernel`]) is the one that resolves row-set markers at paint.
+pub fn mount_circuit(mut core: ClientCore) -> (usize, usize) {
+    let trait_count: usize = core.schema.orbitals.iter().map(|o| o.traits.len()).sum();
+    let orbital_count = core.schema.orbitals.len();
+
     core.mount_page_blocking();
     core.settle(8);
     tracing::info!(

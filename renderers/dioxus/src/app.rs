@@ -12,7 +12,8 @@ use crate::recurse;
 use crate::registry::DioxusPatternRegistry;
 use crate::renderer::{DioxusView, EventSink};
 use dioxus::prelude::*;
-use orbital_core::Value;
+use orbital_core::client::helpers::{resolve_row_set_markers, SlotContent};
+use orbital_core::{Value, ValueMap};
 use std::cell::RefCell;
 
 /// Everything a running Dioxus Orbital app needs: the shared circuit and the
@@ -55,6 +56,27 @@ pub fn poke_rerender() {
             signal.set(next);
         }
     });
+}
+
+/// `slot`'s contents as painted: every row-set marker in a prop is replaced by the rows the kernel's one resolver
+/// ([`ClientCore::resolve_rows`]) answers now, re-checked for the current viewer. A repaint of a slot holding a
+/// reference (`repaint: "rows-changed"`) replaces its content, and this re-resolves it.
+pub fn painted_slot_contents(core: &ClientCore, slot: &str) -> Vec<SlotContent> {
+    core.slot_contents(slot)
+        .into_iter()
+        .map(|content| SlotContent {
+            props: resolve_row_set_markers(&content.props, &|reference| core.resolve_rows(reference)),
+            ..content
+        })
+        .collect()
+}
+
+/// The per-trait composed content (`@trait.X`) as painted, resolved like [`painted_slot_contents`].
+pub fn painted_trait_content(core: &ClientCore) -> ValueMap {
+    core.trait_content
+        .iter()
+        .map(|(name, content)| (name.clone(), resolve_row_set_markers(content, &|reference| core.resolve_rows(reference))))
+        .collect()
 }
 
 /// Root Orbital component. Reads [`APP`], paints `ui_slots` through the registry,
@@ -111,12 +133,13 @@ pub fn App() -> Element {
         let mut slot_names: Vec<String> = core.ui_slots.keys().cloned().collect();
         slot_names.sort();
 
+        let trait_content = painted_trait_content(core);
         let view = DioxusView {
             trait_name: &core.current_trait_name,
             orbital_name: &orbital,
             current_state: &core.current_state,
             entities: &core.entities,
-            trait_content: &core.trait_content,
+            trait_content: &trait_content,
             source_trait: None,
             sink: Some(sink),
             canvas_theme: core.canvas_theme(),
@@ -134,7 +157,7 @@ pub fn App() -> Element {
             div { class: "almadar-orbital-dioxus", "data-state": "{core.current_state}", "data-theme": "{theme}",
                 for slot_name in slot_names.iter() {
                     div { class: "almadar-slot", "data-slot": "{slot_name}",
-                        for sc in core.slot_contents(slot_name).iter() {
+                        for sc in painted_slot_contents(core, slot_name).iter() {
                             {registry.render_spec(&sc.props, sc.entity.as_ref(), &view.for_source(sc.source_trait.clone(), sink_for(sc.source_trait.clone())))}
                         }
                     }
