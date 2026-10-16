@@ -39,6 +39,9 @@ path = "src/bin/game.rs"
 # checkout this app builds against, and carry the renderer's upstream patches.
 [patch."https://github.com/almadar-io/orbital-core"]
 orbital-core = { path = "../../crates/orbital-core" }
+orbital-core-base = { path = "../../crates/orbital-core/crates/base" }
+orbital-core-eval = { path = "../../crates/orbital-core/crates/eval" }
+orbital-core-runtime = { path = "../../crates/orbital-core/crates/runtime" }
 
 [patch."https://github.com/almadar-io/orbital-canvas"]
 orbital-canvas = { path = "../../crates/orbital-canvas" }
