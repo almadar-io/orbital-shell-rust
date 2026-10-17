@@ -138,7 +138,11 @@ fn frames(renderer: Renderer, item: &str, schema: &OrbitalSchema, out_dir: &Path
     let trait_name = td.name.clone();
     let owner_fields = orbital_core::runtime::owner_fields_from_schema(schema);
     let ctx = orbital_core::planner::EntityCtx { schema, owner_fields: &owner_fields, viewer_id: None };
-    let steps = orbital_core::planner::plan_trait(td, &ctx, None);
+    // A reply-route step is never driven: the reply arrives inside its request's own dispatch.
+    let steps: Vec<_> = orbital_core::planner::plan_trait(td, &ctx, None)
+        .into_iter()
+        .filter(|step| step.reply.is_none())
+        .collect();
 
     let build = || -> Result<Surface, String> {
         let mut surface = Surface::mount(renderer, schema, kernel(schema, 3)?)?;
