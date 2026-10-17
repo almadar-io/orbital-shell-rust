@@ -194,6 +194,35 @@ mod tests {
         module
     }
 
+    /// Kernel-mode shell: the generated state machines carry no effect bodies, so an `os/` effect is
+    /// never half-emitted. It is unsupported in generated code by design and runs through the
+    /// `EffectRunner` seam only.
+    #[test]
+    fn os_effects_are_not_silently_dropped_by_the_rust_shell() {
+        use orbital_core::ir::{OirEffect, OirExpr, OirState, OirTrait, OirTransition};
+        let effect = OirEffect::os(
+            orbital_core::runtime::os::OsOp::ReadFile,
+            vec![OirExpr::string("/data/secret.txt")],
+            None,
+            None,
+        );
+        assert!(!orbital_core::effects::CLIENT_EFFECT_KINDS.contains(&effect.kind()));
+        let mut module = test_module();
+        let mut t = OirTrait::new("Files");
+        t.states.push(OirState::initial("idle"));
+        let mut tr = OirTransition::new("idle", "idle", "READ");
+        tr.effects.push(OirExpr::effect(effect));
+        t.transitions.push(tr);
+        module.traits.push(t);
+        let output = RustBackend::new().generate(&module);
+        let all: String = output.files.iter().map(|f| f.content.as_str()).collect();
+        assert!(
+            !all.contains("secret.txt") && !all.contains("read-file"),
+            "os/ is unsupported in generated Rust: it must not be half-emitted"
+        );
+        assert!(all.contains("run_effects"), "effects must stay behind the EffectRunner seam");
+    }
+
     #[test]
     fn test_backend_name() {
         let backend = RustBackend::new();
