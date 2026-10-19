@@ -1,5 +1,4 @@
-//! Native behavior catalog — the desktop counterpart of
-//! `packages/almadar-ui-wasm/preview/catalog.html`. One winit window, built
+//! Native behavior catalog. One winit window, built
 //! with the same dioxus primitives the renderer itself uses: a sidebar of
 //! every baked behavior (the SAME gzipped corpus `orb verify` resolves from —
 //! no filesystem paths), and a content pane that mounts the selected
@@ -86,8 +85,7 @@ struct CatalogRow {
     file: std::path::PathBuf,
 }
 
-/// Tier display order + plural labels — mirrors the browser catalog
-/// (`packages/almadar-ui-wasm/preview/catalog.ts`).
+/// Tier display order + plural labels.
 const TIER_ORDER: &[&str] = &["atom", "molecule", "organism", "template"];
 
 fn tier_label(level: &str) -> String {

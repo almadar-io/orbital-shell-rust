@@ -21,7 +21,7 @@
 //!     the shared `ClientCore` circuit). Keyboard/IME is a deliberate
 //!     follow-up — the current gate (atoms with buttons) is mouse-only.
 //!
-//! JS API (consumed by `@almadar/ui-wasm`'s TS bridge):
+//! JS API (its TS bridge was `@almadar/ui-wasm`, archived at `archive/packages/almadar-ui-wasm`):
 //! `new WebHandle()` · `start(elementId, schemaJson, cssText)` ·
 //! `send_event(event, payloadJson)` · `snapshot()` · `current_state()` ·
 //! `destroy()`.

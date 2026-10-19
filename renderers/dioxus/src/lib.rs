@@ -38,7 +38,7 @@ pub mod native;
 #[cfg(all(feature = "native", not(target_arch = "wasm32")))]
 pub mod game;
 
-/// Native behavior catalog (desktop counterpart of the ui-wasm browser
+/// Native behavior catalog (desktop counterpart of the archived ui-wasm browser
 /// catalog) — sidebar of every baked behavior + event chips driving the
 /// mounted state machine.
 #[cfg(all(feature = "native", not(target_arch = "wasm32")))]

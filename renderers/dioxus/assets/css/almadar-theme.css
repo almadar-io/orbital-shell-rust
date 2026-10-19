@@ -665,6 +665,28 @@ body {
 }
 
 
+/* === @almadar/ui themes/_head.css === */
+/**
+ * The shared theme layer every theme stylesheet starts with: the shared web fonts and the base.
+ * A compiled client imports it, then only the presets its program declares, then `_foundation.css`;
+ * `index.css` imports it, then every preset.
+ *
+ * IMPORTANT: @import must precede all other statements (Vite requirement).
+ */
+
+/* Layer 1 skin axes — font families consumed by prism / gazette / terminal / atelier / kiosk,
+ * plus VT323 for retro's pixel display type.
+ * Combined into a single Google Fonts request for fewer round-trips. font-display: swap
+ * means body text renders immediately with the fallback chain while the web fonts load. */
+
+/* Kenney game font faces — consumed by the game themes and GameShell's fontFamily knob. */
+
+/* Shared base layer — atelier's typography + density at :root, inherited
+ * by every theme that doesn't override. MUST come before per-theme
+ * imports so [data-theme="..."] selectors win the cascade on the few
+ * personality themes that intentionally opt out. */
+
+
 /* === @almadar/ui themes/_presets.css === */
 /**
  * GENERATED — do not edit by hand.
@@ -11345,6 +11367,9 @@ body {
     --corner-shape-pill: superellipse(1.5);
     --border-style: solid;
     --border-style-interactive: solid;
+    --illustration-loading: url("data:image/svg+xml;utf8,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22 fill=%22none%22%3E%3Cdefs%3E%3CclipPath id=%22k%22%3E%3Cpath clip-rule=%22evenodd%22 d=%22M16,50 A34,14 0 1 1 84,50 A34,14 0 1 1 16,50 Z M35,50 A15,5.5 0 1 1 65,50 A15,5.5 0 1 1 35,50 Z%22/%3E%3C/clipPath%3E%3C/defs%3E%3Cstyle%3E.spin%7Btransform-origin:50px 50px;animation:s 3s linear infinite%7D%40keyframes s%7Bto%7Btransform:rotate(360deg)%7D%7D.pre%7Btransform-origin:50px 50px;animation:p 4s ease-in-out infinite%7D%40keyframes p%7B0%25,100%25%7Btransform:rotate(-14deg)%7D50%25%7Btransform:rotate(14deg)%7D%7D.lift%7Btransform-origin:50px 50px;animation:l 4s ease-in-out infinite%7D%40keyframes l%7B0%25,50%25,100%25%7Btransform:scaleY(1)%7D25%25%7Btransform:scaleY(.94)%7D75%25%7Btransform:scaleY(1.06)%7D%7D%40media (prefers-reduced-motion:reduce)%7B*%7Banimation:none!important%7D%7D%3C/style%3E%3Cellipse cx=%2250%22 cy=%2212%22 rx=%229%22 ry=%222.6%22 stroke=%22%2300b1b8%22 stroke-width=%221.2%22 stroke-dasharray=%221.6 2.4%22 opacity=%22.55%22/%3E%3Cpath d=%22M50,50 V8%22 stroke=%22%2300b1b8%22 stroke-width=%221%22 stroke-dasharray=%221.6 2.4%22 opacity=%22.4%22/%3E%3Cg class=%22pre%22%3E%3Cg class=%22lift%22%3E%3Cpath d=%22M50,44 V14%22 stroke=%22%2300b1b8%22 stroke-width=%222.6%22 stroke-linecap=%22round%22/%3E%3Cpath d=%22M43.5,20 L50,11 L56.5,20 Z%22 fill=%22%2300b1b8%22/%3E%3Cg clip-path=%22url(%23k)%22%3E%3Crect x=%220%22 y=%220%22 width=%22100%22 height=%22100%22 fill=%22%2300b1b8%22/%3E%3Cg transform=%22translate(50 50) scale(1 .41) translate(-50 -50)%22%3E%3Cg class=%22spin%22%3E%3Crect x=%2250%22 y=%22-40%22 width=%2280%22 height=%22180%22 fill=%22%238fdde0%22/%3E%3C/g%3E%3C/g%3E%3C/g%3E%3Cpath d=%22M16,50 A34,14 0 1 1 84,50 A34,14 0 1 1 16,50 Z M35,50 A15,5.5 0 1 1 65,50 A15,5.5 0 1 1 35,50 Z%22 fill-rule=%22evenodd%22 stroke=%22%2300b1b8%22 stroke-width=%221.4%22/%3E%3Cpath d=%22M50,56 V84%22 stroke=%22%2300b1b8%22 stroke-width=%222.6%22 stroke-linecap=%22round%22 opacity=%22.35%22/%3E%3C/g%3E%3C/g%3E%3Ccircle cx=%2250%22 cy=%2250%22 r=%223%22 fill=%22%2300b1b8%22/%3E%3C/svg%3E");
+    --loader-mark-display: inline-block;
+    --loader-icon-display: none;
     --surface-card-image: linear-gradient(135deg, rgba(99, 102, 241, 0.07) 0%, rgba(34, 211, 238, 0.05) 55%, rgba(16, 185, 129, 0.06) 100%);
     --surface-edge-mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1440 100' preserveAspectRatio='none'><path d='M0 60 C240 100 480 100 720 60 C960 20 1200 20 1440 60 V100 H0 Z'/></svg>");
     --surface-edge-height: clamp(24px, 6vw, 96px);
@@ -11497,6 +11522,9 @@ body {
     --corner-shape-pill: superellipse(1.5);
     --border-style: solid;
     --border-style-interactive: solid;
+    --illustration-loading: url("data:image/svg+xml;utf8,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22 fill=%22none%22%3E%3Cdefs%3E%3CclipPath id=%22k%22%3E%3Cpath clip-rule=%22evenodd%22 d=%22M16,50 A34,14 0 1 1 84,50 A34,14 0 1 1 16,50 Z M35,50 A15,5.5 0 1 1 65,50 A15,5.5 0 1 1 35,50 Z%22/%3E%3C/clipPath%3E%3C/defs%3E%3Cstyle%3E.spin%7Btransform-origin:50px 50px;animation:s 3s linear infinite%7D%40keyframes s%7Bto%7Btransform:rotate(360deg)%7D%7D.pre%7Btransform-origin:50px 50px;animation:p 4s ease-in-out infinite%7D%40keyframes p%7B0%25,100%25%7Btransform:rotate(-14deg)%7D50%25%7Btransform:rotate(14deg)%7D%7D.lift%7Btransform-origin:50px 50px;animation:l 4s ease-in-out infinite%7D%40keyframes l%7B0%25,50%25,100%25%7Btransform:scaleY(1)%7D25%25%7Btransform:scaleY(.94)%7D75%25%7Btransform:scaleY(1.06)%7D%7D%40media (prefers-reduced-motion:reduce)%7B*%7Banimation:none!important%7D%7D%3C/style%3E%3Cellipse cx=%2250%22 cy=%2212%22 rx=%229%22 ry=%222.6%22 stroke=%22%232cc5cb%22 stroke-width=%221.2%22 stroke-dasharray=%221.6 2.4%22 opacity=%22.55%22/%3E%3Cpath d=%22M50,50 V8%22 stroke=%22%232cc5cb%22 stroke-width=%221%22 stroke-dasharray=%221.6 2.4%22 opacity=%22.4%22/%3E%3Cg class=%22pre%22%3E%3Cg class=%22lift%22%3E%3Cpath d=%22M50,44 V14%22 stroke=%22%232cc5cb%22 stroke-width=%222.6%22 stroke-linecap=%22round%22/%3E%3Cpath d=%22M43.5,20 L50,11 L56.5,20 Z%22 fill=%22%232cc5cb%22/%3E%3Cg clip-path=%22url(%23k)%22%3E%3Crect x=%220%22 y=%220%22 width=%22100%22 height=%22100%22 fill=%22%232cc5cb%22/%3E%3Cg transform=%22translate(50 50) scale(1 .41) translate(-50 -50)%22%3E%3Cg class=%22spin%22%3E%3Crect x=%2250%22 y=%22-40%22 width=%2280%22 height=%22180%22 fill=%22%231d6f73%22/%3E%3C/g%3E%3C/g%3E%3C/g%3E%3Cpath d=%22M16,50 A34,14 0 1 1 84,50 A34,14 0 1 1 16,50 Z M35,50 A15,5.5 0 1 1 65,50 A15,5.5 0 1 1 35,50 Z%22 fill-rule=%22evenodd%22 stroke=%22%232cc5cb%22 stroke-width=%221.4%22/%3E%3Cpath d=%22M50,56 V84%22 stroke=%22%232cc5cb%22 stroke-width=%222.6%22 stroke-linecap=%22round%22 opacity=%22.35%22/%3E%3C/g%3E%3C/g%3E%3Ccircle cx=%2250%22 cy=%2250%22 r=%223%22 fill=%22%232cc5cb%22/%3E%3C/svg%3E");
+    --loader-mark-display: inline-block;
+    --loader-icon-display: none;
     --surface-card-image: linear-gradient(135deg, rgba(129, 140, 248, 0.10) 0%, rgba(34, 211, 238, 0.06) 55%, rgba(52, 211, 153, 0.07) 100%);
     --diagram-stroke-thin: 1px;
     --diagram-stroke-normal: 2px;
@@ -15659,8 +15687,8 @@ body {
  */
 
 [data-theme="nata-light"] {
-    --color-primary: #b45309;
-    --color-primary-hover: #92400e;
+    --color-primary: #9c6233;
+    --color-primary-hover: #85532b;
     --color-primary-foreground: #ffffff;
     --color-secondary: #fdf3e6;
     --color-secondary-hover: #fbe6c8;
@@ -15676,7 +15704,7 @@ body {
     --color-surface: #f8f2ea;
     --color-border: #ece2d3;
     --color-input: #dccdb6;
-    --color-ring: #b45309;
+    --color-ring: #9c6233;
     --color-error: #dc2626;
     --color-error-foreground: #ffffff;
     --color-success: #047857;
@@ -15776,6 +15804,9 @@ body {
     --corner-shape-pill: round;
     --border-style: solid;
     --border-style-interactive: solid;
+    --illustration-loading: url("data:image/svg+xml;utf8,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22 fill=%22none%22%3E%3Cdefs%3E%3C/defs%3E%3Cstyle%3E.s1%7Banimation:s1 4.8s ease-in-out infinite%7D%40keyframes s1%7B0%25,14%25%7Bopacity:1%7D30%25,76%25%7Bopacity:0%7D92%25,100%25%7Bopacity:1%7D%7D.p2%7Bopacity:0;animation:p2 4.8s ease-in-out infinite%7D%40keyframes p2%7B0%25,14%25%7Bopacity:0%7D30%25,76%25%7Bopacity:1%7D92%25,100%25%7Bopacity:0%7D%7D.sl%7Banimation:sl 4.8s ease-in-out infinite%7D%40keyframes sl%7B0%25,14%25%7Btransform:translateY(0)%7D18%25%7Btransform:translateY(-3px)%7D22%25%7Btransform:translateY(3px)%7D26%25%7Btransform:translateY(-2px)%7D30%25,76%25%7Btransform:translateY(0)%7D80%25%7Btransform:translateY(2px)%7D84%25%7Btransform:translateY(-3px)%7D88%25%7Btransform:translateY(3px)%7D92%25,100%25%7Btransform:translateY(0)%7D%7D.ph%7Bfill:none;stroke-width:3;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:36 200;opacity:0%7D.in%7Banimation:in 4.8s linear infinite%7D%40keyframes in%7B0%25%7Bstroke-dashoffset:36;opacity:1%7D15%25%7Bstroke-dashoffset:-64;opacity:1%7D16%25,100%25%7Bopacity:0%7D%7D.out%7Banimation:out 4.8s linear infinite%7D%40keyframes out%7B0%25,76%25%7Bopacity:0;stroke-dashoffset:36%7D77%25%7Bopacity:1;stroke-dashoffset:36%7D93%25%7Bstroke-dashoffset:-100;opacity:1%7D94%25,100%25%7Bopacity:0%7D%7D%40media (prefers-reduced-motion:reduce)%7B*%7Banimation:none!important%7D%7D%3C/style%3E%3Cg class=%22sl%22%3E%3Cg class=%22s1%22%3E%3Ccircle cx=%2250%22 cy=%2250%22 r=%2217%22 fill=%22%239c6233%22/%3E%3Ccircle cx=%2245%22 cy=%2245%22 r=%226%22 fill=%22%23e6c09a%22/%3E%3C/g%3E%3Cg class=%22p2%22%3E%3Cpath d=%22M50,50 C39,44 33,31 36,20 C39,9 61,9 64,20 C67,31 61,44 50,50 Z%22 fill=%22%239c6233%22/%3E%3Cpath d=%22M50,50 C39,56 33,69 36,80 C39,91 61,91 64,80 C67,69 61,56 50,50 Z%22 fill=%22%23e6c09a%22/%3E%3C/g%3E%3C/g%3E%3Cpath class=%22ph in%22 pathLength=%22100%22 d=%22M-4,50 q3.5,-7 7,0 t7,0 t7,0 t7,0 t7,0 t7,0 t7,0%22 stroke=%22%239c6233%22 transform=%22rotate(-35 50 50)%22/%3E%3Cpath class=%22ph out%22 pathLength=%22100%22 d=%22M54,50 q3.5,-7 7,0 t7,0 t7,0 t7,0 t7,0 t7,0 t7,0%22 stroke=%22%239c6233%22 transform=%22rotate(-35 50 50)%22/%3E%3C/svg%3E");
+    --loader-mark-display: inline-block;
+    --loader-icon-display: none;
     --surface-card-image: linear-gradient(135deg, rgba(180, 83, 9, 0.07) 0%, rgba(15, 118, 110, 0.05) 100%);
     --surface-edge-mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1440 100' preserveAspectRatio='none'><path d='M0 60 C240 100 480 100 720 60 C960 20 1200 20 1440 60 V100 H0 Z'/></svg>");
     --surface-edge-height: clamp(24px, 6vw, 96px);
@@ -15811,8 +15842,8 @@ body {
 }
 
 [data-theme="nata-dark"] {
-    --color-primary: #fbbf24;
-    --color-primary-hover: #fcd34d;
+    --color-primary: #eab88a;
+    --color-primary-hover: #f0caa5;
     --color-primary-foreground: #1c1408;
     --color-secondary: #2a1f0e;
     --color-secondary-hover: #3a2b14;
@@ -15828,7 +15859,7 @@ body {
     --color-surface: #201810;
     --color-border: #3a2e1c;
     --color-input: #4d3d25;
-    --color-ring: #fbbf24;
+    --color-ring: #eab88a;
     --color-error: #f87171;
     --color-error-foreground: #000000;
     --color-success: #34d399;
@@ -15928,6 +15959,9 @@ body {
     --corner-shape-pill: round;
     --border-style: solid;
     --border-style-interactive: solid;
+    --illustration-loading: url("data:image/svg+xml;utf8,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22 fill=%22none%22%3E%3Cdefs%3E%3C/defs%3E%3Cstyle%3E.s1%7Banimation:s1 4.8s ease-in-out infinite%7D%40keyframes s1%7B0%25,14%25%7Bopacity:1%7D30%25,76%25%7Bopacity:0%7D92%25,100%25%7Bopacity:1%7D%7D.p2%7Bopacity:0;animation:p2 4.8s ease-in-out infinite%7D%40keyframes p2%7B0%25,14%25%7Bopacity:0%7D30%25,76%25%7Bopacity:1%7D92%25,100%25%7Bopacity:0%7D%7D.sl%7Banimation:sl 4.8s ease-in-out infinite%7D%40keyframes sl%7B0%25,14%25%7Btransform:translateY(0)%7D18%25%7Btransform:translateY(-3px)%7D22%25%7Btransform:translateY(3px)%7D26%25%7Btransform:translateY(-2px)%7D30%25,76%25%7Btransform:translateY(0)%7D80%25%7Btransform:translateY(2px)%7D84%25%7Btransform:translateY(-3px)%7D88%25%7Btransform:translateY(3px)%7D92%25,100%25%7Btransform:translateY(0)%7D%7D.ph%7Bfill:none;stroke-width:3;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:36 200;opacity:0%7D.in%7Banimation:in 4.8s linear infinite%7D%40keyframes in%7B0%25%7Bstroke-dashoffset:36;opacity:1%7D15%25%7Bstroke-dashoffset:-64;opacity:1%7D16%25,100%25%7Bopacity:0%7D%7D.out%7Banimation:out 4.8s linear infinite%7D%40keyframes out%7B0%25,76%25%7Bopacity:0;stroke-dashoffset:36%7D77%25%7Bopacity:1;stroke-dashoffset:36%7D93%25%7Bstroke-dashoffset:-100;opacity:1%7D94%25,100%25%7Bopacity:0%7D%7D%40media (prefers-reduced-motion:reduce)%7B*%7Banimation:none!important%7D%7D%3C/style%3E%3Cg class=%22sl%22%3E%3Cg class=%22s1%22%3E%3Ccircle cx=%2250%22 cy=%2250%22 r=%2217%22 fill=%22%23eab88a%22/%3E%3Ccircle cx=%2245%22 cy=%2245%22 r=%226%22 fill=%22%238a6040%22/%3E%3C/g%3E%3Cg class=%22p2%22%3E%3Cpath d=%22M50,50 C39,44 33,31 36,20 C39,9 61,9 64,20 C67,31 61,44 50,50 Z%22 fill=%22%23eab88a%22/%3E%3Cpath d=%22M50,50 C39,56 33,69 36,80 C39,91 61,91 64,80 C67,69 61,56 50,50 Z%22 fill=%22%238a6040%22/%3E%3C/g%3E%3C/g%3E%3Cpath class=%22ph in%22 pathLength=%22100%22 d=%22M-4,50 q3.5,-7 7,0 t7,0 t7,0 t7,0 t7,0 t7,0 t7,0%22 stroke=%22%23eab88a%22 transform=%22rotate(-35 50 50)%22/%3E%3Cpath class=%22ph out%22 pathLength=%22100%22 d=%22M54,50 q3.5,-7 7,0 t7,0 t7,0 t7,0 t7,0 t7,0 t7,0%22 stroke=%22%23eab88a%22 transform=%22rotate(-35 50 50)%22/%3E%3C/svg%3E");
+    --loader-mark-display: inline-block;
+    --loader-icon-display: none;
     --surface-card-image: linear-gradient(135deg, rgba(129, 140, 248, 0.10) 0%, rgba(34, 211, 238, 0.06) 55%, rgba(52, 211, 153, 0.07) 100%);
     --diagram-stroke-thin: 1px;
     --diagram-stroke-normal: 2px;
@@ -19032,8 +19066,8 @@ body {
  */
 
 [data-theme="rawi-light"] {
-    --color-primary: #e11d48;
-    --color-primary-hover: #be123c;
+    --color-primary: #b0566a;
+    --color-primary-hover: #9a4a5c;
     --color-primary-foreground: #ffffff;
     --color-secondary: #fdecef;
     --color-secondary-hover: #fbd5dc;
@@ -19049,7 +19083,7 @@ body {
     --color-surface: #f9f0f3;
     --color-border: #f0dde3;
     --color-input: #e3c6cf;
-    --color-ring: #e11d48;
+    --color-ring: #b0566a;
     --color-error: #dc2626;
     --color-error-foreground: #ffffff;
     --color-success: #047857;
@@ -19149,6 +19183,9 @@ body {
     --corner-shape-pill: round;
     --border-style: solid;
     --border-style-interactive: solid;
+    --illustration-loading: url("data:image/svg+xml;utf8,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22 fill=%22none%22%3E%3Cdefs%3E%3C/defs%3E%3Cstyle%3E.osc%7Banimation:o 1.2s ease-in-out infinite alternate%7D%40keyframes o%7Bfrom%7Btransform:translateY(-4px)%7Dto%7Btransform:translateY(4px)%7D%7D.w%7Bfill:none;stroke:%23b0566a;stroke-width:2.6;stroke-linecap:round;opacity:0;transform-origin:50px 50px;animation:w 2.4s ease-out infinite%7D%40keyframes w%7B0%25%7Bopacity:0;transform:scale(.55)%7D15%25%7Bopacity:1%7D100%25%7Bopacity:0;transform:scale(1.25)%7D%7D.w2%7Banimation-delay:.8s%7D.w3%7Banimation-delay:1.6s%7D%40media (prefers-reduced-motion:reduce)%7B*%7Banimation:none!important%7D%7D%3C/style%3E%3Cpath class=%22w w1%22 d=%22M27,34 A28,28 0 0 0 27,66%22/%3E%3Cpath class=%22w w1%22 d=%22M73,34 A28,28 0 0 1 73,66%22/%3E%3Cpath class=%22w w2%22 d=%22M27,34 A28,28 0 0 0 27,66%22/%3E%3Cpath class=%22w w2%22 d=%22M73,34 A28,28 0 0 1 73,66%22/%3E%3Cpath class=%22w w3%22 d=%22M27,34 A28,28 0 0 0 27,66%22/%3E%3Cpath class=%22w w3%22 d=%22M73,34 A28,28 0 0 1 73,66%22/%3E%3Cg class=%22osc%22%3E%3Cpath d=%22M50,52 C37,48 32,34 36,24 C40,14 60,14 64,24 C68,34 63,48 50,52 Z%22 fill=%22%23b0566a%22/%3E%3Cpath d=%22M50,52 C43,55 41,62 43,67 C45,72 55,72 57,67 C59,62 57,55 50,52 Z%22 fill=%22%23e8b4bf%22/%3E%3C/g%3E%3C/svg%3E");
+    --loader-mark-display: inline-block;
+    --loader-icon-display: none;
     --surface-card-image: linear-gradient(135deg, rgba(225, 29, 72, 0.07) 0%, rgba(124, 58, 237, 0.05) 100%);
     --surface-edge-mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1440 100' preserveAspectRatio='none'><path d='M0 60 C240 100 480 100 720 60 C960 20 1200 20 1440 60 V100 H0 Z'/></svg>");
     --surface-edge-height: clamp(24px, 6vw, 96px);
@@ -19184,8 +19221,8 @@ body {
 }
 
 [data-theme="rawi-dark"] {
-    --color-primary: #fb7185;
-    --color-primary-hover: #fda4af;
+    --color-primary: #f2a7b0;
+    --color-primary-hover: #f6c0c6;
     --color-primary-foreground: #1a0b10;
     --color-secondary: #2a1219;
     --color-secondary-hover: #3a1a24;
@@ -19201,7 +19238,7 @@ body {
     --color-surface: #22111a;
     --color-border: #3a1d27;
     --color-input: #4d2633;
-    --color-ring: #fb7185;
+    --color-ring: #f2a7b0;
     --color-error: #f87171;
     --color-error-foreground: #000000;
     --color-success: #34d399;
@@ -19301,6 +19338,9 @@ body {
     --corner-shape-pill: round;
     --border-style: solid;
     --border-style-interactive: solid;
+    --illustration-loading: url("data:image/svg+xml;utf8,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22 fill=%22none%22%3E%3Cdefs%3E%3C/defs%3E%3Cstyle%3E.osc%7Banimation:o 1.2s ease-in-out infinite alternate%7D%40keyframes o%7Bfrom%7Btransform:translateY(-4px)%7Dto%7Btransform:translateY(4px)%7D%7D.w%7Bfill:none;stroke:%23f2a7b0;stroke-width:2.6;stroke-linecap:round;opacity:0;transform-origin:50px 50px;animation:w 2.4s ease-out infinite%7D%40keyframes w%7B0%25%7Bopacity:0;transform:scale(.55)%7D15%25%7Bopacity:1%7D100%25%7Bopacity:0;transform:scale(1.25)%7D%7D.w2%7Banimation-delay:.8s%7D.w3%7Banimation-delay:1.6s%7D%40media (prefers-reduced-motion:reduce)%7B*%7Banimation:none!important%7D%7D%3C/style%3E%3Cpath class=%22w w1%22 d=%22M27,34 A28,28 0 0 0 27,66%22/%3E%3Cpath class=%22w w1%22 d=%22M73,34 A28,28 0 0 1 73,66%22/%3E%3Cpath class=%22w w2%22 d=%22M27,34 A28,28 0 0 0 27,66%22/%3E%3Cpath class=%22w w2%22 d=%22M73,34 A28,28 0 0 1 73,66%22/%3E%3Cpath class=%22w w3%22 d=%22M27,34 A28,28 0 0 0 27,66%22/%3E%3Cpath class=%22w w3%22 d=%22M73,34 A28,28 0 0 1 73,66%22/%3E%3Cg class=%22osc%22%3E%3Cpath d=%22M50,52 C37,48 32,34 36,24 C40,14 60,14 64,24 C68,34 63,48 50,52 Z%22 fill=%22%23f2a7b0%22/%3E%3Cpath d=%22M50,52 C43,55 41,62 43,67 C45,72 55,72 57,67 C59,62 57,55 50,52 Z%22 fill=%22%239c5664%22/%3E%3C/g%3E%3C/svg%3E");
+    --loader-mark-display: inline-block;
+    --loader-icon-display: none;
     --surface-card-image: linear-gradient(135deg, rgba(129, 140, 248, 0.10) 0%, rgba(34, 211, 238, 0.06) 55%, rgba(52, 211, 153, 0.07) 100%);
     --diagram-stroke-thin: 1px;
     --diagram-stroke-normal: 2px;

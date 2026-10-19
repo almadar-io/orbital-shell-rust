@@ -114,21 +114,7 @@ mod desktop {
             *c.borrow_mut() = if no_css {
                 Vec::new()
             } else {
-                let mut texts = Vec::new();
-                for rel in [
-                    "../packages/almadar-ui-wasm/preview/almadar.css",
-                    "../packages/almadar-ui-wasm/dist/tailwind.css",
-                ] {
-                    if let Ok(t) = std::fs::read_to_string(rel) {
-                        texts.push(t);
-                    }
-                }
-                if texts.is_empty() {
-                    // Fall back to a small synthetic sheet — the crash path is
-                    // about head-node churn, not the rules themselves.
-                    texts.push("/* stress */ .almadar-button { color: red; }".to_string());
-                }
-                texts
+                orbital_client_dioxus::styles::stylesheets().into_iter().skip(1).collect()
             }
         });
 

@@ -1,5 +1,4 @@
-//! Native behavior catalog — the desktop counterpart of the ui-wasm browser
-//! catalog.
+//! Native behavior catalog.
 //!
 //! Usage:
 //!   orbital-native-catalog [--css <file.css>]...
@@ -7,12 +6,9 @@
 //! Opens ONE winit window (Blitz: Stylo + Taffy + vello) with a sidebar of
 //! every baked behavior; clicking a row mounts its `.orb` through the SAME
 //! pipeline `orb verify` runs (`shell::mount_core` → `KernelBridge` +
-//! `ClientCore`), and event chips drive the state machine. CSS flags mirror
-//! `orbital-native-preview` — the default stack is `@almadar/ui-wasm`'s
-//! `dist/almadar-theme.css` (the REAL `@almadar/ui` token/theme bundle, first)
-//! + `preview/almadar.css` (structural base) + `dist/tailwind.css`
-//! (utilities); with no `--css` flag the three default monorepo paths are
-//! tried relative to the working directory.
+//! `ClientCore`), and event chips drive the state machine. With no `--css` flag it paints with the
+//! renderer's own stylesheets (`styles::stylesheets()`: the `@almadar/ui` theme bundle, the base layer, the
+//! Tailwind utilities); each `--css <file>` replaces that stack.
 
 #[cfg(not(target_arch = "wasm32"))]
 fn main() {
@@ -38,21 +34,14 @@ fn main() {
             }
         }
     }
-    if css_paths.is_empty() {
-        for p in [
-            "packages/almadar-ui-wasm/dist/almadar-theme.css",
-            "packages/almadar-ui-wasm/preview/almadar.css",
-            "packages/almadar-ui-wasm/dist/tailwind.css",
-        ] {
-            if std::path::Path::new(p).exists() {
-                css_paths.push(p.to_string());
-            }
-        }
-    }
-    let css_texts: Vec<String> = css_paths
-        .iter()
-        .map(|p| std::fs::read_to_string(p).unwrap_or_else(|e| panic!("failed to read css {p}: {e}")))
-        .collect();
+    let css_texts: Vec<String> = if css_paths.is_empty() {
+        orbital_client_dioxus::styles::stylesheets()
+    } else {
+        css_paths
+            .iter()
+            .map(|p| std::fs::read_to_string(p).unwrap_or_else(|e| panic!("failed to read css {p}: {e}")))
+            .collect()
+    };
 
     orbital_client_dioxus::app::CSS_TEXT.with(|c| *c.borrow_mut() = css_texts.clone());
 
@@ -80,7 +69,6 @@ fn main() {
     dioxus_native::set_frame_hook(None);
 }
 
-/// wasm32 stub — the browser catalog is `packages/almadar-ui-wasm/preview/
-/// catalog.html`; this bin is desktop-only (see `catalog.rs`).
+/// wasm32 stub — this bin is desktop-only (see `catalog.rs`).
 #[cfg(target_arch = "wasm32")]
 fn main() {}
