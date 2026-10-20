@@ -26,7 +26,7 @@ fn generate_server_rs(app_name: &str) -> String {
 
         use anyhow::Context;
         use axum::Router;
-        use orbital_server::{create_router, InMemoryAdapter, OrbitalServerRuntime};
+        use orbital_server::{create_router, DriverAdapter, OrbitalServerRuntime};
         use std::path::Path;
         use std::sync::Arc;
 
@@ -39,7 +39,7 @@ fn generate_server_rs(app_name: &str) -> String {
             let schema = orbital_core::schema::parse_schema_file(schema_path)
                 .with_context(|| format!("failed to load schema from {}", schema_path.display()))?;
 
-            let persistence = Arc::new(InMemoryAdapter::new());
+            let persistence = Arc::new(DriverAdapter::memory());
             let runtime = OrbitalServerRuntime::new(persistence).shared();
             runtime
                 .register_schema(schema.clone())
