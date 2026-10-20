@@ -1,0 +1,14 @@
+[package]
+name = "{{APP_NAME}}"
+version = "0.1.0"
+edition = "2021"
+
+# One standalone terminal binary: the program is embedded and the kernel runs in-process,
+# so it carries the terminal renderer and orbital-core only.
+[dependencies]
+orbital-core = { git = "https://github.com/almadar-io/orbital-core", branch = "main" }
+orbital-client-tui = { git = "https://github.com/almadar-io/orbital-shell-rust", branch = "main" }
+anyhow = "1"
+
+# Keep the generated project independent of any parent workspace.
+[workspace]

@@ -18,4 +18,4 @@ pub use game::generate_game_bin;
 pub use server::generate_server_files;
 pub use services::generate_services_module;
 pub use state_machine::generate_traits;
-pub use tui::generate_tui_bin;
+pub use tui::{generate_tui_bin, generate_tui_standalone_main};

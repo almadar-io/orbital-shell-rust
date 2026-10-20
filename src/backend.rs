@@ -5,23 +5,68 @@
 use crate::codegen::{
     generate_desktop_bin, generate_effects_module, generate_entities_module, generate_game_bin,
     generate_server_files, generate_services_module, generate_traits, generate_tui_bin,
+    generate_tui_standalone_main,
 };
 use orbital_core::generate::{Backend, GeneratedFile, GeneratedOutput, ShellMode};
 use orbital_core::ir::OirModule;
 
+/// Which renderer set the generated project carries (the shell's `renderer` option).
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum RustRenderer {
+    /// Axum server plus the desktop, terminal and game clients.
+    #[default]
+    All,
+    /// One standalone terminal binary: the resolved program embedded, the kernel in-process, no server.
+    Tui,
+}
+
+impl RustRenderer {
+    pub const OPTION: &'static str = "renderer";
+    pub const VALUES: [&'static str; 2] = ["all", "tui"];
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "all" => Some(Self::All),
+            "tui" => Some(Self::Tui),
+            _ => None,
+        }
+    }
+}
+
 /// Rust code generation backend.
-#[derive(Debug, Default, Clone, Copy)]
-pub struct RustBackend;
+#[derive(Debug, Default, Clone)]
+pub struct RustBackend {
+    /// The resolved program JSON a standalone terminal binary embeds; `None` generates the full project.
+    terminal_program: Option<String>,
+}
 
 impl RustBackend {
     /// Create a new Rust backend.
     pub fn new() -> Self {
-        Self
+        Self::default()
+    }
+
+    /// The standalone terminal backend, embedding `program` (the resolved `.orb` JSON).
+    pub fn terminal(program: String) -> Self {
+        Self { terminal_program: Some(program) }
+    }
+}
+
+fn generate_terminal(program: &str) -> GeneratedOutput {
+    GeneratedOutput {
+        files: vec![
+            GeneratedFile::new("program.orb", program.to_string()),
+            GeneratedFile::new("src/main.rs", generate_tui_standalone_main()),
+        ],
+        warnings: vec![],
     }
 }
 
 impl Backend for RustBackend {
     fn generate(&self, module: &OirModule) -> GeneratedOutput {
+        if let Some(program) = &self.terminal_program {
+            return generate_terminal(program);
+        }
         let mut files = vec![];
         let mut warnings = vec![];
 
@@ -81,6 +126,9 @@ impl Backend for RustBackend {
     }
 
     fn generate_with_mode(&self, module: &OirModule, mode: ShellMode) -> GeneratedOutput {
+        if let Some(program) = &self.terminal_program {
+            return generate_terminal(program);
+        }
         match mode {
             ShellMode::Full => self.generate(module),
             ShellMode::Server => {
@@ -275,6 +323,43 @@ mod tests {
         assert!(!paths.contains(&"src/server.rs"));
         assert!(!paths.contains(&"src/main.rs"));
         assert!(!paths.contains(&"src/effects/mod.rs"));
+    }
+
+    #[test]
+    fn tui_renderer_emits_one_standalone_binary_with_the_program_embedded() {
+        use crate::{RustRenderer, RustShell};
+        use orbital_core::project::{write_project, WriteOptions};
+        let program = r#"{"name":"TestApp","orbitals":[]}"#;
+        let output = std::env::temp_dir().join(format!("orb-agent-tui-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&output);
+        let options = WriteOptions {
+            copy_template: true,
+            service_runtimes: Some(Default::default()),
+            ..Default::default()
+        };
+        let generated = write_project(
+            &test_module(),
+            &output,
+            &RustShell::for_renderer(RustRenderer::Tui),
+            &RustBackend::terminal(program.to_string()),
+            &options,
+        )
+        .expect("terminal project written");
+        let paths: Vec<&str> = generated.files.iter().map(|f| f.path.as_str()).collect();
+        assert!(!paths.iter().any(|p| p.starts_with("src/bin/")), "one binary only: {paths:?}");
+        assert!(!paths.contains(&"src/server.rs"));
+
+        let read = |rel: &str| std::fs::read_to_string(output.join(rel)).unwrap_or_else(|e| panic!("{rel}: {e}"));
+        let manifest = read("Cargo.toml");
+        for banned in ["dioxus", "wgpu", "orbital-server", "axum", "[[bin]]"] {
+            assert!(!manifest.contains(banned), "terminal manifest must not carry {banned}:\n{manifest}");
+        }
+        assert!(manifest.contains("orbital-client-tui"));
+        let main = read("src/main.rs");
+        assert!(main.contains("include_str!(\"../program.orb\")"), "program embedded:\n{main}");
+        assert!(!main.contains("resolved.orb") && !main.contains("SERVER_URL") && !main.contains("3030"));
+        assert_eq!(read("program.orb"), program);
+        let _ = std::fs::remove_dir_all(&output);
     }
 
     #[test]

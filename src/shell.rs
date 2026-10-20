@@ -18,10 +18,23 @@ impl RustShell {
         Self { template_path }
     }
 
+    /// The shell whose template carries `renderer`'s crate set.
+    pub fn for_renderer(renderer: crate::RustRenderer) -> Self {
+        let name = match renderer {
+            crate::RustRenderer::All => "rust-shell",
+            crate::RustRenderer::Tui => "rust-terminal",
+        };
+        Self { template_path: Self::template(name) }
+    }
+
     /// Find the `rust-shell` template directory at runtime.
     fn find_template_path() -> PathBuf {
+        Self::template("rust-shell")
+    }
+
+    fn template(name: &str) -> PathBuf {
         // The one template lookup (`ORBITAL_SHELLS_DIR` → beside the binary → the checkout).
-        orbital_core::renderer_packs::shell_template("rust-shell", std::path::Path::new(env!("CARGO_MANIFEST_DIR")))
+        orbital_core::renderer_packs::shell_template(name, std::path::Path::new(env!("CARGO_MANIFEST_DIR")))
     }
 
     /// Create with an explicit template path.
