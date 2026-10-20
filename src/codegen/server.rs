@@ -40,7 +40,7 @@ fn generate_server_rs(app_name: &str) -> String {
                 .with_context(|| format!("failed to load schema from {}", schema_path.display()))?;
 
             let persistence = Arc::new(InMemoryAdapter::new());
-            let runtime = Arc::new(OrbitalServerRuntime::new(persistence));
+            let runtime = OrbitalServerRuntime::new(persistence).shared();
             runtime
                 .register_schema(schema.clone())
                 .context("failed to register schema with runtime")?;
