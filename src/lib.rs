@@ -5,6 +5,7 @@
 
 mod backend;
 pub mod codegen;
+pub mod host;
 mod shell;
 pub mod shell_program;
 
