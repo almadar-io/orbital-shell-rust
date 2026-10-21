@@ -1177,39 +1177,3 @@ impl WebHandle {
         log::info!(target: NS, "destroy: app unmounted");
     }
 }
-
-/// Run the same verify building blocks `orb verify` does — L1 (the kernel walk,
-/// `orbital_core::verify`) and L2 (the render contract,
-/// `orbital_core::client::render_probe`, against this renderer) — on a program
-/// `orb` resolved, from inside the browser. Stateless (no canvas). Returns JSON:
-/// `{ item, ok, l1: { ok, headline, summary, verdicts[] }, l2: { ok, headline,
-///   slots_rendered, stubbed, verdicts[] } }`; every verdict is `{ name, passed, detail }`.
-#[wasm_bindgen]
-pub fn verify_schema_json(resolved_json: String) -> Result<String, JsValue> {
-    let schema = orbital_core::schema::parse_schema(&resolved_json).map_err(js_err)?;
-    let item = schema.name.clone();
-    log::info!(target: NS, "verify: item='{}' orbitals={} schema_bytes={}", item, schema.orbitals.len(), resolved_json.len());
-
-    let l1 = orbital_core::verify::verify_schema(&item, schema.clone()).map_err(js_err)?;
-    log::info!(target: NS, "verify L1: {}", l1.headline());
-    for v in &l1.verdicts {
-        log::info!(target: NS, "verify L1 verdict={} passed={} detail='{}'", v.name, v.passed, v.detail);
-    }
-
-    let target = crate::probe_target::DioxusTarget::new();
-    let l2 = orbital_core::client::render_probe::probe(&item, schema, None, &target).map_err(js_err)?;
-    log::info!(target: NS, "verify L2: {}", l2.headline());
-    for v in &l2.verdicts {
-        log::info!(target: NS, "verify L2 verdict={} passed={} detail='{}'", v.name, v.passed, v.detail);
-    }
-
-    let ok = l1.ok() && l2.ok();
-    log::info!(target: NS, "verify done: item='{}' ok={}", item, ok);
-    let out = serde_json::json!({
-        "item": item,
-        "ok": ok,
-        "l1": { "ok": l1.ok(), "headline": l1.headline(), "summary": l1.summary, "verdicts": l1.verdicts },
-        "l2": { "ok": l2.ok(), "headline": l2.headline(), "slots_rendered": l2.slots_rendered, "stubbed": l2.stubbed, "verdicts": l2.verdicts },
-    });
-    serde_json::to_string(&out).map_err(js_err)
-}

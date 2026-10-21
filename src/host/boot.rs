@@ -100,16 +100,54 @@ pub fn boot_file(
     trace_by_default: bool,
     substrate: Option<SubstratePort>,
 ) -> anyhow::Result<Arc<Host>> {
+    boot_file_with(schema_path, mock, env, trace_by_default, HostConfig { substrate, ..HostConfig::default() })
+}
+
+/// [`boot_file`] with the whole host configuration given: a pinned dispatch clock (`HostConfig::clock`) as well as the
+/// substrate port.
+pub fn boot_file_with(
+    schema_path: &Path,
+    mock: bool,
+    env: &orbital_core::runtime::auth::AuthEnv,
+    trace_by_default: bool,
+    config: HostConfig,
+) -> anyhow::Result<Arc<Host>> {
     let schema = parse_schema_file(schema_path)?;
+    boot(schema, schema_path, Arc::new(DriverAdapter::memory()), mock, env, trace_by_default, config, None)
+}
+
+/// Programs composed into one app by the host's `program/compose` (the substrate `port` answers it, as `orb` does), then
+/// booted on the in-memory store with that same port installed: how `orb serve` boots an app beside `std-http-server`.
+/// `catalogs` must hold every locale the composed app declares.
+pub fn boot_composed(
+    programs: Vec<orbital_core::Value>,
+    app_name: &str,
+    port: SubstratePort,
+    catalogs: Catalogs,
+    env: &orbital_core::runtime::auth::AuthEnv,
+    trace_by_default: bool,
+) -> anyhow::Result<Arc<Host>> {
+    let mut options = orbital_core::ValueMap::new();
+    options.insert("appName".to_string(), orbital_core::Value::String(app_name.to_string()));
+    let composed = port
+        .0
+        .run("program/compose", &[orbital_core::Value::Array(programs), orbital_core::Value::Object(options)])
+        .map_err(|failure| anyhow::anyhow!("program/compose: {}", failure.message))?;
+    let schema: orbital_core::OrbitalSchema =
+        serde_json::from_value(orbital_core::json_value::value_to_json(&composed))
+            .map_err(|e| anyhow::anyhow!("program/compose answered no program: {e}"))?;
+    if let Some(missing) = schema.locales.iter().flatten().find(|locale| !catalogs.contains_key(*locale)) {
+        anyhow::bail!("the composed app declares locale \"{missing}\" but no catalog was given for it");
+    }
     boot(
         schema,
-        schema_path,
+        Path::new(&format!("{app_name}.orb")),
         Arc::new(DriverAdapter::memory()),
-        mock,
+        false,
         env,
         trace_by_default,
-        substrate,
-        None,
+        HostConfig { substrate: Some(port), ..HostConfig::default() },
+        Some(catalogs),
     )
 }
 
@@ -131,7 +169,7 @@ pub fn boot_embedded(
         mock,
         env,
         false,
-        None,
+        HostConfig::default(),
         Some(catalogs),
     )?;
     start_tick_driver(&runtime);
@@ -149,7 +187,7 @@ pub fn boot(
     mock: bool,
     env: &orbital_core::runtime::auth::AuthEnv,
     trace_by_default: bool,
-    substrate: Option<SubstratePort>,
+    config: HostConfig,
     catalogs: Option<Catalogs>,
 ) -> anyhow::Result<Arc<Host>> {
     tracing::info!(
@@ -160,14 +198,7 @@ pub fn boot(
         "loaded schema",
     );
 
-    let runtime = Host::with_persistence(
-        persistence,
-        HostConfig {
-            substrate,
-            ..HostConfig::default()
-        },
-    )
-    .shared();
+    let runtime = Host::with_persistence(persistence, config).shared();
 
     configure_trace(&runtime, env, trace_by_default)?;
     // Register schema (materializes any authored `instances`).
@@ -619,5 +650,105 @@ mod auth_boot_tests {
         let none = runtime();
         configure_sign_in(&none, &empty(), &env(&[])).unwrap();
         assert!(none.sign_in().is_none());
+    }
+}
+
+#[cfg(test)]
+mod composed_tests {
+    use super::*;
+    use orbital_core::effects::executor::{SubstrateFailure, SubstrateHandler};
+
+    /// A `program/compose` that appends every program's orbitals into one app, as a stand-in for `orb`'s composer.
+    struct Appending;
+
+    impl SubstrateHandler for Appending {
+        fn run(&self, op: &str, args: &[orbital_core::Value]) -> Result<orbital_core::Value, SubstrateFailure> {
+            let refuse = |message: &str| SubstrateFailure { message: message.to_string(), errors: Vec::new() };
+            if op != "program/compose" {
+                return Err(refuse("only program/compose"));
+            }
+            let Some(orbital_core::Value::Array(programs)) = args.first() else { return Err(refuse("no list")) };
+            let name = orbital_core::json_value::value_to_json(&args[1])["appName"].clone();
+            let mut orbitals = Vec::new();
+            let mut locales = Vec::new();
+            for program in programs {
+                let json = orbital_core::json_value::value_to_json(program);
+                orbitals.extend(json["orbitals"].as_array().cloned().unwrap_or_default());
+                locales.extend(json["locales"].as_array().cloned().unwrap_or_default());
+            }
+            let mut app = serde_json::json!({ "name": name, "orbitals": orbitals });
+            if !locales.is_empty() {
+                app["locales"] = serde_json::Value::Array(locales);
+            }
+            serde_json::from_value(app).map_err(|e| refuse(&e.to_string()))
+        }
+    }
+
+    fn program(name: &str, orbital: &str, extra: serde_json::Value) -> orbital_core::Value {
+        let mut json = serde_json::json!({
+            "name": name,
+            "orbitals": [{
+                "name": orbital,
+                "entity": { "name": format!("{orbital}Row"), "persistence": "runtime", "fields": [{ "name": "id", "type": "string" }] },
+                "traits": [{ "name": format!("{orbital}Trait"), "linkedEntity": format!("{orbital}Row"),
+                    "stateMachine": { "states": [{ "name": "idle", "isInitial": true }, { "name": "ready" }],
+                        "events": [{ "key": "INIT", "name": "Init" }],
+                        "transitions": [{ "from": "idle", "to": "ready", "event": "INIT" }] } }]
+            }]
+        });
+        if let (Some(target), Some(more)) = (json.as_object_mut(), extra.as_object()) {
+            target.extend(more.clone());
+        }
+        serde_json::from_value(json).unwrap()
+    }
+
+    fn port() -> SubstratePort {
+        SubstratePort(Arc::new(Appending))
+    }
+
+    #[test]
+    fn composed_programs_boot_as_one_app_and_mount_every_trait() {
+        let host = boot_composed(
+            vec![program("app", "Notes", serde_json::json!({})), program("server", "Http", serde_json::json!({}))],
+            "served",
+            port(),
+            Catalogs::new(),
+            &Default::default(),
+            false,
+        )
+        .unwrap();
+        let names: Vec<String> = host.list_orbitals().into_iter().map(|o| o.name).collect();
+        assert_eq!(names.len(), 2, "{names:?}");
+        assert!(names.contains(&"Notes".to_string()) && names.contains(&"Http".to_string()), "{names:?}");
+        super::super::run::mount_init(&host).unwrap();
+        for t in ["NotesTrait", "HttpTrait"] {
+            let state = host.get_state(t, super::super::run::RUN_ENTITY).map(|s| s.current_state);
+            assert_eq!(state.as_deref(), Some("ready"), "{t} mounted");
+        }
+    }
+
+    #[test]
+    fn control_a_compose_the_port_refuses_names_why_and_boots_nothing() {
+        struct Refusing;
+        impl SubstrateHandler for Refusing {
+            fn run(&self, _: &str, _: &[orbital_core::Value]) -> Result<orbital_core::Value, SubstrateFailure> {
+                Err(SubstrateFailure { message: "duplicate orbital Notes".to_string(), errors: Vec::new() })
+            }
+        }
+        let error = boot_composed(vec![], "served", SubstratePort(Arc::new(Refusing)), Catalogs::new(), &Default::default(), false)
+            .err()
+            .expect("a refused compose does not boot");
+        assert!(error.to_string().contains("duplicate orbital Notes"), "{error}");
+    }
+
+    #[test]
+    fn edge_a_declared_locale_without_its_catalog_refuses_the_boot() {
+        let app = program("app", "Notes", serde_json::json!({ "locales": ["en", "ar"] }));
+        let mut catalogs = Catalogs::new();
+        catalogs.insert("en".to_string(), std::collections::HashMap::new());
+        let error = boot_composed(vec![app], "served", port(), catalogs, &Default::default(), false)
+            .err()
+            .expect("a missing catalog refuses the boot");
+        assert!(error.to_string().contains("\"ar\""), "{error}");
     }
 }

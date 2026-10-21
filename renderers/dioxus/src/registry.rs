@@ -2,7 +2,7 @@
 //!
 //! Mirrors `orbital-client/src/rendering/desktop.rs:60-121`: replace-by-name on
 //! register. A pattern with no renderer gets the declared unsupported-pattern
-//! error (`orbital_core::renderer_coverage`), never a placeholder.
+//! error, never a placeholder.
 
 use crate::renderer::{DioxusPatternRenderer, DioxusView};
 use dioxus::prelude::*;
@@ -12,18 +12,67 @@ use std::collections::HashMap;
 /// This renderer's id in the declared unsupported-pattern error.
 pub const RENDERER_ID: &str = "rust-dioxus";
 
+/// The error code a pattern this renderer lacks carries.
+pub const CODE_PATTERN_UNSUPPORTED: &str = "ORB_PATTERN_UNSUPPORTED_BY_RENDERER";
+
 /// Game patterns this renderer stubs for now (G-ORB-238): they draw the declared
 /// unsupported answer, and the render probe reports them as stubbed, not failed.
-/// Exactly the registry patterns this renderer lacks — `tests/renderer_coverage.rs`
-/// keeps the two equal.
+/// Exactly the registry patterns this renderer lacks — `orbital-integration-tests`
+/// `tests/native_snapshot_baselines.rs` keeps the two equal.
 pub const STUBBED_PATTERNS: &[&str] = &[
-    "action-palette", "action-tile", "choice-button", "control-button", "control-grid",
-    "dialogue-bubble", "draw-fx-layer", "draw-group", "draw-mesh", "draw-shape",
-    "draw-shape-layer", "draw-skinned-mesh", "draw-sprite", "draw-sprite-layer", "draw-text",
-    "draw-text-layer", "game-audio-cue", "game-audio-toggle", "game-menu", "game-shell",
-    "health-bar", "pattern-tile", "score-display", "sequence-bar", "stat-badge",
-    "timer-display", "trait-slot",
+    "action-palette",
+    "action-tile",
+    "choice-button",
+    "control-button",
+    "control-grid",
+    "dialogue-bubble",
+    "draw-fx-layer",
+    "draw-group",
+    "draw-mesh",
+    "draw-shape",
+    "draw-shape-layer",
+    "draw-skinned-mesh",
+    "draw-sprite",
+    "draw-sprite-layer",
+    "draw-text",
+    "draw-text-layer",
+    "game-audio-cue",
+    "game-audio-toggle",
+    "game-menu",
+    "game-shell",
+    "health-bar",
+    "pattern-tile",
+    "score-display",
+    "sequence-bar",
+    "stat-badge",
+    "timer-display",
+    "trait-slot",
 ];
+
+/// Logs the first occurrence per pattern: the client renders every frame, so
+/// repeats leave the log, never the screen.
+fn unsupported_pattern_message(pattern: &str) -> String {
+    static SEEN: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<String>>> =
+        std::sync::OnceLock::new();
+    let pattern = if pattern.is_empty() {
+        "(no type)"
+    } else {
+        pattern
+    };
+    let message = format!(
+        "pattern `{pattern}` is not supported by renderer {RENDERER_ID} {}",
+        env!("CARGO_PKG_VERSION")
+    );
+    let first = SEEN
+        .get_or_init(Default::default)
+        .lock()
+        .map(|mut seen| seen.insert(pattern.to_string()))
+        .unwrap_or(true);
+    if first {
+        tracing::warn!(code = CODE_PATTERN_UNSUPPORTED, "{message}");
+    }
+    message
+}
 
 /// The answer for a pattern this client does not implement.
 struct UnsupportedDioxusRenderer;
@@ -45,17 +94,12 @@ impl DioxusPatternRenderer for UnsupportedDioxusRenderer {
             .and_then(|o| o.get("type"))
             .and_then(|v| v.as_str())
             .unwrap_or("");
-        let message = orbital_core::renderer_coverage::UnsupportedPattern::new(
-            t,
-            RENDERER_ID,
-            env!("CARGO_PKG_VERSION"),
-        )
-        .message();
+        let message = unsupported_pattern_message(t);
         rsx! {
             div {
                 class: "almadar-unsupported-pattern",
                 role: "alert",
-                "data-code": orbital_core::renderer_coverage::CODE_PATTERN_UNSUPPORTED,
+                "data-code": CODE_PATTERN_UNSUPPORTED,
                 "{message}"
             }
         }

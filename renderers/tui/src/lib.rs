@@ -6,16 +6,16 @@
 #[allow(dead_code, unused_variables, unused_imports)]
 pub mod components;
 
-use orbital_core::client::bridge::{KernelBridge, ServerBridge};
-use orbital_core::client::client_core::ClientCore;
-use orbital_core::client::client_kernel::ClientKernel;
-use orbital_core::client::http::SyncServerBridge;
-use orbital_core::client::helpers::*;
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
 use crossterm::ExecutableCommand;
+use orbital_core::client::bridge::{KernelBridge, ServerBridge};
+use orbital_core::client::client_core::ClientCore;
+use orbital_core::client::client_kernel::ClientKernel;
+use orbital_core::client::helpers::*;
+use orbital_core::client::http::SyncServerBridge;
 use orbital_core::{OrbitalSchema, Value};
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
@@ -135,11 +135,15 @@ pub struct RequestLog {
 
 /// The transport for a terminal app: a server at `server_url`, else the
 /// in-process kernel (offline, seeded like every headless client).
-fn bridge(schema: &OrbitalSchema, server_url: Option<&str>) -> anyhow::Result<Arc<dyn ServerBridge>> {
+fn bridge(
+    schema: &OrbitalSchema,
+    server_url: Option<&str>,
+) -> anyhow::Result<Arc<dyn ServerBridge>> {
     Ok(match server_url {
         Some(url) => Arc::new(SyncServerBridge::new(url)),
         None => {
-            let kernel = KernelBridge::new(schema.clone()).map_err(|e| anyhow::anyhow!("kernel bridge: {e}"))?;
+            let kernel = KernelBridge::new(schema.clone())
+                .map_err(|e| anyhow::anyhow!("kernel bridge: {e}"))?;
             kernel.seed_sample(schema, 3);
             Arc::new(kernel)
         }
@@ -180,7 +184,10 @@ fn restore_terminal() -> io::Result<()> {
     Ok(())
 }
 
-fn run_app(terminal: &mut Terminal<CrosstermBackend<Stdout>>, app: &mut TuiApp) -> anyhow::Result<()> {
+fn run_app(
+    terminal: &mut Terminal<CrosstermBackend<Stdout>>,
+    app: &mut TuiApp,
+) -> anyhow::Result<()> {
     loop {
         terminal.draw(|frame| app.draw(frame))?;
 
@@ -231,7 +238,11 @@ impl TuiApp {
         for renderer in renderers {
             pattern_registry.register(renderer);
         }
-        let mut app = Self { core, request_history: Vec::new(), pattern_registry };
+        let mut app = Self {
+            core,
+            request_history: Vec::new(),
+            pattern_registry,
+        };
         app.mount();
         app
     }
@@ -254,7 +265,10 @@ impl TuiApp {
     fn mount(&mut self) {
         if !self.core.is_online() {
             self.core.handle_offline_event("INIT");
-            self.core.status_message = Some(("Offline mode: Connect to server for full functionality".to_string(), true));
+            self.core.status_message = Some((
+                "Offline mode: Connect to server for full functionality".to_string(),
+                true,
+            ));
             return;
         }
         self.timed("INIT", |core| {
@@ -293,7 +307,8 @@ impl TuiApp {
     pub fn send_event(&mut self, event: &str, payload: Value) {
         if !self.core.is_online() {
             self.core.handle_offline_event(event);
-            self.core.status_message = Some((format!("Cannot execute '{}' in offline mode", event), true));
+            self.core.status_message =
+                Some((format!("Cannot execute '{}' in offline mode", event), true));
             return;
         }
         debug!(trait_name = %self.core.current_trait_name, event = %event, "Sending event through client core");
@@ -303,7 +318,9 @@ impl TuiApp {
     /// Drive one round of queued follow-up events (each as the trait that emitted it).
     pub fn settle_round(&mut self) {
         for (event, origin, payload) in std::mem::take(&mut self.core.pending_events) {
-            self.timed(&event, |core| core.drive_blocking(&event, origin.as_deref(), payload));
+            self.timed(&event, |core| {
+                core.drive_blocking(&event, origin.as_deref(), payload)
+            });
         }
     }
 
@@ -361,7 +378,10 @@ impl TuiApp {
             .map(|(idx, orbital)| {
                 let prefix = if idx == current { "> " } else { "  " };
                 let style = if idx == current {
-                    Style::default().fg(Color::Black).bg(Color::Cyan).add_modifier(Modifier::BOLD)
+                    Style::default()
+                        .fg(Color::Black)
+                        .bg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD)
                 } else {
                     Style::default().fg(Color::White)
                 };
@@ -391,7 +411,10 @@ impl TuiApp {
             .block(Block::default().title("Orbitals").borders(Borders::ALL))
             .highlight_style(Style::default().add_modifier(Modifier::BOLD));
         frame.render_widget(list, area);
-        frame.render_widget(Paragraph::new(footer), inner_rect(area, 0, area.height.saturating_sub(2), area.width, 1));
+        frame.render_widget(
+            Paragraph::new(footer),
+            inner_rect(area, 0, area.height.saturating_sub(2), area.width, 1),
+        );
     }
 
     fn render_main_content(&mut self, frame: &mut Frame, area: Rect) {
@@ -409,17 +432,25 @@ impl TuiApp {
         let trait_content: orbital_core::ValueMap = core
             .trait_content
             .iter()
-            .map(|(name, content)| (name.clone(), resolve_row_set_markers(content, &|reference| core.resolve_rows(reference))))
+            .map(|(name, content)| {
+                (
+                    name.clone(),
+                    resolve_row_set_markers(content, &|reference| core.resolve_rows(reference)),
+                )
+            })
             .collect();
         let areas: Vec<Rect> = Layout::default()
             .direction(Direction::Vertical)
-            .constraints(std::iter::repeat_n(Constraint::Min(3), main_contents.len()).collect::<Vec<_>>())
+            .constraints(
+                std::iter::repeat_n(Constraint::Min(3), main_contents.len()).collect::<Vec<_>>(),
+            )
             .split(area)
             .to_vec();
 
         for (content, area) in main_contents.iter().zip(areas) {
             let renderer = self.pattern_registry.get_renderer(&content.pattern);
-            let painted = resolve_row_set_markers(&content.props, &|reference| core.resolve_rows(reference));
+            let painted =
+                resolve_row_set_markers(&content.props, &|reference| core.resolve_rows(reference));
             let mut ctx = RenderContext {
                 trait_name: core.current_trait_name.as_str(),
                 orbital_name: orbital_name.as_str(),
@@ -438,20 +469,35 @@ impl TuiApp {
     }
 
     fn render_status_bar(&self, frame: &mut Frame, area: Rect) {
-        let mut spans = vec![Span::raw("q:quit "), Span::raw("1-9:orbitals "), Span::raw("esc:cancel ")];
+        let mut spans = vec![
+            Span::raw("q:quit "),
+            Span::raw("1-9:orbitals "),
+            Span::raw("esc:cancel "),
+        ];
         if let Some((message, is_error)) = &self.core.status_message {
             spans.push(Span::raw(" | "));
-            let style = if *is_error { Style::default().fg(Color::Red) } else { Style::default().fg(Color::Green) };
+            let style = if *is_error {
+                Style::default().fg(Color::Red)
+            } else {
+                Style::default().fg(Color::Green)
+            };
             spans.push(Span::styled(message.clone(), style));
         }
         let total = self.request_history.len();
         let failed = self.request_history.iter().filter(|r| !r.success).count();
         let avg = if total > 0 {
-            self.request_history.iter().map(|r| r.duration_ms).sum::<u64>() / total as u64
+            self.request_history
+                .iter()
+                .map(|r| r.duration_ms)
+                .sum::<u64>()
+                / total as u64
         } else {
             0
         };
-        spans.push(Span::raw(format!(" | req:{} fail:{} avg:{}ms", total, failed, avg)));
+        spans.push(Span::raw(format!(
+            " | req:{} fail:{} avg:{}ms",
+            total, failed, avg
+        )));
         frame.render_widget(Paragraph::new(Line::from(spans)), area);
     }
 
@@ -462,7 +508,9 @@ impl TuiApp {
         let buffer = terminal.backend().buffer();
         let mut out = String::new();
         for y in 0..buffer.area.height {
-            let line: String = (0..buffer.area.width).map(|x| buffer[(x, y)].symbol()).collect();
+            let line: String = (0..buffer.area.width)
+                .map(|x| buffer[(x, y)].symbol())
+                .collect();
             out.push_str(line.trim_end());
             out.push('\n');
         }
@@ -818,9 +866,33 @@ impl PatternRenderer for ButtonRenderer {
 pub const RENDERER_ID: &str = "rust-tui";
 
 /// The answer for a pattern this target does not implement: the declared
-/// unsupported-pattern error (`orbital_core::renderer_coverage`), never a
-/// placeholder or a substitute render.
+/// unsupported-pattern error, never a placeholder or a substitute render.
 pub struct UnsupportedPatternRenderer;
+
+/// Logs the first occurrence per pattern: the renderer draws every frame, so
+/// repeats leave the log, never the screen.
+fn unsupported_pattern_message(pattern: &str) -> String {
+    static SEEN: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<String>>> =
+        std::sync::OnceLock::new();
+    let pattern = if pattern.is_empty() {
+        "(no type)"
+    } else {
+        pattern
+    };
+    let message = format!(
+        "pattern `{pattern}` is not supported by renderer {RENDERER_ID} {}",
+        env!("CARGO_PKG_VERSION")
+    );
+    let first = SEEN
+        .get_or_init(Default::default)
+        .lock()
+        .map(|mut seen| seen.insert(pattern.to_string()))
+        .unwrap_or(true);
+    if first {
+        tracing::warn!(code = "ORB_PATTERN_UNSUPPORTED_BY_RENDERER", "{message}");
+    }
+    message
+}
 
 impl PatternRenderer for UnsupportedPatternRenderer {
     fn pattern_name(&self) -> &str {
@@ -835,12 +907,7 @@ impl PatternRenderer for UnsupportedPatternRenderer {
         _entity: Option<&Value>,
         _ctx: &mut RenderContext<'_>,
     ) {
-        let message = orbital_core::renderer_coverage::UnsupportedPattern::new(
-            &get_string_or(props, "type", ""),
-            RENDERER_ID,
-            env!("CARGO_PKG_VERSION"),
-        )
-        .message();
+        let message = unsupported_pattern_message(&get_string_or(props, "type", ""));
         frame.render_widget(
             Paragraph::new(Text::from(Line::from(Span::styled(
                 message,
