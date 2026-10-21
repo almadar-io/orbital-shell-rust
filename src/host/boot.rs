@@ -346,7 +346,6 @@ pub fn configure_sign_in(
     let clock: Clock = Arc::new(orbital_core::time_util::now_millis);
     let persistence = runtime.persistence().clone();
     let find: RowFinder = Arc::new(move |entity: &str, id: &str| {
-        use orbital_core::PersistenceHandler;
         persistence
             .find(entity, id)
             .map(|row| row.and_then(|row| serde_json::to_value(row).ok()))

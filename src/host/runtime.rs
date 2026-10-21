@@ -78,7 +78,7 @@ impl orbital_core::effects::executor::SubstrateHandler for SelfSubstrate {
     fn run(&self, op: &str, args: &[Value]) -> Result<Value, orbital_core::effects::executor::SubstrateFailure> {
         use orbital_core::effects::executor::SubstrateFailure;
         let failure = |message: String| SubstrateFailure { message, errors: Vec::new() };
-        if op != "program/dispatch" {
+        if !matches!(op, "program/dispatch" | "program/tick" | "program/resolve-rows") {
             return match &self.host {
                 Some(host) => host.run(op, args),
                 None => Err(failure(format!("no substrate host configured for {op}"))),
@@ -88,7 +88,12 @@ impl orbital_core::effects::executor::SubstrateHandler for SelfSubstrate {
             .runtime
             .get()
             .and_then(std::sync::Weak::upgrade)
-            .ok_or_else(|| failure("program/dispatch: this host is not shared (Host::shared)".to_string()))?;
+            .ok_or_else(|| failure(format!("{op}: this host is not shared (Host::shared)")))?;
+        match op {
+            "program/tick" => return runtime.tick_answer(args).map_err(failure),
+            "program/resolve-rows" => return runtime.resolve_rows_answer(args).map_err(failure),
+            _ => {}
+        }
         let (Some(Value::String(address)), Some(payload)) = (args.first(), args.get(1)) else {
             return Err(failure("program/dispatch: the host is asked for a qualified address and a payload".to_string()));
         };
@@ -784,6 +789,30 @@ impl Host {
             }
         }
         ran
+    }
+
+    /// `program/tick`: one [`Self::tick_pass`] now, answered `{ ran: [{ trait, tick }] }`.
+    fn tick_answer(&self, args: &[Value]) -> Result<Value, String> {
+        if !args.is_empty() {
+            return Err("program/tick: takes no arguments, only its { emit } options".to_string());
+        }
+        let ran = self.tick_pass(self.monotonic_ms(), orbital_core::Calendar::local_now());
+        let ran: Vec<serde_json::Value> =
+            ran.into_iter().map(|(trait_name, tick)| serde_json::json!({ "trait": trait_name, "tick": tick })).collect();
+        serde_json::from_value(serde_json::json!({ "ran": ran })).map_err(|e| e.to_string())
+    }
+
+    /// `program/resolve-rows`: a row-set reference resolved for the viewer the call names, `@read` applied inside the
+    /// kernel's one resolver; answered `{ rows, total }`.
+    fn resolve_rows_answer(&self, args: &[Value]) -> Result<Value, String> {
+        let [reference, viewer] = args else {
+            return Err("program/resolve-rows: the host is asked for a row-set reference and the viewer it is resolved for".to_string());
+        };
+        let reference: RowSetRef = serde_json::to_value(reference)
+            .and_then(serde_json::from_value)
+            .map_err(|e| format!("program/resolve-rows: not a row-set reference: {e}"))?;
+        let page = self.kernel.resolve_rows(&reference, viewer)?;
+        serde_json::to_value(page).and_then(serde_json::from_value).map_err(|e| e.to_string())
     }
 
     /// The declared credentials of the installed services registry and every registered program.
@@ -1583,6 +1612,10 @@ mod tests {
     }
 
     fn ticking_program() -> orbital_core::OrbitalSchema {
+        ticking_program_every(1000)
+    }
+
+    fn ticking_program_every(interval: u64) -> orbital_core::OrbitalSchema {
         serde_json::from_value(serde_json::json!({
             "name": "Clock",
             "orbitals": [{
@@ -1592,8 +1625,8 @@ mod tests {
                     "name": "Pulse", "linkedEntity": "Beat",
                     "stateMachine": { "states": [{ "name": "idle", "isInitial": true }], "events": [{ "key": "INIT", "name": "Init" }], "transitions": [{ "from": "idle", "to": "idle", "event": "INIT" }] },
                     "ticks": [
-                        { "name": "beat", "interval": 1000, "runsInBackground": true, "effects": [["persist", "create", "Beat", { "n": 1 }]] },
-                        { "name": "screen", "interval": 1000, "effects": [["persist", "create", "Beat", { "n": 2 }]] }
+                        { "name": "beat", "interval": interval, "runsInBackground": true, "effects": [["persist", "create", "Beat", { "n": 1 }]] },
+                        { "name": "screen", "interval": interval, "effects": [["persist", "create", "Beat", { "n": 2 }]] }
                     ]
                 }]
             }]
@@ -1617,5 +1650,66 @@ mod tests {
             runtime.persistence.list("Beat").unwrap().iter().filter_map(|r| serde_json::to_value(r).unwrap()["n"].as_f64()).collect();
         assert_eq!(ns.iter().filter(|n| **n == 1.0).count(), 1, "{ns:?}");
         assert!(!ns.contains(&2.0), "{ns:?}");
+    }
+
+    fn ask(runtime: &Host, op: &str, args: &[serde_json::Value]) -> Result<serde_json::Value, String> {
+        let args: Vec<Value> = args.iter().map(|a| serde_json::from_value(a.clone()).unwrap()).collect();
+        orbital_core::effects::executor::SubstrateHandler::run(runtime.substrate.as_ref(), op, &args)
+            .map(|v| serde_json::to_value(v).unwrap())
+            .map_err(|f| f.message)
+    }
+
+    #[test]
+    fn a_program_tick_runs_one_pass_and_answers_the_background_ticks_that_ran() {
+        let runtime = Host::new(Arc::new(DriverAdapter::memory())).shared();
+        runtime.register_schema(ticking_program_every(10)).unwrap();
+        assert_eq!(ask(&runtime, "program/tick", &[]).unwrap(), serde_json::json!({ "ran": [] }), "the first pass only captures the clock");
+        std::thread::sleep(std::time::Duration::from_millis(40));
+        assert_eq!(
+            ask(&runtime, "program/tick", &[]).unwrap(),
+            serde_json::json!({ "ran": [{ "trait": "Pulse", "tick": "beat" }] }),
+            "control: `screen` is a client's tick and never runs on a pass"
+        );
+        let ns: Vec<f64> =
+            runtime.persistence.list("Beat").unwrap().iter().filter_map(|r| serde_json::to_value(r).unwrap()["n"].as_f64()).collect();
+        assert_eq!(ns, [1.0], "the pass persisted the background tick's row once");
+        assert!(ask(&runtime, "program/tick", &[serde_json::json!(5)]).unwrap_err().contains("takes no arguments"), "edge: a stray argument");
+    }
+
+    fn owned_notes(runtime: &Host) {
+        let schema: orbital_core::OrbitalSchema = serde_json::from_value(serde_json::json!({
+            "name": "ResolveApp",
+            "orbitals": [{
+                "name": "Notes",
+                "entity": { "name": "Note", "persistence": "persistent", "read_policy": ["=", ["object/get", "@entity", "ownerId"], "@user.id"],
+                    "fields": [{ "name": "id", "type": "string", "primaryKey": true }, { "name": "ownerId", "type": "string" }] },
+                "traits": [{ "name": "NoteBrowse", "linkedEntity": "Note",
+                    "stateMachine": { "states": [{ "name": "idle", "isInitial": true }], "transitions": [{ "from": "idle", "to": "idle", "event": "LIST" }] } }],
+                "pages": []
+            }]
+        }))
+        .unwrap();
+        runtime.register_schema(schema).unwrap();
+        for (id, owner) in [("a1", "alice"), ("a2", "alice"), ("b1", "bob")] {
+            runtime.persistence.create("Note", &serde_json::from_value(serde_json::json!({ "id": id, "ownerId": owner })).unwrap()).unwrap();
+        }
+    }
+
+    #[test]
+    fn a_program_resolve_rows_answers_only_the_rows_the_named_viewer_may_read() {
+        let runtime = Host::new(Arc::new(DriverAdapter::memory())).shared();
+        owned_notes(&runtime);
+        runtime.set_current_user(serde_json::from_value(serde_json::json!({ "id": "bob" })).unwrap());
+        let reference = serde_json::json!({ "entityType": "Note", "ids": ["a1", "b1", "a2"], "total": 3, "query": {} });
+        let ids = |page: serde_json::Value| -> Vec<String> {
+            page["rows"].as_array().unwrap().iter().map(|r| r["id"].as_str().unwrap().to_string()).collect()
+        };
+        let alice = ask(&runtime, "program/resolve-rows", &[reference.clone(), serde_json::json!({ "id": "alice" })]).unwrap();
+        assert_eq!(ids(alice.clone()), ["a1", "a2"], "the named viewer, never the runtime's bound one: {alice}");
+        assert_eq!(alice["total"], 2);
+        let anonymous = ask(&runtime, "program/resolve-rows", &[reference.clone(), serde_json::Value::Null]).unwrap();
+        assert_eq!(ids(anonymous), Vec::<String>::new(), "control: the anonymous viewer reads no owned row");
+        assert!(ask(&runtime, "program/resolve-rows", &[serde_json::json!({ "entityType": "Note" }), serde_json::Value::Null]).unwrap_err().contains("reference"), "edge: a malformed reference");
+        assert!(ask(&runtime, "program/resolve-rows", &[reference]).unwrap_err().contains("viewer"), "edge: the viewer is never implied");
     }
 }

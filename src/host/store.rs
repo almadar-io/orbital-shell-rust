@@ -8,7 +8,7 @@
 
 use orbital_core::runtime::couchdb::CouchRows;
 use orbital_core::runtime::entity_source::{EntitySource, InMemoryEntityCache};
-use orbital_core::runtime::firestore::{FirestoreConfig, FirestoreRows};
+use orbital_core::runtime::firestore::FirestoreRows;
 use orbital_core::runtime::http_service::Transport;
 use orbital_core::runtime::pg_rows::PostgresRows;
 use orbital_core::runtime::row_query::{
