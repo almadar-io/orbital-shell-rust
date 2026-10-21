@@ -91,7 +91,8 @@ impl orbital_core::effects::executor::SubstrateHandler for SelfSubstrate {
     fn run(&self, op: &str, args: &[Value]) -> Result<Value, orbital_core::effects::executor::SubstrateFailure> {
         use orbital_core::effects::executor::SubstrateFailure;
         let failure = |message: String| SubstrateFailure { message, errors: Vec::new() };
-        if !matches!(op, "program/dispatch" | "program/inputs" | "program/tick" | "program/resolve-rows") {
+        let trace_ask = op == "program/inputs" && matches!(args, [Value::Object(ask)] if ask.len() == 1 && ask.contains_key("trace"));
+        if !(trace_ask || matches!(op, "program/dispatch" | "program/tick" | "program/resolve-rows")) {
             return match &self.host {
                 Some(host) => host.run(op, args),
                 None => Err(failure(format!("no substrate host configured for {op}"))),
@@ -1945,7 +1946,11 @@ mod tests {
         let newest = serde_json::to_value(&runtime.trace()[1]).unwrap();
         assert_eq!(last[0]["seq"].as_f64(), newest["seq"].as_f64(), "the newest step: {last}");
         assert_eq!(ask(&runtime, "program/inputs", &[serde_json::json!({ "trace": 0 })]).unwrap(), serde_json::json!([]), "control");
-        assert!(ask(&runtime, "program/inputs", &[serde_json::json!({ "select": [] })]).is_err(), "edge: only the trace is asked of the host");
+        assert_eq!(
+            ask(&runtime, "program/inputs", &[serde_json::json!({ "select": [] })]).unwrap_err(),
+            "no substrate host configured for program/inputs",
+            "edge: any other program/inputs ask goes to the installed host, not the trace"
+        );
     }
 
     fn desk() -> Arc<Host> {
@@ -1967,7 +1972,7 @@ mod tests {
             .collect();
         orbital_core::effects::executor::SubstrateHandler::run(runtime.substrate.as_ref(), "program/dispatch", &args)
             .map(|v| orbital_core::json_value::value_to_json(&v))
-            .map_err(|f| (f.message, serde_json::to_value(&f.errors).unwrap()))
+            .map_err(|f| (f.message, serde_json::Value::Array(f.errors.iter().map(orbital_core::json_value::value_to_json).collect())))
     }
 
     fn note_titles(runtime: &Host) -> Vec<String> {
@@ -1982,7 +1987,7 @@ mod tests {
         assert!(answer.get("emittedEvents").is_some() && answer.get("states").is_some(), "the whole EventResponse: {answer}");
         assert_eq!(note_titles(&runtime), ["via request"]);
         let refused = dispatch_request(&runtime, serde_json::json!({ "wire": true, "orbital": "Desk", "targetTrait": "Notes", "event": "ADD_NOTE", "viewer": { "id": "u2" } })).unwrap();
-        assert_eq!(refused["guardFailed"], true, "control: another viewer meets the guard: {refused}");
+        assert_eq!(refused["guardFailed"], "Notes.ADD_NOTE", "control: another viewer meets the guard: {refused}");
         assert_eq!(note_titles(&runtime).len(), 1);
         let outcome = dispatch_request(&runtime, serde_json::json!({ "orbital": "Desk", "targetTrait": "Notes", "event": "ADD_NOTE", "viewer": { "id": "u1" } })).unwrap();
         assert_eq!(outcome["ok"], true, "without wire the answer is the model's outcome: {outcome}");

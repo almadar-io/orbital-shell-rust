@@ -117,18 +117,26 @@ pub fn boot_file_with(
 }
 
 /// Programs composed into one app by the host's `program/compose` (the substrate `port` answers it, as `orb` does), then
-/// booted on the in-memory store with that same port installed: how `orb serve` boots an app beside `std-http-server`.
-/// `catalogs` must hold every locale the composed app declares.
+/// booted with that same port installed and its ticks driven: how `orb serve` boots an app beside `std-http-server`.
+/// Under `mock` the store is in memory with sample rows; otherwise the environment selects it (`DATA_BACKEND`, ...), as
+/// `orb serve --no-mock` asks. `overrides` are the explicit compose overrides (`"<Trait>.<knob>"` values and `grants`) the
+/// port records in the composed program. `catalogs` must hold every locale the composed app declares.
 pub fn boot_composed(
     programs: Vec<orbital_core::Value>,
     app_name: &str,
+    overrides: Option<serde_json::Value>,
     port: SubstratePort,
     catalogs: Catalogs,
+    mock: bool,
     env: &orbital_core::runtime::auth::AuthEnv,
     trace_by_default: bool,
 ) -> anyhow::Result<Arc<Host>> {
     let mut options = orbital_core::ValueMap::new();
     options.insert("appName".to_string(), orbital_core::Value::String(app_name.to_string()));
+    if let Some(overrides) = overrides {
+        let overrides = serde_json::from_value(overrides).map_err(|e| anyhow::anyhow!("the compose overrides: {e}"))?;
+        options.insert("overrides".to_string(), overrides);
+    }
     let composed = port
         .0
         .run("program/compose", &[orbital_core::Value::Array(programs), orbital_core::Value::Object(options)])
@@ -139,16 +147,18 @@ pub fn boot_composed(
     if let Some(missing) = schema.locales.iter().flatten().find(|locale| !catalogs.contains_key(*locale)) {
         anyhow::bail!("the composed app declares locale \"{missing}\" but no catalog was given for it");
     }
-    boot(
+    let runtime = boot(
         schema,
         Path::new(&format!("{app_name}.orb")),
-        Arc::new(DriverAdapter::memory()),
-        false,
+        store_from_env(env, mock)?,
+        mock,
         env,
         trace_by_default,
         HostConfig { substrate: Some(port), ..HostConfig::default() },
         Some(catalogs),
-    )
+    )?;
+    start_tick_driver(&runtime);
+    Ok(runtime)
 }
 
 /// A program a host embeds (the Node and Python kernel add-ons): parsed from `program_json`, its store the environment
@@ -656,6 +666,7 @@ mod auth_boot_tests {
 #[cfg(test)]
 mod composed_tests {
     use super::*;
+    use orbital_core::PersistenceHandler;
     use orbital_core::effects::executor::{SubstrateFailure, SubstrateHandler};
 
     /// A `program/compose` that appends every program's orbitals into one app, as a stand-in for `orb`'s composer.
@@ -711,8 +722,10 @@ mod composed_tests {
         let host = boot_composed(
             vec![program("app", "Notes", serde_json::json!({})), program("server", "Http", serde_json::json!({}))],
             "served",
+            None,
             port(),
             Catalogs::new(),
+            true,
             &Default::default(),
             false,
         )
@@ -735,7 +748,7 @@ mod composed_tests {
                 Err(SubstrateFailure { message: "duplicate orbital Notes".to_string(), errors: Vec::new() })
             }
         }
-        let error = boot_composed(vec![], "served", SubstratePort(Arc::new(Refusing)), Catalogs::new(), &Default::default(), false)
+        let error = boot_composed(vec![], "served", None, SubstratePort(Arc::new(Refusing)), Catalogs::new(), true, &Default::default(), false)
             .err()
             .expect("a refused compose does not boot");
         assert!(error.to_string().contains("duplicate orbital Notes"), "{error}");
@@ -746,9 +759,60 @@ mod composed_tests {
         let app = program("app", "Notes", serde_json::json!({ "locales": ["en", "ar"] }));
         let mut catalogs = Catalogs::new();
         catalogs.insert("en".to_string(), std::collections::HashMap::new());
-        let error = boot_composed(vec![app], "served", port(), catalogs, &Default::default(), false)
+        let error = boot_composed(vec![app], "served", None, port(), catalogs, true, &Default::default(), false)
             .err()
             .expect("a missing catalog refuses the boot");
         assert!(error.to_string().contains("\"ar\""), "{error}");
+    }
+
+    fn persistent_program(ticks: serde_json::Value) -> orbital_core::Value {
+        serde_json::from_value(serde_json::json!({
+            "name": "desk",
+            "orbitals": [{
+                "name": "Desk",
+                "entity": { "name": "Memo", "persistence": "persistent", "fields": [{ "name": "id", "type": "string", "primaryKey": true }, { "name": "n", "type": "number" }] },
+                "traits": [{ "name": "Memos", "linkedEntity": "Memo",
+                    "stateMachine": { "states": [{ "name": "idle", "isInitial": true }], "events": [{ "key": "INIT", "name": "Init" }],
+                        "transitions": [{ "from": "idle", "to": "idle", "event": "INIT" }] },
+                    "ticks": ticks }]
+            }]
+        }))
+        .unwrap()
+    }
+
+    fn memos(host: &Host) -> Vec<serde_json::Value> {
+        host.persistence().list("Memo").unwrap().iter().map(|r| serde_json::to_value(r).unwrap()).collect()
+    }
+
+    #[test]
+    fn under_mock_the_composed_app_runs_on_sample_rows_in_memory() {
+        let host = boot_composed(vec![persistent_program(serde_json::json!([]))], "served", None, port(), Catalogs::new(), true, &Default::default(), false)
+            .unwrap();
+        assert!(!memos(&host).is_empty(), "mock seeds sample rows");
+    }
+
+    #[test]
+    fn control_without_mock_the_environment_picks_the_store_and_names_what_it_lacks() {
+        let error = boot_composed(vec![persistent_program(serde_json::json!([]))], "served", None, port(), Catalogs::new(), false, &Default::default(), false)
+            .err()
+            .expect("no store configured refuses to boot");
+        assert!(error.to_string().contains("FIREBASE_PROJECT_ID"), "{error:#}");
+        let env: orbital_core::runtime::auth::AuthEnv =
+            [("DATA_BACKEND", "mock"), ("NODE_ENV", "development")].iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
+        let host = boot_composed(vec![persistent_program(serde_json::json!([]))], "served", None, port(), Catalogs::new(), false, &env, false).unwrap();
+        assert!(memos(&host).is_empty(), "edge: the environment's in-memory store is not seeded without mock");
+    }
+
+    #[test]
+    fn the_composed_boot_drives_its_background_ticks() {
+        let ticks = serde_json::json!([{ "name": "beat", "interval": 10, "runsInBackground": true, "effects": [["persist", "create", "Memo", { "n": 1 }]] }]);
+        let env: orbital_core::runtime::auth::AuthEnv =
+            [("DATA_BACKEND", "mock"), ("NODE_ENV", "development")].iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
+        let host = boot_composed(vec![persistent_program(ticks)], "served", None, port(), Catalogs::new(), false, &env, false).unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while memos(&host).is_empty() {
+            assert!(std::time::Instant::now() < deadline, "no tick ran: nothing drove the background tick");
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
     }
 }
