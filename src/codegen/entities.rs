@@ -247,7 +247,7 @@ impl TargetTypeRenderer for RustRenderer<'_> {
     fn optional(&self, _inner_ty: &OirType, inner: TokenStream) -> TokenStream {
         quote!(Option<#inner>)
     }
-    fn struct_ty(&self, fields: &[OirField]) -> TokenStream {
+    fn struct_ty(&self, fields: &[OirField], _additional: Option<&OirType>) -> TokenStream {
         let name = format_ident!("{}", self.context_name);
         let field_tokens: Vec<TokenStream> = fields
             .iter()
@@ -392,8 +392,8 @@ impl TargetTypeRenderer for RustRenderer<'_> {
     fn classify_optional(&self, _inner_ty: &OirType, inner: TypeMappingClass) -> TypeMappingClass {
         inner
     }
-    fn classify_struct_ty(&self, _fields: &[OirField]) -> TypeMappingClass {
-        TypeMappingClass::Faithful
+    fn classify_struct_ty(&self, _fields: &[OirField], additional: Option<&OirType>) -> TypeMappingClass {
+        if additional.is_some() { TypeMappingClass::Lossy } else { TypeMappingClass::Faithful }
     }
 }
 
@@ -561,11 +561,13 @@ mod tests {
         // structs extend the positional name (`{Entity}{Field}{Nested}`).
         let (ty, hoisted) = rust_render(
             &OirType::Struct {
+                additional: None,
                 fields: vec![
                     OirField::new("name", OirType::String),
                     OirField::new(
                         "geo",
                         OirType::Struct {
+                            additional: None,
                             fields: vec![OirField::new("lat", OirType::Number)],
                         },
                     ),
@@ -589,12 +591,14 @@ mod tests {
                     OirField::new(
                         "book",
                         OirType::Struct {
+                            additional: None,
                             fields: vec![OirField::new("kind", OirType::String)],
                         },
                     ),
                     OirField::new(
                         "movie",
                         OirType::Struct {
+                            additional: None,
                             fields: vec![OirField::new("kind", OirType::String)],
                         },
                     ),
