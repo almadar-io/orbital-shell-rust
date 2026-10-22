@@ -54,6 +54,8 @@ pub struct HostConfig {
     pub substrate: Option<SubstratePort>,
     /// The dispatch stamp source every `@now` reads (`KernelConfig::clock`); `None` is the wall clock.
     pub clock: Option<orbital_core::runtime::DispatchClock>,
+    /// Where the program's `cwd`/`home`/`exe-dir`/`env` grants and paths are anchored; `None` is this process's.
+    pub anchors: Option<orbital_core::runtime::os_host::OsAnchors>,
 }
 
 impl std::fmt::Debug for HostConfig {
@@ -65,6 +67,7 @@ impl std::fmt::Debug for HostConfig {
             .field("max_event_history", &self.max_event_history)
             .field("substrate", &self.substrate)
             .field("clock", &self.clock.as_ref().map(|_| "pinned"))
+            .field("anchors", &self.anchors)
             .finish()
     }
 }
@@ -87,12 +90,76 @@ struct SelfSubstrate {
     host: Option<Arc<dyn orbital_core::effects::executor::SubstrateHandler>>,
 }
 
+impl SelfSubstrate {
+    fn shared(&self) -> Option<Arc<Host>> {
+        self.runtime.get().and_then(std::sync::Weak::upgrade)
+    }
+
+    /// The work of a deferred keyed op (EXEC-QUEUE-13), built on the asking thread: it runs as the viewer that thread
+    /// entered, so a deferred `program/dispatch` keeps the asking viewer (EXEC-AGENT-1).
+    fn later(self: &Arc<Self>, op: &str, args: &[Value]) -> orbital_core::runtime::native_host::SubstrateWork {
+        let (this, op, args) = (Arc::clone(self), op.to_string(), args.to_vec());
+        let viewer = this.shared().and_then(|runtime| runtime.kernel.thread_viewer());
+        Box::new(move || {
+            let _viewer = this.shared().zip(viewer).map(|(runtime, user)| runtime.enter_viewer((*user).clone()));
+            orbital_core::effects::executor::SubstrateHandler::run(this.as_ref(), &op, &args)
+        })
+    }
+
+    /// `program/live { viewer?, clientId? }`: this host's live broadcast, as `orb serve`'s `/api/events` carries it. An
+    /// item goes to the stream when it would go to that connection (`LiveBroadcastItem::delivered_to`): a peer's row
+    /// only when `viewer` may read it, every row for an absent or `null` viewer, never the stream's own `clientId`'s.
+    fn live_source(&self, op: &str, args: &[Value]) -> Option<orbital_core::runtime::native_host::SubstrateSource> {
+        use orbital_core::runtime::os_host::completion::StreamPoll;
+        if op != "program/live" {
+            return None;
+        }
+        let runtime = self.shared()?;
+        let options = match args.first() {
+            Some(Value::Object(options)) => options.clone(),
+            _ => ValueMap::new(),
+        };
+        let viewer = options.get("viewer").filter(|v| matches!(v, Value::Object(_))).cloned();
+        let client_id = options.get("clientId").and_then(Value::as_str).map(str::to_string);
+        let mut receiver = runtime.subscribe_live();
+        let host = Arc::downgrade(&runtime);
+        Some(Box::new(move || loop {
+            let Some(runtime) = host.upgrade() else { return StreamPoll::Ended };
+            let item = match receiver.try_recv() {
+                Ok(item) => item,
+                Err(broadcast::error::TryRecvError::Empty) => return StreamPoll::Idle,
+                Err(broadcast::error::TryRecvError::Lagged(_)) => continue,
+                Err(broadcast::error::TryRecvError::Closed) => return StreamPoll::Ended,
+            };
+            let readable = |item: &LiveBroadcastItem| viewer.as_ref().is_none_or(|v| runtime.live_item_visible_to(item, v));
+            if item.delivered_to(client_id.as_deref(), readable) {
+                return StreamPoll::Item(live_item_value(&item));
+            }
+        }))
+    }
+}
+
+/// One live item as a `program/live` stream event: `{ event, payload?, source }`, the `/api/events` frame without its
+/// transport fields.
+fn live_item_value(item: &LiveBroadcastItem) -> Value {
+    let mut fields = ValueMap::new();
+    fields.insert("event".to_string(), Value::String(item.event.clone()));
+    if let Some(payload) = &item.payload {
+        fields.insert("payload".to_string(), payload.clone());
+    }
+    let source = serde_json::to_value(&item.source).ok().and_then(|json| serde_json::from_value::<Value>(json).ok());
+    fields.insert("source".to_string(), source.unwrap_or(Value::Null));
+    Value::Object(fields)
+}
+
 impl orbital_core::effects::executor::SubstrateHandler for SelfSubstrate {
     fn run(&self, op: &str, args: &[Value]) -> Result<Value, orbital_core::effects::executor::SubstrateFailure> {
         use orbital_core::effects::executor::SubstrateFailure;
         let failure = |message: String| SubstrateFailure { message, errors: Vec::new() };
-        let trace_ask = op == "program/inputs" && matches!(args, [Value::Object(ask)] if ask.len() == 1 && ask.contains_key("trace"));
-        if !(trace_ask || matches!(op, "program/dispatch" | "program/tick" | "program/resolve-rows")) {
+        if op == "program/live" {
+            return Err(failure("program/live streams to its onMessage route: give it a key and an onMessage route".to_string()));
+        }
+        if !matches!(op, "program/dispatch" | "program/inputs" | "program/tick" | "program/resolve-rows") {
             return match &self.host {
                 Some(host) => host.run(op, args),
                 None => Err(failure(format!("no substrate host configured for {op}"))),
@@ -106,7 +173,7 @@ impl orbital_core::effects::executor::SubstrateHandler for SelfSubstrate {
         match op {
             "program/tick" => return runtime.tick_answer(args).map_err(failure),
             "program/resolve-rows" => return runtime.resolve_rows_answer(args).map_err(failure),
-            "program/inputs" => return runtime.trace_answer(args).map_err(failure),
+            "program/inputs" => return runtime.inputs_answer(args).map_err(failure),
             _ => {}
         }
         if let [Value::Object(ask)] = args {
@@ -114,8 +181,8 @@ impl orbital_core::effects::executor::SubstrateHandler for SelfSubstrate {
         }
         if let [_, payload, Value::Object(options)] = args {
             return runtime.request_answer(payload, options).map_err(|(message, code, status)| SubstrateFailure {
+                errors: vec![serde_json::from_value(serde_json::json!({ "code": code, "message": message, "status": status })).unwrap_or(Value::Null)],
                 message,
-                errors: vec![serde_json::from_value(serde_json::json!({ "code": code, "status": status })).unwrap_or(Value::Null)],
             });
         }
         let (Some(Value::String(address)), Some(payload)) = (args.first(), args.get(1)) else {
@@ -143,6 +210,7 @@ impl Default for HostConfig {
             max_event_history: 1000,
             substrate: None,
             clock: None,
+            anchors: None,
         }
     }
 }
@@ -171,12 +239,38 @@ impl From<HostConfig> for KernelConfig {
 pub struct OriginGuard {
     slot: Arc<RwLock<std::collections::HashMap<std::thread::ThreadId, String>>>,
     thread: std::thread::ThreadId,
+    outer: Option<String>,
 }
 
 impl Drop for OriginGuard {
     fn drop(&mut self) {
-        self.slot.write().remove(&self.thread);
+        let mut slot = self.slot.write();
+        match self.outer.take() {
+            Some(outer) => slot.insert(self.thread, outer),
+            None => slot.remove(&self.thread),
+        };
     }
+}
+
+/// A dispatch's stream items in execution order: each outcome's effect results in declaration order, a client effect or
+/// an emitted event each, then the whole response (`complete`), as orbital-server's `?stream` route replays them.
+fn stream_items(outcomes: &[(String, ProcessEventResult)], response: &orbital_core::EventResponse) -> Vec<orbital_core::StreamItem> {
+    let mut items = Vec::new();
+    for (trait_name, result) in outcomes {
+        for effect_result in &result.effect_results {
+            if let Some(effect) = orbital_core::ClientEffect::from_effect(&effect_result.effect) {
+                items.push(orbital_core::StreamItem::effect(effect));
+            } else if let orbital_core::Effect::Emit { event, payload } = &effect_result.effect {
+                items.push(orbital_core::StreamItem::event(orbital_core::EmittedEvent {
+                    event: event.clone(),
+                    payload: (!payload.is_null()).then(|| payload.clone()),
+                    source: Some(orbital_core::BusEventSource::from_trait(trait_name.clone())),
+                }));
+            }
+        }
+    }
+    items.push(orbital_core::StreamItem::complete(response.clone()));
+    items
 }
 
 /// The most dispatches the trace keeps; the oldest drop first.
@@ -347,6 +441,14 @@ fn host_of(
         Arc::new(on_event),
     )
     .with_substrate(Some(Arc::clone(substrate) as Arc<dyn orbital_core::effects::executor::SubstrateHandler>))
+    .with_substrate_later(Some({
+        let substrate = Arc::clone(substrate);
+        Arc::new(move |op: &str, args: &[Value]| substrate.later(op, args)) as Arc<orbital_core::runtime::native_host::SubstrateLater>
+    }))
+    .with_substrate_streams(Some({
+        let substrate = Arc::clone(substrate);
+        Arc::new(move |op: &str, args: &[Value]| substrate.live_source(op, args)) as Arc<orbital_core::runtime::native_host::SubstrateStreams>
+    }))
 }
 
 /// Adapter that exposes a `PersistenceAdapter` as an `EntitySource` for the kernel.
@@ -548,7 +650,11 @@ impl Host {
         let origin_by_thread: Arc<
             RwLock<std::collections::HashMap<std::thread::ThreadId, String>>,
         > = Arc::default();
-        let handles = Arc::new(OsHandles::default());
+        let mut os_handles = OsHandles::default();
+        if let Some(anchors) = config.anchors.clone() {
+            os_handles.anchors = anchors;
+        }
+        let handles = Arc::new(os_handles);
         let host = Arc::new(RwLock::new(Arc::new(host_of(
             &kernel,
             &entity_source,
@@ -827,17 +933,33 @@ impl Host {
         serde_json::from_value(serde_json::json!({ "ran": ran })).map_err(|e| e.to_string())
     }
 
-    /// The `{ trace: n }` ask of a `program/inputs`: the last `n` dispatch steps this host traced, oldest first.
-    fn trace_answer(&self, args: &[Value]) -> Result<Value, String> {
-        let [Value::Object(ask)] = args else {
-            return Err("program/inputs: the host is asked only for { trace: n }".to_string());
+    /// A `program/inputs` asked of this host. The kernel's own `{ trace: n }` ask answers the last `n` traced dispatch
+    /// steps, oldest first. Any other ask (a kernel that does not answer the agent ports itself) answers the reflection
+    /// the kernel answers: the declared inputs, the readable entities and the `select`ed inputs, plus `trace` when
+    /// asked. `state` and `stats` are read by the kernel only.
+    fn inputs_answer(&self, args: &[Value]) -> Result<Value, String> {
+        use orbital_core::runtime::agent_ports::{inputs_reads, plan_inputs};
+        let reads = inputs_reads(args)?;
+        let trace = || -> Result<Value, String> {
+            let trace = self.trace();
+            let skip = trace.len().saturating_sub(reads.trace.unwrap_or(0));
+            serde_json::to_value(&trace[skip..]).and_then(serde_json::from_value).map_err(|e| e.to_string())
         };
-        let Some(Value::Number(steps)) = ask.get("trace") else {
-            return Err("program/inputs: the host is asked only for { trace: n }".to_string());
-        };
-        let trace = self.trace();
-        let skip = trace.len().saturating_sub(*steps as usize);
-        serde_json::to_value(&trace[skip..]).and_then(serde_json::from_value).map_err(|e| e.to_string())
+        if matches!(args, [Value::Object(ask)] if ask.len() == 1 && ask.contains_key("trace")) {
+            return trace();
+        }
+        if reads.state.is_some() || reads.stats {
+            return Err("program/inputs: state and stats are read by the kernel, not asked of the host".to_string());
+        }
+        let reflection = plan_inputs(args, &self.external_inputs(), &self.kernel.readable_entities(), None, "")
+            .map_err(|failure| failure.error)?;
+        match (reflection, reads.trace) {
+            (Value::Object(mut answer), Some(_)) => {
+                answer.insert("trace".to_string(), trace()?);
+                Ok(Value::Object(answer))
+            }
+            (reflection, _) => Ok(reflection),
+        }
     }
 
     /// The `{ inbound, body, headers }` ask of a `program/dispatch`: [`Self::deliver_inbound`], answered `{ status, body }`.
@@ -870,6 +992,7 @@ impl Host {
         let flag = |key: &str| json(key).and_then(|v| v.as_bool()).unwrap_or(false);
         let present = |v: &serde_json::Value| match v {
             serde_json::Value::Null => false,
+            serde_json::Value::String(text) => !text.is_empty(),
             serde_json::Value::Object(m) => !m.is_empty(),
             serde_json::Value::Array(items) => !items.is_empty(),
             _ => true,
@@ -895,19 +1018,27 @@ impl Host {
         let Some(detail) = self.get_orbital(&orbital) else {
             return Err((format!("Orbital not found: {orbital}"), "ORBITAL_NOT_FOUND", 404));
         };
-        let respond = |response: EventResponse| -> Result<Value, (String, &'static str, u16)> {
+        let respond = |outcomes: &[(String, ProcessEventResult)], response: EventResponse| -> Result<Value, (String, &'static str, u16)> {
             let answer = if flag("wire") {
-                serde_json::to_value(&response).map_err(|e| (e.to_string(), "EVENT_PROCESSING_ERROR", 500))?
+                let mut answer = serde_json::to_value(&response).map_err(|e| (e.to_string(), "EVENT_PROCESSING_ERROR", 500))?;
+                if flag("stream") {
+                    let items = serde_json::to_value(stream_items(outcomes, &response)).map_err(|e| (e.to_string(), "EVENT_PROCESSING_ERROR", 500))?;
+                    if let serde_json::Value::Object(fields) = &mut answer {
+                        fields.insert("items".to_string(), items);
+                    }
+                }
+                answer
             } else {
                 orbital_core::json_value::value_to_json(&orbital_core::runtime::agent_ports::dispatch_outcome(&response))
             };
             serde_json::from_value(answer).map_err(|e| (e.to_string(), "EVENT_PROCESSING_ERROR", 500))
         };
-        let targeted = |trait_name: &str, delivery: Option<&DeliveryRecord>, log: Option<&DispatchLog>| -> Result<EventResponse, (String, &'static str, u16)> {
+        type Ran = (Vec<(String, ProcessEventResult)>, EventResponse);
+        let targeted = |trait_name: &str, delivery: Option<&DeliveryRecord>, log: Option<&DispatchLog>| -> Result<Ran, (String, &'static str, u16)> {
             let outcomes = self.dispatch_continuing(trait_name, &entity_id, &request.event, payload.clone(), delivery, log).map_err(failed)?;
             let mut response = EventResponse::from_process_results(&outcomes, trait_name, &request.event);
             self.echo_held_states(&mut response, trait_name, &entity_id);
-            Ok(response)
+            Ok((outcomes, response))
         };
         if flag("input") {
             let Some(trait_name) = request.target_trait.as_deref() else {
@@ -915,43 +1046,45 @@ impl Host {
             };
             let declared = self.external_inputs().iter().any(|i| i.orbital == orbital && i.trait_name == trait_name && i.event == request.event);
             if !declared {
-                return respond(EventResponse::not_an_external_input(trait_name, &request.event));
+                return respond(&[], EventResponse::not_an_external_input(trait_name, &request.event));
             }
-            let response = targeted(trait_name, None, None)?;
+            let (outcomes, response) = targeted(trait_name, None, None)?;
             self.broadcast_persisted(&response, None);
-            return respond(response);
+            return respond(&outcomes, response);
         }
         if let Some(trait_name) = self.inbound_only_trait(&orbital, request.target_trait.as_deref(), &request.event) {
-            return respond(EventResponse::inbound_only(&trait_name, &request.event));
+            return respond(&[], EventResponse::inbound_only(&trait_name, &request.event));
         }
         let _locale = self.enter_locale(request.locale.as_deref()).map_err(|e| (e.to_string(), "LOCALE_NOT_DECLARED", 400))?;
         let client_id = request.client_id.as_deref();
-        let response = if let Some(seeds) = request.mount.as_deref().filter(|seeds| !seeds.is_empty()) {
+        let (outcomes, response): Ran = if let Some(seeds) = request.mount.as_deref().filter(|seeds| !seeds.is_empty()) {
             let outcomes = self.dispatch_mount(seeds, &entity_id, payload.clone()).map_err(failed)?;
             let mut response = EventResponse::from_process_results(&outcomes, &seeds[0].r#trait, seeds[0].event.as_str());
             self.echo_held_states(&mut response, &seeds[0].r#trait, &entity_id);
-            response
+            (outcomes, response)
         } else if let Some(trait_name) = request.target_trait.as_deref() {
             targeted(trait_name, request.delivery.as_ref(), request.dispatch_log.as_ref())?
         } else if let Some(declared) = request.traits.as_deref() {
             let names: Vec<String> = declared.iter().map(|t| t.r#trait.clone()).collect();
             let outcomes = if names.is_empty() { Vec::new() } else { self.dispatch_each(&names, &entity_id, &request.event, payload.clone()).map_err(failed)? };
-            match names.first() {
+            let response = match names.first() {
                 Some(first) => {
                     let mut response = EventResponse::from_process_results(&outcomes, first, &request.event);
                     self.echo_held_states(&mut response, first, &entity_id);
                     response
                 }
                 None => EventResponse::from_discovery(&[], &[], &request.event, Default::default()),
-            }
+            };
+            (outcomes, response)
         } else {
             let handlers = self.discover_handlers(&detail.traits, &entity_id, &request.event);
             let held = self.held_states(&detail.traits, &entity_id);
             let outcomes = if handlers.is_empty() { Vec::new() } else { self.dispatch_each(&handlers, &entity_id, &request.event, payload.clone()).map_err(failed)? };
-            EventResponse::from_discovery(&outcomes, &handlers, &request.event, held)
+            let response = EventResponse::from_discovery(&outcomes, &handlers, &request.event, held);
+            (outcomes, response)
         };
         self.broadcast_persisted(&response, client_id);
-        respond(response)
+        respond(&outcomes, response)
     }
 
     /// `program/resolve-rows`: a row-set reference resolved for the viewer the call names, `@read` applied inside the
@@ -1002,6 +1135,7 @@ impl Host {
     /// Serve `client_id`'s tab from this thread until the guard drops: the live messages of the calls it runs go to that tab.
     pub fn enter_origin(&self, client_id: Option<&str>) -> OriginGuard {
         let thread = std::thread::current().id();
+        let outer = self.origin_by_thread.read().get(&thread).cloned();
         if let Some(client_id) = client_id {
             self.origin_by_thread
                 .write()
@@ -1010,6 +1144,7 @@ impl Host {
         OriginGuard {
             slot: Arc::clone(&self.origin_by_thread),
             thread,
+            outer,
         }
     }
 
@@ -1759,6 +1894,81 @@ mod tests {
         assert!(runtime.persistence.list("Note").unwrap().iter().all(|row| serde_json::to_value(row).unwrap()["title"] != "from the agent"));
     }
 
+    fn live_program() -> orbital_core::OrbitalSchema {
+        serde_json::from_value(serde_json::json!({
+            "name": "Live",
+            "orbitals": [{
+                "name": "Live",
+                "entity": { "name": "Feed", "persistence": "runtime", "fields": [
+                    { "name": "id", "type": "string" }, { "name": "seen", "type": "string", "default": "" }, { "name": "error", "type": "string" }] },
+                "traits": [{
+                    "name": "Watch", "linkedEntity": "Feed",
+                    "stateMachine": {
+                        "states": [{ "name": "idle", "isInitial": true }],
+                        "events": [{ "key": "OPEN", "name": "Open" }, { "key": "OPEN_UNKEYED", "name": "Open unkeyed" }, { "key": "STOP", "name": "Stop" },
+                            { "key": "ITEM", "name": "Item" }, { "key": "LIVE_FAILED", "name": "Live failed" }],
+                        "transitions": [
+                            { "from": "idle", "to": "idle", "event": "OPEN", "effects": [["program/live", {}, { "key": "feed", "emit": { "onMessage": "ITEM", "failure": "LIVE_FAILED" } }]] },
+                            { "from": "idle", "to": "idle", "event": "OPEN_UNKEYED", "effects": [["program/live", {}, { "emit": { "onMessage": "ITEM", "failure": "LIVE_FAILED" } }]] },
+                            { "from": "idle", "to": "idle", "event": "STOP", "effects": [["cancel-call", "feed"]] },
+                            { "from": "idle", "to": "idle", "event": "ITEM", "effects": [["set", "@entity.seen", ["str/concat", "@entity.seen", "@payload.event"]]] },
+                            { "from": "idle", "to": "idle", "event": "LIVE_FAILED", "effects": [["set", "@entity.error", "@payload.error"]] }
+                        ]
+                    }
+                }]
+            }]
+        }))
+        .expect("the program parses")
+    }
+
+    fn broadcast(runtime: &Host, event: &str) {
+        runtime.broadcast_live(LiveBroadcastItem {
+            event: event.to_string(),
+            payload: None,
+            source: orbital_core::effects::BusEventSource::from_trait("Elsewhere".to_string()),
+            origin_client_id: None,
+            target: orbital_core::effects::LiveTarget::Peers,
+        });
+    }
+
+    fn feed(runtime: &Host, until: impl Fn(&serde_json::Value) -> bool) -> serde_json::Value {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            let entity = serde_json::to_value(&runtime.kernel.snapshot_trait("Watch", Some("default")).entity).unwrap();
+            if until(&entity) || std::time::Instant::now() > deadline {
+                return entity;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+    }
+
+    #[test]
+    fn a_keyed_live_subscribe_receives_each_broadcast_in_order_until_cancelled() {
+        let runtime = Host::new(Arc::new(DriverAdapter::memory())).shared();
+        runtime.register_schema(live_program()).unwrap();
+        runtime.dispatch_continuing("Watch", "default", "OPEN", Value::Null, None, None).unwrap();
+        broadcast(&runtime, "E1");
+        broadcast(&runtime, "E2");
+        let entity = feed(&runtime, |e| e["seen"] == "E1E2");
+        assert_eq!(entity["seen"], "E1E2", "both broadcasts arrived, in order: {entity}");
+        runtime.dispatch_continuing("Watch", "default", "STOP", Value::Null, None, None).unwrap();
+        broadcast(&runtime, "E3");
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        assert_eq!(feed(&runtime, |_| true)["seen"], "E1E2", "cancel-call stopped the stream");
+    }
+
+    #[test]
+    fn control_an_unkeyed_live_subscribe_is_refused() {
+        let runtime = Host::new(Arc::new(DriverAdapter::memory())).shared();
+        runtime.register_schema(live_program()).unwrap();
+        runtime.dispatch_continuing("Watch", "default", "OPEN_UNKEYED", Value::Null, None, None).unwrap();
+        broadcast(&runtime, "E1");
+        let entity = feed(&runtime, |e| e["error"].is_string());
+        assert!(entity["error"].as_str().unwrap_or_default().contains("give it a key"), "{entity}");
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        assert_eq!(feed(&runtime, |_| true)["seen"].as_str().unwrap_or_default(), "", "no stream was opened");
+    }
+
     #[test]
     fn edge_a_runtime_that_is_not_shared_names_why_it_cannot_dispatch() {
         let runtime = Host::new(Arc::new(DriverAdapter::memory()));
@@ -1934,6 +2144,62 @@ mod tests {
         assert_eq!(refused["status"], 404, "{refused}");
     }
 
+    /// [`hooked_program`] asking with a `key`, plus a `silent` hook whose handler answers nothing.
+    fn keyed_hooked_program() -> orbital_core::OrbitalSchema {
+        let mut program = serde_json::to_value(hooked_program()).unwrap();
+        program["inbound"] = serde_json::json!(["hook", "silent"]);
+        program["orbitals"][0]["traits"][0]["stateMachine"]["transitions"][0]["effects"][0][2]["key"] = serde_json::json!("hook-1");
+        program["orbitals"][0]["traits"].as_array_mut().unwrap().push(serde_json::json!({
+            "name": "Silent", "linkedEntity": "Run",
+            "emits": [{ "event": "HUSH_ANSWERED" }],
+            "stateMachine": {
+                "states": [{ "name": "idle", "isInitial": true }],
+                "events": [{ "key": "HUSH", "inbound": { "name": "silent", "answers": "HUSH_ANSWERED" } }],
+                "transitions": [{ "from": "idle", "to": "idle", "event": "HUSH", "effects": [] }]
+            }
+        }));
+        serde_json::from_value(program).expect("the keyed program parses")
+    }
+
+    /// `GO` asks `program/dispatch { inbound: hook }` with a key: the delivery runs after `GO` commits, as a dispatch
+    /// of its own, and its answer arrives as `DONE` (the std HTTP server's `POST /api/hooks/:name`).
+    fn go_keyed_hook(hook: &str) -> (String, serde_json::Value) {
+        let runtime = Host::new(Arc::new(DriverAdapter::memory())).shared();
+        runtime.register_schema(keyed_hooked_program()).unwrap();
+        let payload: Value = serde_json::from_value(serde_json::json!({ "hook": hook })).unwrap();
+        runtime.dispatch_continuing("Caller", "default", "GO", payload, None, None).unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        loop {
+            let snapshot = runtime.kernel.snapshot_trait("Caller", Some("default"));
+            if snapshot.state != "idle" {
+                let got = serde_json::to_value(&snapshot.entity).unwrap()["got"].as_str().unwrap_or_default().to_string();
+                return (snapshot.state, serde_json::from_str(&got).unwrap_or(serde_json::Value::String(got)));
+            }
+            assert!(std::time::Instant::now() < deadline, "the keyed delivery never completed");
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+    }
+
+    #[test]
+    fn a_keyed_inbound_program_dispatch_answers_the_handlers_status_and_body() {
+        let (state, answer) = go_keyed_hook("hook");
+        assert_eq!((state.as_str(), answer), ("done", serde_json::json!({ "status": 201, "body": "pong" })));
+    }
+
+    #[test]
+    fn control_a_keyed_inbound_dispatch_to_an_undeclared_hook_answers_404() {
+        let (state, refused) = go_keyed_hook("nope");
+        assert_eq!(state, "done", "the refusal is an answer, not a failure: {refused}");
+        assert_eq!(refused, serde_json::json!({ "status": 404, "body": "{\"error\":\"Unknown hook provider: nope\"}" }));
+    }
+
+    #[test]
+    fn control_a_keyed_inbound_dispatch_whose_handler_never_answers_is_500_inbound_unanswered() {
+        let (state, unanswered) = go_keyed_hook("silent");
+        assert_eq!(state, "done", "{unanswered}");
+        assert_eq!(unanswered, serde_json::json!({ "status": 500, "body": "{\"error\":\"inbound-unanswered\"}" }));
+    }
+
     #[test]
     fn a_program_inputs_trace_ask_answers_the_last_steps_this_host_traced() {
         let runtime = Host::new(Arc::new(DriverAdapter::memory())).shared();
@@ -1946,11 +2212,19 @@ mod tests {
         let newest = serde_json::to_value(&runtime.trace()[1]).unwrap();
         assert_eq!(last[0]["seq"].as_f64(), newest["seq"].as_f64(), "the newest step: {last}");
         assert_eq!(ask(&runtime, "program/inputs", &[serde_json::json!({ "trace": 0 })]).unwrap(), serde_json::json!([]), "control");
-        assert_eq!(
-            ask(&runtime, "program/inputs", &[serde_json::json!({ "select": [] })]).unwrap_err(),
-            "no substrate host configured for program/inputs",
-            "edge: any other program/inputs ask goes to the installed host, not the trace"
-        );
+        assert!(ask(&runtime, "program/inputs", &[serde_json::json!({ "stats": true })]).unwrap_err().contains("read by the kernel"), "edge");
+    }
+
+    #[test]
+    fn a_program_inputs_ask_answers_the_declared_inputs_the_dispatch_route_lists() {
+        let runtime = desk();
+        let answer = ask(&runtime, "program/inputs", &[serde_json::json!({})]).unwrap();
+        let addresses: Vec<&str> = answer["inputs"].as_array().unwrap().iter().filter_map(|i| i["address"].as_str()).collect();
+        assert_eq!(addresses, ["Desk.Notes.ADD_NOTE"], "{answer}");
+        assert_eq!(answer["entities"], serde_json::json!(["Note"]));
+        assert!(answer.get("trace").is_none(), "control: no trace unless asked");
+        let bare = ask(&runtime, "program/inputs", &[]).unwrap();
+        assert_eq!(bare["inputs"], answer["inputs"], "control: no options is the same reflection");
     }
 
     fn desk() -> Arc<Host> {
@@ -2006,8 +2280,10 @@ mod tests {
     fn a_request_fails_with_the_routes_code_for_an_unknown_orbital_or_locale() {
         let runtime = desk();
         let (message, errors) = dispatch_request(&runtime, serde_json::json!({ "wire": true, "orbital": "Nowhere", "targetTrait": "Notes", "event": "ADD_NOTE" })).unwrap_err();
-        assert_eq!((message.as_str(), errors.clone()), ("Orbital not found: Nowhere", serde_json::json!([{ "code": "ORBITAL_NOT_FOUND", "status": 404 }])));
+        assert_eq!((message.as_str(), errors.clone()), ("Orbital not found: Nowhere", serde_json::json!([{ "code": "ORBITAL_NOT_FOUND", "message": "Orbital not found: Nowhere", "status": 404 }])));
+        runtime.set_messages(vec!["en".to_string()], Default::default());
         let (_, errors) = dispatch_request(&runtime, serde_json::json!({ "wire": true, "orbital": "Desk", "targetTrait": "Notes", "event": "ADD_NOTE", "locale": "xx" })).unwrap_err();
+        assert!(dispatch_request(&runtime, serde_json::json!({ "wire": true, "orbital": "Desk", "targetTrait": "Notes", "event": "ADD_NOTE", "locale": "en" })).is_ok(), "control: a declared locale");
         assert_eq!(errors[0]["code"], "LOCALE_NOT_DECLARED", "{errors}");
         assert!(dispatch_request(&runtime, serde_json::json!({ "wire": true, "orbital": "Desk", "targetTrait": "Notes", "event": "ADD_NOTE", "locale": "" })).is_ok(), "control: an empty locale is absent");
     }
@@ -2033,5 +2309,60 @@ mod tests {
         assert_eq!(runtime.kernel.snapshot_trait("Notes", Some("n8")).state, "", "control: another entity was never addressed");
         let mounted = dispatch_request(&runtime, serde_json::json!({ "wire": true, "orbital": "Desk", "event": "INIT", "mount": [{ "trait": "Agent", "event": "INIT" }] })).unwrap();
         assert!(mounted.get("success").is_some(), "a mount batch answers one EventResponse: {mounted}");
+    }
+
+    #[test]
+    fn a_nested_request_with_its_own_viewer_and_origin_leaves_the_askers_intact() {
+        let runtime = desk();
+        let viewer = |id: &str| -> Value { serde_json::from_value(serde_json::json!({ "id": id })).unwrap() };
+        let seen = |runtime: &Host| runtime.kernel.thread_viewer().map(|v| serde_json::to_value(v.as_ref()).unwrap()["id"].clone());
+        let origin = |runtime: &Host| runtime.origin_by_thread.read().get(&std::thread::current().id()).cloned();
+        {
+            let _asker = runtime.enter_viewer(viewer("u1"));
+            let _tab = runtime.enter_origin(Some("tab-a"));
+            dispatch_request(&runtime, serde_json::json!({ "wire": true, "orbital": "Desk", "targetTrait": "Notes", "event": "ADD_NOTE", "viewer": { "id": "u2" }, "clientId": "tab-b" })).unwrap();
+            assert_eq!(seen(&runtime), Some(serde_json::json!("u1")), "the asker's viewer is restored");
+            assert_eq!(origin(&runtime).as_deref(), Some("tab-a"), "the asker's origin is restored");
+            dispatch_request(&runtime, serde_json::json!({ "wire": true, "orbital": "Desk", "targetTrait": "Notes", "event": "ADD_NOTE" })).unwrap();
+            assert_eq!(origin(&runtime).as_deref(), Some("tab-a"), "a request naming no clientId keeps the asker's origin");
+        }
+        assert_eq!(seen(&runtime), None, "control: with no asker the slot is empty again");
+        assert_eq!(origin(&runtime), None, "control");
+    }
+
+    #[test]
+    fn a_wire_stream_request_answers_its_items_in_execution_order() {
+        let runtime = Host::new(Arc::new(DriverAdapter::memory())).shared();
+        let schema: orbital_core::OrbitalSchema = serde_json::from_value(serde_json::json!({
+            "name": "Board",
+            "orbitals": [{
+                "name": "Board",
+                "entity": { "name": "Tile", "persistence": "runtime", "fields": [{ "name": "id", "type": "string" }] },
+                "traits": [{
+                    "name": "Tiles", "linkedEntity": "Tile",
+                    "emits": [{ "event": "PONG" }],
+                    "stateMachine": {
+                        "states": [{ "name": "idle", "isInitial": true }],
+                        "events": [{ "key": "PING", "name": "Ping" }, { "key": "PONG", "name": "Pong" }],
+                        "transitions": [
+                            { "from": "idle", "to": "idle", "event": "PING", "effects": [
+                                ["render-ui", "main", { "type": "stack", "children": [] }],
+                                ["emit", "PONG", { "n": 1 }]] },
+                            { "from": "idle", "to": "idle", "event": "PONG" }]
+                    }
+                }]
+            }]
+        }))
+        .unwrap();
+        runtime.register_schema(schema).unwrap();
+        let base = serde_json::json!({ "wire": true, "orbital": "Board", "targetTrait": "Tiles", "event": "PING" });
+        let mut streamed = base.clone();
+        streamed["stream"] = serde_json::json!(true);
+        let answer = dispatch_request(&runtime, streamed).unwrap();
+        let kinds: Vec<&str> = answer["items"].as_array().unwrap().iter().filter_map(|i| i["type"].as_str()).collect();
+        assert_eq!(kinds, ["effect", "event", "complete"], "declaration order, then the response: {answer}");
+        assert_eq!(answer["items"][1]["data"]["event"], "PONG");
+        assert_eq!(answer["items"][2]["data"]["success"], answer["success"], "complete carries the response");
+        assert!(dispatch_request(&runtime, base).unwrap().get("items").is_none(), "control: no items without stream");
     }
 }

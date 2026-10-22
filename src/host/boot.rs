@@ -770,7 +770,7 @@ mod composed_tests {
             "name": "desk",
             "orbitals": [{
                 "name": "Desk",
-                "entity": { "name": "Memo", "persistence": "persistent", "fields": [{ "name": "id", "type": "string", "primaryKey": true }, { "name": "n", "type": "number" }] },
+                "entity": { "name": "Memo", "persistence": "persistent", "fields": [{ "name": "id", "type": "string" }, { "name": "n", "type": "number" }] },
                 "traits": [{ "name": "Memos", "linkedEntity": "Memo",
                     "stateMachine": { "states": [{ "name": "idle", "isInitial": true }], "events": [{ "key": "INIT", "name": "Init" }],
                         "transitions": [{ "from": "idle", "to": "idle", "event": "INIT" }] },
@@ -806,12 +806,15 @@ mod composed_tests {
     #[test]
     fn the_composed_boot_drives_its_background_ticks() {
         let ticks = serde_json::json!([{ "name": "beat", "interval": 10, "runsInBackground": true, "effects": [["persist", "create", "Memo", { "n": 1 }]] }]);
-        let env: orbital_core::runtime::auth::AuthEnv =
-            [("DATA_BACKEND", "mock"), ("NODE_ENV", "development")].iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
-        let host = boot_composed(vec![persistent_program(ticks)], "served", None, port(), Catalogs::new(), false, &env, false).unwrap();
+        let host = boot_composed(vec![persistent_program(ticks)], "served", None, port(), Catalogs::new(), true, &Default::default(), true).unwrap();
+        let seeded = memos(&host).len();
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-        while memos(&host).is_empty() {
-            assert!(std::time::Instant::now() < deadline, "no tick ran: nothing drove the background tick");
+        while memos(&host).len() <= seeded {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "no tick ran over the {seeded} seeded rows: nothing drove the background tick; trace {}",
+                serde_json::to_string(&host.trace()).unwrap()
+            );
             std::thread::sleep(std::time::Duration::from_millis(20));
         }
     }
