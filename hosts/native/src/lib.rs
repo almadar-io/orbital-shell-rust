@@ -2,10 +2,14 @@
 //! `cli-*` programs, `orb mcp --program`, the Node and Python add-ons and the generated Rust app all run on.
 
 pub mod boot;
+#[path = "../../browser/src/lib.rs"]
 pub mod cdp;
 pub mod background;
+#[path = "../../../runtime/src/run.rs"]
 pub mod run;
+#[path = "../../../runtime/src/error.rs"]
 mod error;
+#[path = "../../../runtime/src/runtime.rs"]
 mod runtime;
 pub mod store;
 

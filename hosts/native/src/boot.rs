@@ -666,7 +666,6 @@ mod auth_boot_tests {
 #[cfg(test)]
 mod composed_tests {
     use super::*;
-    use orbital_core::PersistenceHandler;
     use orbital_core::effects::executor::{SubstrateFailure, SubstrateHandler};
 
     /// A `program/compose` that appends every program's orbitals into one app, as a stand-in for `orb`'s composer.

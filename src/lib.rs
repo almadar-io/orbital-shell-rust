@@ -5,6 +5,7 @@
 
 mod backend;
 pub mod codegen;
+#[path = "../hosts/native/src/lib.rs"]
 pub mod host;
 mod shell;
 pub mod shell_program;
@@ -13,4 +14,5 @@ pub use backend::{RustBackend, RustRenderer};
 pub use shell::RustShell;
 
 #[cfg(feature = "desktop")]
+#[path = "../hosts/desktop/src/lib.rs"]
 pub mod desktop;

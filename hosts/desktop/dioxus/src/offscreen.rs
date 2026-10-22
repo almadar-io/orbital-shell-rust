@@ -34,9 +34,9 @@ impl dioxus_document::Document for HeadSink {
 }
 
 /// Inter (OFL) — the sans typeface for `ui-sans-serif`/`sans-serif`.
-const INTER_TTF: &[u8] = include_bytes!("../assets/fonts/Inter.ttf");
+const INTER_TTF: &[u8] = include_bytes!("../../../../renderers/dioxus/assets/fonts/Inter.ttf");
 /// Roboto Mono (OFL) — the mono typeface for `ui-monospace`/`monospace`.
-const ROBOTO_MONO_TTF: &[u8] = include_bytes!("../assets/fonts/RobotoMono.ttf");
+const ROBOTO_MONO_TTF: &[u8] = include_bytes!("../../../../renderers/dioxus/assets/fonts/RobotoMono.ttf");
 
 /// The Parley font context with the embedded typefaces, every CSS generic
 /// family almadar.css resolves to mapped onto them (`--almadar-font:

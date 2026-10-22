@@ -18,9 +18,11 @@ pub mod components;
 pub mod registry;
 pub mod renderer;
 #[cfg(feature = "native")]
+#[path = "../../../hosts/desktop/dioxus/src/offscreen.rs"]
 pub mod offscreen;
 pub mod probe_target;
 pub mod styles;
+#[path = "../../../runtime/dioxus/src/shell.rs"]
 pub mod shell;
 
 // Browser (wasm32) shell: the native (Blitz) render path painted into a
@@ -28,9 +30,11 @@ pub mod shell;
 // @almadar/ui). Desktop keeps `native::launch_cfg`; wasm runs the glue in
 // `wasm.rs` because blitz-shell's winit event loop has no wasm target.
 #[cfg(all(feature = "native", target_arch = "wasm32"))]
+#[path = "../../../hosts/web/dioxus/src/wasm.rs"]
 pub mod wasm;
 
 #[cfg(all(feature = "native", not(target_arch = "wasm32")))]
+#[path = "../../../hosts/desktop/dioxus/src/native.rs"]
 pub mod native;
 
 /// Game pattern renderers (`canvas` / `canvas-2d` via a shared-device wgpu paint
@@ -42,6 +46,7 @@ pub mod game;
 /// catalog) — sidebar of every baked behavior + event chips driving the
 /// mounted state machine.
 #[cfg(all(feature = "native", not(target_arch = "wasm32")))]
+#[path = "../../../hosts/desktop/dioxus/src/catalog.rs"]
 pub mod catalog;
 
 // Re-export the shared substrate from one path so generated renderers and `app`
