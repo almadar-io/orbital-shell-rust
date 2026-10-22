@@ -1,6 +1,11 @@
 //! The native program host: one `orbital_core::RuntimeKernel` with the native ports a program asks for, the host every
 //! native consumer boots a program on (`orb run`, `cli-*` programs, `orb mcp --program`, the add-ons, the generated Rust app).
 
+#[path = "trace.rs"]
+mod trace;
+use trace::TraceJournal;
+pub use orbital_core::runtime::dispatch_trace::{TraceEffect, TraceEmit, TraceTransition};
+
 use orbital_core::effects::{DeliveryRecord, DispatchLog};
 use orbital_core::runtime::credentials::{credentials_with_rows, Credentials};
 use orbital_core::runtime::native_host::NativeHost;
@@ -25,8 +30,7 @@ use orbital_core::{
 };
 use parking_lot::{Mutex, RwLock};
 use serde::Serialize;
-use std::collections::VecDeque;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use tokio::sync::broadcast;
 
@@ -119,6 +123,9 @@ impl SelfSubstrate {
             Some(Value::Object(options)) => options.clone(),
             _ => ValueMap::new(),
         };
+        if options.get("kind").and_then(Value::as_str) == Some("trace") {
+            return Some(runtime.trace.source(&options));
+        }
         let viewer = options.get("viewer").filter(|v| matches!(v, Value::Object(_))).cloned();
         let client_id = options.get("clientId").and_then(Value::as_str).map(str::to_string);
         let mut receiver = runtime.subscribe_live();
@@ -267,42 +274,15 @@ const TRACE_CAPACITY: usize = 200;
 #[serde(rename_all = "camelCase")]
 pub struct TraceEntry {
     pub seq: u64,
+    pub dispatch_id: u64,
     pub at_ms: i64,
     pub seed: String,
+    pub seed_entity_id: String,
+    pub seed_traits: Vec<String>,
+    pub instance: String,
+    pub program_version: u64,
     pub outcomes: Vec<TraceTransition>,
     pub asks: Vec<TraceAsk>,
-    pub error: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct TraceTransition {
-    #[serde(rename = "trait")]
-    pub trait_name: String,
-    pub from: String,
-    pub to: String,
-    pub event: Option<String>,
-    pub executed: bool,
-    pub fired_arm: Option<usize>,
-    pub guards: Vec<String>,
-    pub effects: Vec<TraceEffect>,
-    pub emits: Vec<TraceEmit>,
-    pub failure: Option<String>,
-}
-
-/// An `emit` the transition ran, with the payload it carried.
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct TraceEmit {
-    pub event: String,
-    pub payload: serde_json::Value,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct TraceEffect {
-    pub effect: serde_json::Value,
-    pub status: String,
     pub error: Option<String>,
 }
 
@@ -347,38 +327,6 @@ fn outbound_of(request: &IoRequest, answer: &IoAnswer) -> Option<TraceOutbound> 
     })
 }
 
-fn transition_of(trait_name: &str, result: &ProcessEventResult) -> TraceTransition {
-    TraceTransition {
-        trait_name: trait_name.to_string(),
-        from: result.previous_state.clone(),
-        to: result.new_state.clone(),
-        event: result.event.clone(),
-        executed: result.executed,
-        fired_arm: result.fired_arm,
-        guards: result.guards.iter().map(|g| format!("{g:?}")).collect(),
-        effects: result
-            .effect_runs
-            .iter()
-            .map(|run| TraceEffect {
-                effect: serde_json::to_value(&run.effect).unwrap_or(serde_json::Value::Null),
-                status: format!("{:?}", run.status),
-                error: run.error.clone(),
-            })
-            .collect(),
-        emits: result
-            .effect_results
-            .iter()
-            .filter_map(|run| match &run.effect {
-                orbital_core::Effect::Emit { event, payload } => Some(TraceEmit {
-                    event: event.clone(),
-                    payload: serde_json::to_value(payload).unwrap_or(serde_json::Value::Null),
-                }),
-                _ => None,
-            })
-            .collect(),
-        failure: result.failure.clone(),
-    }
-}
 
 /// Fan the `persist` effect's success emits of `response` out to every other connected `/api/events` client.
 fn broadcast_persisted(
@@ -547,11 +495,8 @@ pub struct Host {
     handles: Arc<OsHandles>,
     /// Orders a deferred completion after the dispatch that deferred its key, and after no other.
     sink: Arc<KernelCompletionSink>,
-    trace: Arc<Mutex<VecDeque<TraceEntry>>>,
-    trace_seq: AtomicU64,
-    trace_on: AtomicBool,
-    /// Where each traced dispatch is also appended, one JSON line per entry (`ORBITAL_TRACE_FILE`).
-    trace_file: Mutex<Option<(std::path::PathBuf, std::fs::File)>>,
+    trace: Arc<TraceJournal>,
+    _trace_lifetime: Arc<()>,
     /// The sign-in the environment configured: a host that serves requests verifies their bearer with it.
     sign_in: RwLock<Option<Arc<orbital_core::runtime::auth::SignIn>>>,
     /// How long a live-stream ticket may be redeemed after it is minted.
@@ -649,12 +594,27 @@ impl Host {
             &origin_by_thread,
             &substrate,
         ))));
+        let trace_lifetime = Arc::new(());
+        let trace = Arc::new(TraceJournal::new(Arc::downgrade(&trace_lifetime)));
+        let enabled_trace = Arc::downgrade(&trace);
+        let observed_trace = Arc::downgrade(&trace);
+        kernel.set_dispatch_observer(Some(Arc::new(orbital_core::runtime::dispatch_trace::DispatchObserver {
+            enabled: Box::new(move || enabled_trace.upgrade().is_some_and(|trace| trace.needs_completion())),
+            completed: Box::new(move |observed| {
+                if let Some(trace) = observed_trace.upgrade() {
+                    trace.record(observed);
+                }
+            }),
+        })));
         let answer: Arc<CompletionAnswerer> = {
             let slot = Arc::downgrade(&host);
+            let trace = trace.clone();
             Arc::new(move |request: &IoRequest| match slot.upgrade() {
                 Some(host) => {
                     let current = host.read().clone();
-                    current.answer(request)
+                    let answer = current.answer(request);
+                    trace.record_ask(request, &answer);
+                    answer
                 }
                 None => IoAnswer::Service(Err("the host has stopped".to_string())),
             })
@@ -666,7 +626,8 @@ impl Host {
             Arc::new(
                 move |site: &CallSite,
                       event: &str,
-                      result: Result<DispatchOutcomes, DispatchError>| match result
+                      result: Result<DispatchOutcomes, DispatchError>| {
+                    match result
                 {
                     Ok(outcomes) => {
                         waiters.lock().retain(|(route, answer)| {
@@ -692,6 +653,7 @@ impl Host {
                         %error,
                         "deferred completion dispatch failed",
                     ),
+                }
                 },
             )
         };
@@ -705,10 +667,8 @@ impl Host {
             secrets,
             handles,
             sink,
-            trace: Arc::new(Mutex::new(VecDeque::new())),
-            trace_seq: AtomicU64::new(0),
-            trace_on: AtomicBool::new(false),
-            trace_file: Mutex::new(None),
+            trace,
+            _trace_lifetime: trace_lifetime,
             sign_in: RwLock::new(None),
             stream_ticket_ttl_ms: AtomicU64::new(orbital_core::runtime::stream_ticket::DEFAULT_TTL_MS),
             origin_by_thread,
@@ -829,6 +789,7 @@ impl Host {
                 }
             }
         }
+        self.trace.version.fetch_add(1, Ordering::SeqCst);
         *self.host.write() = Arc::new(host_of(
             &self.kernel,
             &self.entity_source,
@@ -895,7 +856,7 @@ impl Host {
                 continue;
             }
             let started = self.kernel.start_dispatch_tick(&trait_name, None, &tick);
-            match self.finish(format!("{trait_name}.{tick}"), started) {
+            match self.finish(started) {
                 Ok(outcomes) => {
                     let response = orbital_core::EventResponse::from_process_results(&outcomes, "", &orbital_core::tick_event_key(&tick));
                     self.broadcast_persisted(&response, None);
@@ -1140,7 +1101,7 @@ impl Host {
 
     /// Record every dispatch's transitions, guards, effects and asks with their answers (`GET /api/trace`).
     pub fn set_trace(&self, on: bool) {
-        self.trace_on.store(on, Ordering::SeqCst);
+        self.trace.on.store(on, Ordering::SeqCst);
     }
 
     /// Trace every dispatch and also append each entry to `path` as one JSON line: the history a restart keeps,
@@ -1150,19 +1111,19 @@ impl Host {
             .create(true)
             .append(true)
             .open(path)?;
-        *self.trace_file.lock() = Some((path.to_path_buf(), file));
+        *self.trace.file.lock() = Some((path.to_path_buf(), file));
         self.set_trace(true);
         Ok(())
     }
 
     /// Whether dispatches are traced.
     pub fn tracing(&self) -> bool {
-        self.trace_on.load(Ordering::SeqCst)
+        self.trace.enabled()
     }
 
     /// The file traced dispatches are appended to, when one is set.
     pub fn trace_file_path(&self) -> Option<std::path::PathBuf> {
-        self.trace_file
+        self.trace.file
             .lock()
             .as_ref()
             .map(|(path, _)| path.clone())
@@ -1170,62 +1131,22 @@ impl Host {
 
     /// The recorded dispatches, oldest first.
     pub fn trace(&self) -> Vec<TraceEntry> {
-        self.trace.lock().iter().cloned().collect()
+        self.trace.log.lock().iter().cloned().collect()
     }
 
     /// Run a started dispatch to its end with the native host, recording its trace when tracing is on.
     fn finish(
         &self,
-        seed: String,
         started: Result<Progress<DispatchOutcomes>, DispatchError>,
     ) -> Result<DispatchOutcomes, HostError> {
-        let tracing_on = self.trace_on.load(Ordering::SeqCst);
-        let asks: Mutex<Vec<TraceAsk>> = Mutex::new(Vec::new());
         let host = self.host.read().clone();
         let scope = self.sink.begin_dispatch();
         let answer = |request: &IoRequest| {
             let answered = scope.answer(&|request| host.answer(request), request);
-            if tracing_on {
-                asks.lock().push(TraceAsk {
-                    request: format!("{request:?}"),
-                    answer: format!("{answered:?}"),
-                    outbound: outbound_of(request, &answered),
-                });
-            }
+            self.trace.record_ask(request, &answered);
             answered
         };
         let result = started.and_then(|progress| drive_concurrent(&self.kernel, progress, &answer));
-        if tracing_on {
-            let (outcomes, error) = match &result {
-                Ok(done) => (
-                    done.iter().map(|(t, r)| transition_of(t, r)).collect(),
-                    None,
-                ),
-                Err(e) => (Vec::new(), Some(e.to_string())),
-            };
-            let entry = TraceEntry {
-                seq: self.trace_seq.fetch_add(1, Ordering::SeqCst),
-                at_ms: orbital_core::time_util::now_millis(),
-                seed,
-                outcomes,
-                asks: asks.into_inner(),
-                error,
-            };
-            if let Some((path, file)) = self.trace_file.lock().as_mut() {
-                use std::io::Write;
-                let written = serde_json::to_string(&entry)
-                    .map_err(std::io::Error::other)
-                    .and_then(|line| writeln!(file, "{line}"));
-                if let Err(e) = written {
-                    tracing::error!(path = %path.display(), error = %e, "trace file write failed");
-                }
-            }
-            let mut log = self.trace.lock();
-            if log.len() == TRACE_CAPACITY {
-                log.pop_front();
-            }
-            log.push_back(entry);
-        }
         result.map_err(|e| match e {
             DispatchError::Kernel(KernelError::TraitNotFound(name)) => {
                 HostError::TraitNotFound(name)
@@ -1301,7 +1222,7 @@ impl Host {
         let started = self
             .kernel
             .start_inbound(&route, headers, raw_body, credential.as_deref());
-        match self.finish(format!("hook {name}"), started) {
+        match self.finish(started) {
             Ok(outcomes) => RuntimeKernel::inbound_answer(&route, &outcomes),
             Err(error) => dispatch_failed(&error.to_string()),
         }
@@ -1332,7 +1253,7 @@ impl Host {
         let started = self
             .kernel
             .start_inbound(&route, headers, raw_body, credential.as_deref());
-        let outcomes = match self.finish(format!("hook {name}"), started) {
+        let outcomes = match self.finish(started) {
             Ok(outcomes) => outcomes,
             Err(error) => {
                 self.inbound_waiters
@@ -1404,7 +1325,7 @@ impl Host {
             delivery,
             log,
         );
-        self.finish(format!("{trait_name}.{event_name}"), started)
+        self.finish(started)
     }
 
     /// The traits of `candidates` whose held state handles `event` (`RuntimeKernel::discover_handlers`).
@@ -1463,7 +1384,7 @@ impl Host {
             None,
             None,
         );
-        self.finish(format!("{}.{event_name}", traits.join("+")), started)
+        self.finish(started)
     }
 
     /// A mount batch (`EventRequest.mount`) — see `RuntimeKernel::dispatch_mount`.
@@ -1476,7 +1397,7 @@ impl Host {
         let started = self
             .kernel
             .start_dispatch_mount(seeds, Some(entity_id), payload);
-        self.finish("mount".to_string(), started)
+        self.finish(started)
     }
 
     /// The keyed calls whose completion is still wanted: open streams (a listener, a watch) and deferred answers.
@@ -1940,6 +1861,181 @@ mod tests {
         broadcast(&runtime, "E3");
         std::thread::sleep(std::time::Duration::from_millis(300));
         assert_eq!(feed(&runtime, |_| true)["seen"], "E1E2", "cancel-call stopped the stream");
+    }
+
+    fn trace_poll(source: &mut orbital_core::runtime::native_host::SubstrateSource) -> serde_json::Value {
+        match source() {
+            orbital_core::runtime::os_host::completion::StreamPoll::Item(item) => serde_json::to_value(item).unwrap(),
+            _ => panic!("expected trace item"),
+        }
+    }
+
+    fn trace_source(runtime: &Host, options: serde_json::Value) -> orbital_core::runtime::native_host::SubstrateSource {
+        let Value::Object(mut options) = serde_json::from_value(options).unwrap() else { panic!("options") };
+        options.insert("kind".into(), Value::String("trace".into()));
+        runtime.substrate.live_source("program/live", &[Value::Object(options)]).expect("shared trace source")
+    }
+
+    #[test]
+    fn trace_stream_selects_the_instance_traits_and_seed_frame_without_losing_history() {
+        let runtime = Host::new(Arc::new(DriverAdapter::memory())).shared();
+        runtime.register_schema(live_program()).unwrap();
+        let mut source = trace_source(&runtime, serde_json::json!({ "traits": ["Watch"], "seedEntityId": "selected" }));
+        let attached = trace_poll(&mut source);
+        assert_eq!(attached["type"], "trace-attached");
+        assert_eq!(attached["programVersion"].as_f64(), Some(1.0));
+        runtime.dispatch_continuing("Watch", "other", "STOP", Value::Null, None, None).unwrap();
+        assert!(matches!(source(), orbital_core::runtime::os_host::completion::StreamPoll::Idle));
+        for _ in 0..205 {
+            runtime.dispatch_continuing("Watch", "selected", "STOP", Value::Null, None, None).unwrap();
+        }
+        for expected in 1..206 {
+            let item = trace_poll(&mut source);
+            assert_eq!(item["type"], "trace");
+            assert_eq!(item["instance"], attached["instance"]);
+            assert_eq!(item["dispatch"]["seq"].as_f64(), Some(f64::from(expected)));
+            assert_eq!(item["dispatch"]["seedEntityId"], "selected");
+            assert_eq!(item["dispatch"]["outcomes"][0]["trait"], "Watch");
+        }
+        assert_eq!(runtime.trace().len(), TRACE_CAPACITY, "snapshot retention does not truncate the transport");
+        let other = Host::new(Arc::new(DriverAdapter::memory())).shared();
+        let mut wrong = trace_source(&other, serde_json::json!({ "traits": ["Watch"], "instance": attached["instance"] }));
+        assert_eq!(trace_poll(&mut wrong)["type"], "trace-disconnected");
+        drop(source);
+        assert!(!runtime.trace.enabled(), "disconnect removes subscriber and ends its recording lease");
+    }
+
+    #[test]
+    fn trace_stream_records_actual_completion_hops_and_ends_when_the_host_stops() {
+        let runtime = Host::new(Arc::new(DriverAdapter::memory())).shared();
+        runtime.register_schema(live_program()).unwrap();
+        let mut source = trace_source(&runtime, serde_json::json!({ "traits": ["Watch"] }));
+        trace_poll(&mut source);
+        runtime.dispatch_continuing("Watch", "default", "OPEN", Value::Null, None, None).unwrap();
+        let open = trace_poll(&mut source);
+        assert_eq!(open["dispatch"]["outcomes"][0]["event"], "OPEN");
+        assert_eq!(open["dispatch"]["asks"].as_array().unwrap().len(), 1, "the opening dispatch keeps its own I/O ask");
+        broadcast(&runtime, "E1");
+        assert_eq!(feed(&runtime, |e| e["seen"] == "E1")["seen"], "E1");
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let completion = loop {
+            if let orbital_core::runtime::os_host::completion::StreamPoll::Item(item) = source() {
+                break serde_json::to_value(item).unwrap();
+            }
+            assert!(std::time::Instant::now() < deadline, "completion trace was not recorded");
+            std::thread::yield_now();
+        };
+        assert_eq!(completion["dispatch"]["outcomes"][0]["event"], "ITEM");
+        assert_eq!(completion["dispatch"]["outcomes"][0]["executed"], true);
+        assert_eq!(completion["dispatch"]["outcomes"][0]["effects"][0]["status"], "Executed");
+        runtime.cancel_open_calls();
+        drop(runtime);
+        assert_eq!(trace_poll(&mut source)["type"], "trace-disconnected");
+        assert!(matches!(source(), orbital_core::runtime::os_host::completion::StreamPoll::Ended));
+    }
+
+    #[test]
+    fn trace_stream_preserves_guard_refusals_and_effect_failures() {
+        let runtime = Host::new(Arc::new(DriverAdapter::memory())).shared();
+        let mut schema = serde_json::to_value(live_program()).unwrap();
+        let machine = &mut schema["orbitals"][0]["traits"][0]["stateMachine"];
+        machine["events"].as_array_mut().unwrap().extend([
+            serde_json::json!({ "key": "REFUSED", "name": "Refused" }),
+            serde_json::json!({ "key": "FAIL", "name": "Fail" }),
+        ]);
+        machine["transitions"].as_array_mut().unwrap().extend([
+            serde_json::json!({ "from": "idle", "to": "idle", "event": "REFUSED", "guard": ["=", 1, 2] }),
+            serde_json::json!({ "from": "idle", "to": "idle", "event": "FAIL", "effects": [["set", "@entity.seen", ["array/append", null, 1]], ["set", "@entity.seen", "never"]] }),
+        ]);
+        runtime.register_schema(serde_json::from_value(schema).unwrap()).unwrap();
+        let mut source = trace_source(&runtime, serde_json::json!({ "traits": ["Watch"] }));
+        trace_poll(&mut source);
+        runtime.dispatch_continuing("Watch", "default", "REFUSED", Value::Null, None, None).unwrap();
+        let refused = trace_poll(&mut source);
+        assert_eq!(refused["dispatch"]["outcomes"][0]["executed"], false);
+        assert_eq!(refused["dispatch"]["outcomes"][0]["firedArm"], serde_json::Value::Null);
+        assert_eq!(refused["dispatch"]["outcomes"][0]["guardResults"][0]["passed"], false);
+        runtime.dispatch_continuing("Watch", "default", "FAIL", Value::Null, None, None).unwrap();
+        let failed = trace_poll(&mut source);
+        let outcome = &failed["dispatch"]["outcomes"][0];
+        assert_eq!(outcome["executed"], true, "transition commit survives failed effects");
+        assert!(outcome["failure"].is_string(), "{outcome}");
+        assert_eq!(outcome["effects"][0]["status"], "Failed");
+        assert_eq!(outcome["effects"][1]["status"], "Skipped");
+    }
+
+    #[test]
+    fn trace_stream_records_under_the_kernel_lane_before_a_delayed_host_finish() {
+        let runtime = Host::new(Arc::new(DriverAdapter::memory())).shared();
+        let mut schema = serde_json::to_value(live_program()).unwrap();
+        schema["orbitals"][0]["id"] = serde_json::json!("o-trace");
+        schema["orbitals"][0]["traits"][0]["id"] = serde_json::json!("t-watch");
+        schema["orbitals"][0]["traits"][0]["sourceDeclaration"] = serde_json::json!({ "traitId": "t-generic", "fingerprint": "original-fingerprint" });
+        schema["orbitals"][0]["traits"][0]["stateMachine"]["events"].as_array_mut().unwrap().push(serde_json::json!({ "key": "NOOP", "name": "Noop" }));
+        schema["orbitals"][0]["traits"][0]["stateMachine"]["transitions"].as_array_mut().unwrap().push(serde_json::json!({ "from": "idle", "to": "idle", "event": "NOOP" }));
+        runtime.register_schema(serde_json::from_value(schema).unwrap()).unwrap();
+        let mut source = trace_source(&runtime, serde_json::json!({ "traits": ["Watch"] }));
+        trace_poll(&mut source);
+        let delayed = runtime.kernel.start_dispatch("Watch", Some("A"), "NOOP", Value::Null, None, None);
+        assert!(matches!(&delayed, Ok(orbital_core::runtime::resumable::Progress::Done(_))), "NOOP must complete before another dispatch enters the lane");
+        runtime.dispatch_continuing("Watch", "B", "NOOP", Value::Null, None, None).unwrap();
+        runtime.finish(delayed).unwrap();
+        let first = trace_poll(&mut source);
+        let second = trace_poll(&mut source);
+        assert_eq!(first["dispatch"]["seq"].as_f64(), Some(0.0));
+        assert_eq!(second["dispatch"]["seq"].as_f64(), Some(1.0));
+        assert_eq!(first["dispatch"]["outcomes"][0]["entityId"], "A");
+        assert_eq!(second["dispatch"]["outcomes"][0]["stateEntityId"], "B");
+        let outcome = &first["dispatch"]["outcomes"][0];
+        assert_eq!(outcome["traitId"], "t-watch");
+        assert_eq!(outcome["orbitalId"], "o-trace");
+        assert_eq!(outcome["sourceTraitId"], "t-generic");
+        assert!(outcome["sourcePath"].is_null());
+        assert_eq!(outcome["sourceDeclarationFingerprint"], "original-fingerprint");
+        assert!(outcome["definitionFingerprint"].as_str().is_some_and(|s| s.len() == 64));
+        assert_eq!(outcome["observedState"], "idle");
+        assert_eq!(outcome["transitionIndex"].as_f64(), Some(5.0));
+        assert!(matches!(source(), orbital_core::runtime::os_host::completion::StreamPoll::Idle), "finishing the host does not record a dispatch twice");
+    }
+
+    #[test]
+    fn trace_stream_observes_held_state_after_cascade_instead_of_parent_destination() {
+        let runtime = Host::new(Arc::new(DriverAdapter::memory())).shared();
+        let mut schema = serde_json::to_value(live_program()).unwrap();
+        schema["orbitals"][0]["traits"][0]["stateMachine"] = serde_json::json!({
+            "states": [{ "name": "idle", "isInitial": true }, { "name": "working" }, { "name": "done" }],
+            "events": [{ "key": "GO", "name": "Go" }, { "key": "ADVANCE", "name": "Advance", "external": true }],
+            "transitions": [
+                { "from": "idle", "to": "working", "event": "GO", "effects": [["emit", "ADVANCE", {}]] },
+                { "from": "working", "to": "done", "event": "ADVANCE" }
+            ]
+        });
+        runtime.register_schema(serde_json::from_value(schema).unwrap()).unwrap();
+        let mut source = trace_source(&runtime, serde_json::json!({ "traits": ["Watch"] }));
+        trace_poll(&mut source);
+        let (tx, rx) = std::sync::mpsc::channel();
+        let inner = Arc::clone(&runtime);
+        std::thread::spawn(move || { let _ = tx.send(inner.dispatch_continuing("Watch", "default", "GO", Value::Null, None, None)); });
+        rx.recv_timeout(std::time::Duration::from_secs(20)).expect("cascaded dispatch must finish without deadlocking").unwrap();
+        let trace = trace_poll(&mut source);
+        let outcomes = trace["dispatch"]["outcomes"].as_array().unwrap();
+        assert_eq!(outcomes.len(), 2);
+        assert_eq!(outcomes[0]["to"], "working");
+        assert_eq!(outcomes[1]["to"], "done");
+        assert_eq!(outcomes[0]["observedState"], "done");
+        assert_eq!(outcomes[0]["stateEntityId"], "default");
+    }
+
+    #[test]
+    fn trace_stream_requires_explicit_selection_and_ignores_unselected_traits() {
+        let runtime = Host::new(Arc::new(DriverAdapter::memory())).shared();
+        runtime.register_schema(live_program()).unwrap();
+        let mut invalid = trace_source(&runtime, serde_json::json!({}));
+        assert_eq!(trace_poll(&mut invalid)["type"], "trace-disconnected");
+        let mut source = trace_source(&runtime, serde_json::json!({ "traits": ["Other"] }));
+        trace_poll(&mut source);
+        runtime.dispatch_continuing("Watch", "default", "STOP", Value::Null, None, None).unwrap();
+        assert!(matches!(source(), orbital_core::runtime::os_host::completion::StreamPoll::Idle));
     }
 
     #[test]
