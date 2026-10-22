@@ -9,7 +9,7 @@ edition = "2021"
 # docs/Almadar_Compiler_Gaps.md.
 [dependencies]
 orbital-core = { path = "../../crates/orbital-core", features = ["client-http"] }
-orbital-server = { path = "../../crates/orbital-server" }
+orbital-shell-rust = { path = "../../crates/orbital-shell-rust" }
 orbital-client-dioxus = { path = "../../crates/orbital-shell-rust/renderers/dioxus", features = ["native"] }
 orbital-client-tui = { path = "../../crates/orbital-shell-rust/renderers/tui" }
 tokio = { version = "1", features = ["full"] }
