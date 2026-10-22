@@ -2,6 +2,8 @@
 //! `cli-*` programs, `orb mcp --program`, the Node and Python add-ons and the generated Rust app all run on.
 
 pub mod boot;
+pub mod cdp;
+pub mod background;
 pub mod run;
 mod error;
 mod runtime;

@@ -1,8 +1,8 @@
 //! Effect-runner code generation for the Rust shell.
 //!
 //! The generated runner delegates server-side effect execution to the shared
-//! `OrbitalServerRuntime` and exposes a typed interface that the generated
-//! Axum server can call.
+//! `Host` and exposes a typed interface that the generated
+//! server can call.
 
 use quote::quote;
 
@@ -10,7 +10,7 @@ use quote::quote;
 pub fn generate_effects_module() -> Vec<(String, String)> {
     let runner_src = quote! {
         use orbital_core::{runtime::ProcessEventResult, Value};
-        use orbital_server::{OrbitalServerRuntime, ServerError};
+        use orbital_shell_rust::host::{Host, HostError};
         use std::sync::Arc;
 
         /// Abstraction over effect execution.
@@ -23,17 +23,17 @@ pub fn generate_effects_module() -> Vec<(String, String)> {
                 entity_id: &str,
                 event: &str,
                 payload: Value,
-            ) -> Result<ProcessEventResult, ServerError>;
+            ) -> Result<ProcessEventResult, HostError>;
         }
 
         /// Effect runner backed by the shared Orbital server runtime.
         pub struct RuntimeEffectRunner {
-            runtime: Arc<OrbitalServerRuntime>,
+            runtime: Arc<Host>,
         }
 
         impl RuntimeEffectRunner {
-            /// Wrap an existing `OrbitalServerRuntime`.
-            pub fn new(runtime: Arc<OrbitalServerRuntime>) -> Self {
+            /// Wrap an existing `Host`.
+            pub fn new(runtime: Arc<Host>) -> Self {
                 Self { runtime }
             }
         }
@@ -45,7 +45,7 @@ pub fn generate_effects_module() -> Vec<(String, String)> {
                 entity_id: &str,
                 event: &str,
                 payload: Value,
-            ) -> Result<ProcessEventResult, ServerError> {
+            ) -> Result<ProcessEventResult, HostError> {
                 self.runtime
                     .process_event(trait_name, entity_id, event, payload)
             }

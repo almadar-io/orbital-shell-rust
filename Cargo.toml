@@ -11,6 +11,7 @@ orbital-core = { git = "https://github.com/almadar-io/orbital-core", branch = "m
 thiserror = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+tungstenite = "0.28"
 quote = "1.0"
 proc-macro2 = "1.0"
 # The native program host (`host`).
