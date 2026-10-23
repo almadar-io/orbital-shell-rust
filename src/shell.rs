@@ -57,7 +57,7 @@ impl Shell for RustShell {
     }
 
     fn description(&self) -> &'static str {
-        "Rust native application with Axum server and egui client"
+        "Rust native host running the served program on the kernel, with Dioxus and terminal clients"
     }
 
     fn extensions(&self) -> &[&'static str] {

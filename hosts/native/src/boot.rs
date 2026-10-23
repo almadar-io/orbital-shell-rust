@@ -131,19 +131,7 @@ pub fn boot_composed(
     env: &orbital_core::runtime::auth::AuthEnv,
     trace_by_default: bool,
 ) -> anyhow::Result<Arc<Host>> {
-    let mut options = orbital_core::ValueMap::new();
-    options.insert("appName".to_string(), orbital_core::Value::String(app_name.to_string()));
-    if let Some(overrides) = overrides {
-        let overrides = serde_json::from_value(overrides).map_err(|e| anyhow::anyhow!("the compose overrides: {e}"))?;
-        options.insert("overrides".to_string(), overrides);
-    }
-    let composed = port
-        .0
-        .run("program/compose", &[orbital_core::Value::Array(programs), orbital_core::Value::Object(options)])
-        .map_err(|failure| anyhow::anyhow!("program/compose: {}", failure.message))?;
-    let schema: orbital_core::OrbitalSchema =
-        serde_json::from_value(orbital_core::json_value::value_to_json(&composed))
-            .map_err(|e| anyhow::anyhow!("program/compose answered no program: {e}"))?;
+    let schema = compose(programs, app_name, overrides, &port)?;
     if let Some(missing) = schema.locales.iter().flatten().find(|locale| !catalogs.contains_key(*locale)) {
         anyhow::bail!("the composed app declares locale \"{missing}\" but no catalog was given for it");
     }
@@ -159,6 +147,28 @@ pub fn boot_composed(
     )?;
     start_tick_driver(&runtime);
     Ok(runtime)
+}
+
+/// Programs composed into one app by the substrate `port`'s `program/compose`, with the explicit compose `overrides`
+/// (`"<Trait>.<knob>"` values and `grants`) recorded in the composed program.
+pub fn compose(
+    programs: Vec<orbital_core::Value>,
+    app_name: &str,
+    overrides: Option<serde_json::Value>,
+    port: &SubstratePort,
+) -> anyhow::Result<orbital_core::OrbitalSchema> {
+    let mut options = orbital_core::ValueMap::new();
+    options.insert("appName".to_string(), orbital_core::Value::String(app_name.to_string()));
+    if let Some(overrides) = overrides {
+        let overrides = serde_json::from_value(overrides).map_err(|e| anyhow::anyhow!("the compose overrides: {e}"))?;
+        options.insert("overrides".to_string(), overrides);
+    }
+    let composed = port
+        .0
+        .run("program/compose", &[orbital_core::Value::Array(programs), orbital_core::Value::Object(options)])
+        .map_err(|failure| anyhow::anyhow!("program/compose: {}", failure.message))?;
+    serde_json::from_value(orbital_core::json_value::value_to_json(&composed))
+        .map_err(|e| anyhow::anyhow!("program/compose answered no program: {e}"))
 }
 
 /// A program a host embeds (the Node and Python kernel add-ons): parsed from `program_json`, its store the environment
@@ -251,7 +261,7 @@ pub fn boot(
     for problem in &problems {
         tracing::warn!(target: orbital_core::logging::ns::SERVER_DATA, %problem, "deployment config");
     }
-    // With no sign-in `@user` is the viewer the JS server presents (`DEFAULT_VIEWER`, or the app's first declared persona).
+    // With no sign-in `@user` is the viewer `ALMADAR_PERSONA` names, else the unauthenticated viewer.
     if runtime.sign_in().is_none() {
         let viewer =
             orbital_core::runtime::host_default_viewer(&schema).map_err(anyhow::Error::msg)?;

@@ -3,8 +3,7 @@
 //! Generates Rust source from an Orbital Intermediate Representation module.
 
 use crate::codegen::{
-    generate_desktop_bin, generate_effects_module, generate_entities_module, generate_game_bin,
-    generate_server_files, generate_services_module, generate_traits, generate_tui_bin,
+    generate_desktop_bin, generate_game_bin, generate_server_main, generate_tui_bin,
     generate_tui_standalone_main,
 };
 use orbital_core::generate::{Backend, GeneratedFile, GeneratedOutput, ShellMode};
@@ -13,7 +12,7 @@ use orbital_core::ir::OirModule;
 /// Which renderer set the generated project carries (the shell's `renderer` option).
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub enum RustRenderer {
-    /// Axum server plus the desktop, terminal and game clients.
+    /// The native host entry plus the desktop, terminal and game clients.
     #[default]
     All,
     /// One standalone terminal binary: the resolved program embedded, the kernel in-process, no server.
@@ -48,7 +47,9 @@ impl RustBackend {
 
     /// The standalone terminal backend, embedding `program` (the resolved `.orb` JSON).
     pub fn terminal(program: String) -> Self {
-        Self { terminal_program: Some(program) }
+        Self {
+            terminal_program: Some(program),
+        }
     }
 }
 
@@ -62,171 +63,39 @@ fn generate_terminal(program: &str) -> GeneratedOutput {
     }
 }
 
+fn client_bins() -> Vec<GeneratedFile> {
+    vec![
+        GeneratedFile::new("src/bin/desktop.rs", generate_desktop_bin()),
+        GeneratedFile::new("src/bin/terminal.rs", generate_tui_bin()),
+        GeneratedFile::new("src/bin/game.rs", generate_game_bin()),
+    ]
+}
+
 impl Backend for RustBackend {
     fn generate(&self, module: &OirModule) -> GeneratedOutput {
+        self.generate_with_mode(module, ShellMode::Full)
+    }
+
+    fn generate_with_mode(&self, _module: &OirModule, mode: ShellMode) -> GeneratedOutput {
         if let Some(program) = &self.terminal_program {
             return generate_terminal(program);
         }
         let mut files = vec![];
-        let mut warnings = vec![];
-
-        let entities_tokens = generate_entities_module(&module.distinct_entities(), &module.named_types);
-        let entities_src = entities_tokens.to_string();
-        files.push(GeneratedFile::new("src/entities/mod.rs", entities_src));
-
-        let services_tokens = generate_services_module(&module.services);
-        let services_src = services_tokens.to_string();
-        files.push(GeneratedFile::new("src/services/mod.rs", services_src));
-
-        // Per-trait state machines.
-        for (path, content) in generate_traits(&module.traits) {
-            files.push(GeneratedFile::new(path, content));
+        if mode != ShellMode::Client {
+            files.push(GeneratedFile::new("src/main.rs", generate_server_main()));
         }
-
-        // Effect runner and Axum server wiring.
-        for (path, content) in generate_effects_module() {
-            files.push(GeneratedFile::new(path, content));
+        if mode != ShellMode::Server {
+            files.extend(client_bins());
         }
-        for (path, content) in generate_server_files(module) {
-            files.push(GeneratedFile::new(path, content));
-        }
-
-        // Native desktop client entry point.
-        files.push(GeneratedFile::new(
-            "src/bin/desktop.rs",
-            generate_desktop_bin(),
-        ));
-
-        // Native terminal client entry point.
-        files.push(GeneratedFile::new(
-            "src/bin/terminal.rs",
-            generate_tui_bin(),
-        ));
-
-        // Lightweight game client entry point.
-        files.push(GeneratedFile::new("src/bin/game.rs", generate_game_bin()));
-
-        // Expose generated modules from the library root.
-        files.push(GeneratedFile::new(
-            "src/lib.rs",
-            generate_lib_rs(&module.name, !module.traits.is_empty()),
-        ));
-
-        if module.entities.is_empty() {
-            warnings.push("No entities declared in schema.".to_string());
-        }
-        if module.services.is_empty() {
-            warnings.push("No services declared in schema.".to_string());
-        }
-        if module.traits.is_empty() {
-            warnings.push("No traits declared in schema.".to_string());
-        }
-
-        GeneratedOutput { files, warnings }
-    }
-
-    fn generate_with_mode(&self, module: &OirModule, mode: ShellMode) -> GeneratedOutput {
-        if let Some(program) = &self.terminal_program {
-            return generate_terminal(program);
-        }
-        match mode {
-            ShellMode::Full => self.generate(module),
-            ShellMode::Server => {
-                let mut files = vec![];
-                let mut warnings = vec![];
-
-                let entities_tokens = generate_entities_module(&module.distinct_entities(), &module.named_types);
-                files.push(GeneratedFile::new(
-                    "src/entities/mod.rs",
-                    entities_tokens.to_string(),
-                ));
-
-                let services_tokens = generate_services_module(&module.services);
-                files.push(GeneratedFile::new(
-                    "src/services/mod.rs",
-                    services_tokens.to_string(),
-                ));
-
-                for (path, content) in generate_traits(&module.traits) {
-                    files.push(GeneratedFile::new(path, content));
-                }
-
-                for (path, content) in generate_effects_module() {
-                    files.push(GeneratedFile::new(path, content));
-                }
-                for (path, content) in generate_server_files(module) {
-                    files.push(GeneratedFile::new(path, content));
-                }
-
-                files.push(GeneratedFile::new(
-                    "src/lib.rs",
-                    generate_lib_rs(&module.name, !module.traits.is_empty()),
-                ));
-
-                if module.entities.is_empty() {
-                    warnings.push("No entities declared in schema.".to_string());
-                }
-
-                GeneratedOutput { files, warnings }
-            }
-            ShellMode::Client => {
-                let mut files = vec![];
-                let mut warnings = vec![];
-
-                let entities_tokens = generate_entities_module(&module.distinct_entities(), &module.named_types);
-                files.push(GeneratedFile::new(
-                    "src/entities/mod.rs",
-                    entities_tokens.to_string(),
-                ));
-
-                for (path, content) in generate_traits(&module.traits) {
-                    files.push(GeneratedFile::new(path, content));
-                }
-
-                files.push(GeneratedFile::new(
-                    "src/bin/desktop.rs",
-                    generate_desktop_bin(),
-                ));
-                files.push(GeneratedFile::new(
-                    "src/bin/terminal.rs",
-                    generate_tui_bin(),
-                ));
-                files.push(GeneratedFile::new("src/bin/game.rs", generate_game_bin()));
-
-                files.push(GeneratedFile::new(
-                    "src/lib.rs",
-                    generate_lib_rs(&module.name, !module.traits.is_empty()),
-                ));
-
-                if module.traits.is_empty() {
-                    warnings.push("No traits declared in schema.".to_string());
-                }
-
-                GeneratedOutput { files, warnings }
-            }
+        GeneratedOutput {
+            files,
+            warnings: vec![],
         }
     }
 
     fn name(&self) -> &'static str {
         "rust"
     }
-}
-
-fn generate_lib_rs(app_name: &str, has_traits: bool) -> String {
-    let traits_mod = if has_traits { "pub mod traits;\n" } else { "" };
-    format!(
-        r#"//! {}
-//!
-//! Generated by the Orbital Rust shell.
-
-pub mod effects;
-pub mod entities;
-pub mod server;
-pub mod services;
-{}
-"#,
-        app_name, traits_mod
-    )
 }
 
 #[cfg(test)]
@@ -242,35 +111,6 @@ mod tests {
         module
     }
 
-    /// Kernel-mode shell: the generated state machines carry no effect bodies, so an `os/` effect is
-    /// never half-emitted. It is unsupported in generated code by design and runs through the
-    /// `EffectRunner` seam only.
-    #[test]
-    fn os_effects_are_not_silently_dropped_by_the_rust_shell() {
-        use orbital_core::ir::{OirEffect, OirExpr, OirState, OirTrait, OirTransition};
-        let effect = OirEffect::os(
-            orbital_core::runtime::os::OsOp::ReadFile,
-            vec![OirExpr::string("/data/secret.txt")],
-            None,
-            None,
-        );
-        assert!(!orbital_core::effects::CLIENT_EFFECT_KINDS.contains(&effect.kind()));
-        let mut module = test_module();
-        let mut t = OirTrait::new("Files");
-        t.states.push(OirState::initial("idle"));
-        let mut tr = OirTransition::new("idle", "idle", "READ");
-        tr.effects.push(OirExpr::effect(effect));
-        t.transitions.push(tr);
-        module.traits.push(t);
-        let output = RustBackend::new().generate(&module);
-        let all: String = output.files.iter().map(|f| f.content.as_str()).collect();
-        assert!(
-            !all.contains("secret.txt") && !all.contains("read-file"),
-            "os/ is unsupported in generated Rust: it must not be half-emitted"
-        );
-        assert!(all.contains("run_effects"), "effects must stay behind the EffectRunner seam");
-    }
-
     #[test]
     fn test_backend_name() {
         let backend = RustBackend::new();
@@ -278,51 +118,39 @@ mod tests {
     }
 
     #[test]
-    fn test_generate_produces_files() {
-        let backend = RustBackend::new();
-        let output = backend.generate(&test_module());
+    fn test_generate_produces_the_host_entry_and_the_clients() {
+        let output = RustBackend::new().generate(&test_module());
         let paths: Vec<_> = output.files.iter().map(|f| f.path.as_str()).collect();
-        assert!(paths.contains(&"src/entities/mod.rs"));
-        assert!(paths.contains(&"src/services/mod.rs"));
-        assert!(paths.contains(&"src/effects/mod.rs"));
-        assert!(paths.contains(&"src/server.rs"));
-        assert!(paths.contains(&"src/main.rs"));
-        assert!(paths.contains(&"src/lib.rs"));
+        assert_eq!(
+            paths,
+            [
+                "src/main.rs",
+                "src/bin/desktop.rs",
+                "src/bin/terminal.rs",
+                "src/bin/game.rs"
+            ]
+        );
     }
 
     #[test]
     fn server_mode_omits_client_bins() {
-        let backend = RustBackend::new();
-        let output = backend.generate_with_mode(&test_module(), ShellMode::Server);
+        let output = RustBackend::new().generate_with_mode(&test_module(), ShellMode::Server);
         let paths: Vec<_> = output.files.iter().map(|f| f.path.as_str()).collect();
-
-        // Server mode must include server files.
-        assert!(paths.contains(&"src/entities/mod.rs"));
-        assert!(paths.contains(&"src/effects/mod.rs"));
-        assert!(paths.contains(&"src/server.rs"));
-        assert!(paths.contains(&"src/main.rs"));
-
-        // Server mode must NOT include native client entry points.
-        assert!(!paths.contains(&"src/bin/desktop.rs"));
-        assert!(!paths.contains(&"src/bin/terminal.rs"));
-        assert!(!paths.contains(&"src/bin/game.rs"));
+        assert_eq!(paths, ["src/main.rs"]);
     }
 
     #[test]
-    fn client_mode_omits_server_files() {
-        let backend = RustBackend::new();
-        let output = backend.generate_with_mode(&test_module(), ShellMode::Client);
+    fn client_mode_omits_the_host_entry() {
+        let output = RustBackend::new().generate_with_mode(&test_module(), ShellMode::Client);
         let paths: Vec<_> = output.files.iter().map(|f| f.path.as_str()).collect();
-
-        // Client mode must include the native client entry points.
-        assert!(paths.contains(&"src/bin/desktop.rs"));
-        assert!(paths.contains(&"src/bin/terminal.rs"));
-        assert!(paths.contains(&"src/bin/game.rs"));
-
-        // Client mode must NOT include server or effects files.
-        assert!(!paths.contains(&"src/server.rs"));
-        assert!(!paths.contains(&"src/main.rs"));
-        assert!(!paths.contains(&"src/effects/mod.rs"));
+        assert_eq!(
+            paths,
+            [
+                "src/bin/desktop.rs",
+                "src/bin/terminal.rs",
+                "src/bin/game.rs"
+            ]
+        );
     }
 
     #[test]
@@ -346,18 +174,33 @@ mod tests {
         )
         .expect("terminal project written");
         let paths: Vec<&str> = generated.files.iter().map(|f| f.path.as_str()).collect();
-        assert!(!paths.iter().any(|p| p.starts_with("src/bin/")), "one binary only: {paths:?}");
+        assert!(
+            !paths.iter().any(|p| p.starts_with("src/bin/")),
+            "one binary only: {paths:?}"
+        );
         assert!(!paths.contains(&"src/server.rs"));
 
-        let read = |rel: &str| std::fs::read_to_string(output.join(rel)).unwrap_or_else(|e| panic!("{rel}: {e}"));
+        let read = |rel: &str| {
+            std::fs::read_to_string(output.join(rel)).unwrap_or_else(|e| panic!("{rel}: {e}"))
+        };
         let manifest = read("Cargo.toml");
         for banned in ["dioxus", "wgpu", "orbital-server", "axum", "[[bin]]"] {
-            assert!(!manifest.contains(banned), "terminal manifest must not carry {banned}:\n{manifest}");
+            assert!(
+                !manifest.contains(banned),
+                "terminal manifest must not carry {banned}:\n{manifest}"
+            );
         }
         assert!(manifest.contains("orbital-client-tui"));
         let main = read("src/main.rs");
-        assert!(main.contains("include_str!(\"../program.orb\")"), "program embedded:\n{main}");
-        assert!(!main.contains("resolved.orb") && !main.contains("SERVER_URL") && !main.contains("3030"));
+        assert!(
+            main.contains("include_str!(\"../program.orb\")"),
+            "program embedded:\n{main}"
+        );
+        assert!(
+            !main.contains("resolved.orb")
+                && !main.contains("SERVER_URL")
+                && !main.contains("3030")
+        );
         assert_eq!(read("program.orb"), program);
         let _ = std::fs::remove_dir_all(&output);
     }
@@ -370,8 +213,11 @@ mod tests {
         let direct_output = backend.generate(&module);
         let full_paths: std::collections::HashSet<_> =
             full_output.files.iter().map(|f| f.path.as_str()).collect();
-        let direct_paths: std::collections::HashSet<_> =
-            direct_output.files.iter().map(|f| f.path.as_str()).collect();
+        let direct_paths: std::collections::HashSet<_> = direct_output
+            .files
+            .iter()
+            .map(|f| f.path.as_str())
+            .collect();
         assert_eq!(full_paths, direct_paths);
     }
 }

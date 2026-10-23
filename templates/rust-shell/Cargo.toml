@@ -12,11 +12,6 @@ orbital-core = { path = "../../crates/orbital-core", features = ["client-http"] 
 orbital-shell-rust = { path = "../../crates/orbital-shell-rust" }
 orbital-client-dioxus = { path = "../../crates/orbital-shell-rust/renderers/dioxus", features = ["native"] }
 orbital-client-tui = { path = "../../crates/orbital-shell-rust/renderers/tui" }
-tokio = { version = "1", features = ["full"] }
-axum = "0.7"
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 anyhow = "1"
 

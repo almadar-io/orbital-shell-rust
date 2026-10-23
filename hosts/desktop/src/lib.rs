@@ -118,8 +118,9 @@ fn frames_trait(schema: &OrbitalSchema) -> Option<&TraitDefinition> {
             .filter(|tr| {
                 tr.effects.as_ref().is_some_and(|effs| {
                     effs.iter().any(|e| {
-                        let s = serde_json::to_string(e).unwrap_or_default();
-                        s.contains("render-ui") && s.contains("\"main\"")
+                        let effect = serde_json::to_value(e).unwrap_or(serde_json::Value::Null);
+                        effect.get(0).and_then(serde_json::Value::as_str) == Some("render-ui")
+                            && effect.get(1).and_then(serde_json::Value::as_str) == Some("main")
                     })
                 })
             })

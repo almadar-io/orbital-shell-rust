@@ -204,7 +204,9 @@ impl orbital_core::effects::executor::SubstrateHandler for SelfSubstrate {
             .map_err(|e| failure(e.to_string()))?;
         let response = orbital_core::EventResponse::from_process_results(&outcomes, trait_name, event);
         runtime.broadcast_persisted(&response, None);
-        Ok(orbital_core::runtime::agent_ports::dispatch_outcome(&response))
+        serde_json::to_value(&response)
+            .and_then(serde_json::from_value)
+            .map_err(|e| failure(format!("program/dispatch: the response does not serialize: {e}")))
     }
 }
 
@@ -929,8 +931,8 @@ impl Host {
     /// A `program/dispatch` event request (owner, 2026-10-21): each option goes onto the seam the events and inputs
     /// routes used. `viewer` is the dispatch's `@user`, `clientId` its origin, `locale` its locale; `input: true` admits
     /// only a declared external input; `mount` runs the lifecycle seeds, `traits` the declared traits, no `targetTrait`
-    /// discovers the handlers; `delivery`/`dispatchLog` continue a client-begun dispatch. `wire: true` answers the whole
-    /// `EventResponse`, otherwise the outcome a model is told. An empty text, record or mount list is absent.
+    /// discovers the handlers; `delivery`/`dispatchLog` continue a client-begun dispatch. The host answers the raw
+    /// `EventResponse` (plus `items` for `stream`); the kernel shapes what a model is told. An empty text, record or mount list is absent.
     fn request_answer(&self, payload: &Value, options: &ValueMap) -> Result<Value, (String, &'static str, u16)> {
         use orbital_core::EventResponse;
         let json = |key: &str| options.get(key).map(orbital_core::json_value::value_to_json);
@@ -955,7 +957,9 @@ impl Host {
         }
         let request: orbital_core::EventRequest = serde_json::from_value(serde_json::Value::Object(request))
             .map_err(|e| (format!("program/dispatch: not an event request: {e}"), "INVALID_REQUEST", 400))?;
-        let orbital = text("orbital").unwrap_or_default();
+        let Some(orbital) = text("orbital") else {
+            return Err(("program/dispatch: an event request names its orbital".to_string(), "INVALID_REQUEST", 400));
+        };
         let entity_id = request.entity_id.clone().unwrap_or_else(|| "default".to_string());
         let payload = request.payload.clone().unwrap_or(Value::Null);
         let failed = |e: HostError| (e.to_string(), "EVENT_PROCESSING_ERROR", e.status_code());
@@ -965,18 +969,13 @@ impl Host {
             return Err((format!("Orbital not found: {orbital}"), "ORBITAL_NOT_FOUND", 404));
         };
         let respond = |outcomes: &[(String, ProcessEventResult)], response: EventResponse| -> Result<Value, (String, &'static str, u16)> {
-            let answer = if flag("wire") {
-                let mut answer = serde_json::to_value(&response).map_err(|e| (e.to_string(), "EVENT_PROCESSING_ERROR", 500))?;
-                if flag("stream") {
-                    let items = serde_json::to_value(stream_items(outcomes, &response)).map_err(|e| (e.to_string(), "EVENT_PROCESSING_ERROR", 500))?;
-                    if let serde_json::Value::Object(fields) = &mut answer {
-                        fields.insert("items".to_string(), items);
-                    }
+            let mut answer = serde_json::to_value(&response).map_err(|e| (e.to_string(), "EVENT_PROCESSING_ERROR", 500))?;
+            if flag("stream") {
+                let items = serde_json::to_value(stream_items(outcomes, &response)).map_err(|e| (e.to_string(), "EVENT_PROCESSING_ERROR", 500))?;
+                if let serde_json::Value::Object(fields) = &mut answer {
+                    fields.insert("items".to_string(), items);
                 }
-                answer
-            } else {
-                orbital_core::json_value::value_to_json(&orbital_core::runtime::agent_ports::dispatch_outcome(&response))
-            };
+            }
             serde_json::from_value(answer).map_err(|e| (e.to_string(), "EVENT_PROCESSING_ERROR", 500))
         };
         type Ran = (Vec<(String, ProcessEventResult)>, EventResponse);
@@ -2345,7 +2344,8 @@ mod tests {
         assert_eq!(refused["guardFailed"], "Notes.ADD_NOTE", "control: another viewer meets the guard: {refused}");
         assert_eq!(note_titles(&runtime).len(), 1);
         let outcome = dispatch_request(&runtime, serde_json::json!({ "orbital": "Desk", "targetTrait": "Notes", "event": "ADD_NOTE", "viewer": { "id": "u1" } })).unwrap();
-        assert_eq!(outcome["ok"], true, "without wire the answer is the model's outcome: {outcome}");
+        assert_eq!(outcome["success"], true, "without wire the host still answers the raw EventResponse; the kernel shapes the model's outcome: {outcome}");
+        assert!(outcome.get("ok").is_none(), "control: the host shapes nothing: {outcome}");
     }
 
     #[test]

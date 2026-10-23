@@ -1,6 +1,6 @@
 # orbital-shell-rust
 
-The Rust shell: generates an Axum backend from a compiled Orbital program.
+The Rust shell: generates a native host that runs the served program on the kernel, plus the desktop, terminal and game clients.
 
 Part of [Almadar](https://almadar.io)'s Orbital compiler, which turns a `.lolo`/`.orb` program into a full-stack app. The `orb` CLI (npm `@almadar/orb`) bundles this crate; you only need this repo to read, build or change it.
 
