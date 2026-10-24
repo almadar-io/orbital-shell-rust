@@ -1730,7 +1730,7 @@ mod tests {
                 }, {
                     "name": "Notes", "linkedEntity": "Note",
                     "stateMachine": machine(
-                        serde_json::json!([{ "key": "ADD_NOTE", "name": "Add note", "external": true,
+                        serde_json::json!([{ "key": "ADD_NOTE", "name": "Add note", "input": true,
                             "payloadSchema": [{ "name": "title", "type": "string", "required": true }] }]),
                         serde_json::json!([{ "from": "idle", "to": "idle", "event": "ADD_NOTE", "guard": ["=", "@user.id", "u1"],
                             "effects": [["persist", "create", "Note", { "title": "@payload.title" }]] }]))
@@ -2003,7 +2003,7 @@ mod tests {
         let mut schema = serde_json::to_value(live_program()).unwrap();
         schema["orbitals"][0]["traits"][0]["stateMachine"] = serde_json::json!({
             "states": [{ "name": "idle", "isInitial": true }, { "name": "working" }, { "name": "done" }],
-            "events": [{ "key": "GO", "name": "Go" }, { "key": "ADVANCE", "name": "Advance", "external": true }],
+            "events": [{ "key": "GO", "name": "Go" }, { "key": "ADVANCE", "name": "Advance", "input": true }],
             "transitions": [
                 { "from": "idle", "to": "working", "event": "GO", "effects": [["emit", "ADVANCE", {}]] },
                 { "from": "working", "to": "done", "event": "ADVANCE" }

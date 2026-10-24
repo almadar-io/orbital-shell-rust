@@ -184,7 +184,7 @@ pub fn boot_embedded(
     let mock = matches!(spec, PersistenceSpec::Mock);
     let runtime = boot(
         schema,
-        Path::new("program.json"),
+        Path::new("program.orb"),
         store_from_env(env, false)?,
         mock,
         env,
