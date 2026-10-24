@@ -1,23 +1,15 @@
-//! Running a booted program to its end: `INIT` mounted on every trait, held while it has an open keyed call, stopped
+//! Running a booted program to its end: the kernel's boot mounts dispatched, held while it has an open keyed call, stopped
 //! cleanly on SIGINT/SIGTERM. `orb run` and the generated Rust app share this body.
 
 use super::{Host, HostError};
+pub use orbital_core::protocols::ProtocolSide;
 
 /// The entity a run mounts its traits on, as an event request naming none addresses (`"default"`).
 pub const RUN_ENTITY: &str = "default";
 
-/// Mount `INIT` on every trait of every registered orbital.
-pub fn mount_init(host: &Host) -> Result<(), HostError> {
-    let seeds: Vec<orbital_core::effects::MountSeed> = host
-        .list_orbitals()
-        .iter()
-        .filter_map(|orbital| host.get_orbital(&orbital.name))
-        .flat_map(|detail| detail.traits)
-        .map(|name| orbital_core::effects::MountSeed {
-            r#trait: name,
-            event: orbital_core::effects::LifecycleEvent::Init,
-        })
-        .collect();
+/// Dispatch the mounts the kernel lists for a host start on `side` (EXEC-ENDPOINT-3); the host chooses none.
+pub fn mount_init(host: &Host, side: ProtocolSide) -> Result<(), HostError> {
+    let seeds = host.boot_mounts(side);
     if !seeds.is_empty() {
         host.dispatch_mount(&seeds, RUN_ENTITY, orbital_core::Value::Null)?;
     }
@@ -81,4 +73,75 @@ pub fn stop_on_signal() -> anyhow::Result<std::sync::mpsc::Receiver<()>> {
         let _ = sender.send(());
     })?;
     Ok(receiver)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use super::super::store::DriverAdapter;
+    use std::sync::Arc;
+
+    fn host() -> Host {
+        let traits: Vec<serde_json::Value> = ["ViewT", "BootT", "HttpT", "Orphan"]
+            .iter()
+            .map(|name| {
+                serde_json::json!({
+                    "name": name,
+                    "linkedEntity": "Note",
+                    "stateMachine": {
+                        "states": [{ "name": "idle", "isInitial": true }, { "name": "ready" }],
+                        "events": [{ "key": "INIT", "name": "INIT" }],
+                        "transitions": [{ "from": "idle", "to": "ready", "event": "INIT", "effects": [] }]
+                    }
+                })
+            })
+            .collect();
+        let program: orbital_core::OrbitalSchema = serde_json::from_value(serde_json::json!({
+            "name": "Endpoints",
+            "version": "1.0.0",
+            "orbitals": [{
+                "name": "Main",
+                "entity": { "name": "Note", "collection": "notes", "fields": [{ "name": "id", "type": "string", "primaryKey": true }] },
+                "traits": traits,
+                "pages": [
+                    { "name": "Home", "path": "/", "traits": [{ "ref": "ViewT" }] },
+                    { "name": "Bg", "path": "", "protocol": "boot", "traits": [{ "ref": "BootT" }] },
+                    { "name": "Api", "path": "", "protocol": "http", "traits": [{ "ref": "HttpT" }] }
+                ]
+            }]
+        }))
+        .unwrap();
+        let host = Host::new(Arc::new(DriverAdapter::memory()));
+        host.register_schema(program).unwrap();
+        host
+    }
+
+    fn state(host: &Host, name: &str) -> Option<String> {
+        host.get_state(name, RUN_ENTITY).map(|s| s.current_state)
+    }
+
+    #[test]
+    fn the_server_side_mounts_exactly_the_kernels_boot_mounts_and_never_a_route_trait() {
+        let host = host();
+        mount_init(&host, ProtocolSide::Server).unwrap();
+        assert_eq!(state(&host, "BootT").as_deref(), Some("ready"));
+        assert_eq!(state(&host, "HttpT").as_deref(), Some("ready"));
+        assert_ne!(state(&host, "ViewT").as_deref(), Some("ready"));
+        assert_ne!(state(&host, "Orphan").as_deref(), Some("ready"));
+    }
+
+    #[test]
+    fn control_the_process_side_mounts_boot_but_not_the_http_trait() {
+        let host = host();
+        mount_init(&host, ProtocolSide::Process).unwrap();
+        assert_eq!(state(&host, "BootT").as_deref(), Some("ready"));
+        assert_ne!(state(&host, "HttpT").as_deref(), Some("ready"));
+    }
+
+    #[test]
+    fn edge_a_program_with_no_endpoint_pages_mounts_nothing() {
+        let host = Host::new(Arc::new(DriverAdapter::memory()));
+        mount_init(&host, ProtocolSide::Server).unwrap();
+        assert!(host.boot_mounts(ProtocolSide::Server).is_empty());
+    }
 }

@@ -132,12 +132,27 @@ pub fn boot_composed(
     trace_by_default: bool,
 ) -> anyhow::Result<Arc<Host>> {
     let schema = compose(programs, app_name, overrides, &port)?;
+    boot_app(schema, port, catalogs, mock, env, trace_by_default)
+}
+
+/// A composed app booted with the substrate `port` installed and its ticks driven (`orb serve`, and a cli program's
+/// `orb-run: server` hand-off): under `mock` the store is in memory with sample rows, otherwise the environment selects
+/// it. `catalogs` must hold every locale the app declares.
+pub fn boot_app(
+    schema: orbital_core::OrbitalSchema,
+    port: SubstratePort,
+    catalogs: Catalogs,
+    mock: bool,
+    env: &orbital_core::runtime::auth::AuthEnv,
+    trace_by_default: bool,
+) -> anyhow::Result<Arc<Host>> {
     if let Some(missing) = schema.locales.iter().flatten().find(|locale| !catalogs.contains_key(*locale)) {
         anyhow::bail!("the composed app declares locale \"{missing}\" but no catalog was given for it");
     }
+    let path = format!("{}.orb", schema.name);
     let runtime = boot(
         schema,
-        Path::new(&format!("{app_name}.orb")),
+        Path::new(&path),
         store_from_env(env, mock)?,
         mock,
         env,
@@ -710,6 +725,7 @@ mod composed_tests {
             "orbitals": [{
                 "name": orbital,
                 "entity": { "name": format!("{orbital}Row"), "persistence": "runtime", "fields": [{ "name": "id", "type": "string" }] },
+                "pages": [{ "name": format!("{orbital}Boot"), "path": "", "protocol": "boot", "traits": [{ "ref": format!("{orbital}Trait") }] }],
                 "traits": [{ "name": format!("{orbital}Trait"), "linkedEntity": format!("{orbital}Row"),
                     "stateMachine": { "states": [{ "name": "idle", "isInitial": true }, { "name": "ready" }],
                         "events": [{ "key": "INIT", "name": "Init" }],
@@ -727,7 +743,7 @@ mod composed_tests {
     }
 
     #[test]
-    fn composed_programs_boot_as_one_app_and_mount_every_trait() {
+    fn composed_programs_boot_as_one_app_and_mount_their_boot_endpoint_traits() {
         let host = boot_composed(
             vec![program("app", "Notes", serde_json::json!({})), program("server", "Http", serde_json::json!({}))],
             "served",
@@ -742,7 +758,7 @@ mod composed_tests {
         let names: Vec<String> = host.list_orbitals().into_iter().map(|o| o.name).collect();
         assert_eq!(names.len(), 2, "{names:?}");
         assert!(names.contains(&"Notes".to_string()) && names.contains(&"Http".to_string()), "{names:?}");
-        super::super::run::mount_init(&host).unwrap();
+        super::super::run::mount_init(&host, super::super::run::ProtocolSide::Server).unwrap();
         for t in ["NotesTrait", "HttpTrait"] {
             let state = host.get_state(t, super::super::run::RUN_ENTITY).map(|s| s.current_state);
             assert_eq!(state.as_deref(), Some("ready"), "{t} mounted");

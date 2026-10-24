@@ -10,7 +10,7 @@ pub fn generate_server_main() -> String {
 //! Runs the served program (`program.orb`) on the kernel; each locale it declares is read from `locales/<locale>.json`.
 
 use orbital_shell_rust::host::boot::{boot_embedded, Catalogs};
-use orbital_shell_rust::host::run::{hold, mount_init, stop_on_signal};
+use orbital_shell_rust::host::run::{hold, mount_init, stop_on_signal, ProtocolSide};
 use std::path::Path;
 
 fn catalogs_of(program: &orbital_core::OrbitalSchema, locales_dir: &Path) -> anyhow::Result<Catalogs> {
@@ -35,7 +35,7 @@ fn main() -> anyhow::Result<()> {
         serde_json::from_str(&program_json).map_err(|e| anyhow::anyhow!("parse program.orb: {e}"))?;
     let catalogs = catalogs_of(&program, Path::new("locales"))?;
     let runtime = boot_embedded(&program_json, &std::env::vars().collect(), catalogs)?;
-    mount_init(&runtime)?;
+    mount_init(&runtime, ProtocolSide::Server)?;
     let stop = stop_on_signal()?;
     hold(&runtime, &stop);
     Ok(())

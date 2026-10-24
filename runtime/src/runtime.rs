@@ -1386,6 +1386,11 @@ impl Host {
         self.finish(started)
     }
 
+    /// What mounts when this host starts on `side` (EXEC-ENDPOINT-3); the host dispatches the list and computes none.
+    pub fn boot_mounts(&self, side: orbital_core::protocols::ProtocolSide) -> Vec<orbital_core::effects::MountSeed> {
+        self.kernel.boot_mounts(side)
+    }
+
     /// A mount batch (`EventRequest.mount`) — see `RuntimeKernel::dispatch_mount`.
     pub fn dispatch_mount(
         &self,

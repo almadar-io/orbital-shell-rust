@@ -56,7 +56,7 @@ pub fn serve_background(runtime: Arc<Host>) -> anyhow::Result<BackgroundServer> 
             let _ = failed.send(Err(anyhow::anyhow!("{event}: {}", message.payload)));
         }));
     }
-    let started = super::run::mount_init(&runtime)
+    let started = super::run::mount_init(&runtime, super::run::ProtocolSide::Server)
         .map_err(anyhow::Error::from)
         .and_then(|()| receiver.recv_timeout(Duration::from_secs(5))
             .map_err(|error| anyhow::anyhow!("waiting for HTTP1_LISTENING: {error}"))?);
