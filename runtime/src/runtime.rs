@@ -624,10 +624,12 @@ impl Host {
         let inbound_waiters: InboundWaiters = Arc::default();
         let done: Arc<CompletionDone> = {
             let tx = live_tx.clone();
+            let stamping = Arc::downgrade(&kernel);
             let waiters = inbound_waiters.clone();
             Arc::new(
                 move |site: &CallSite,
                       event: &str,
+                      client_id: Option<&str>,
                       result: Result<DispatchOutcomes, DispatchError>| {
                     match result
                 {
@@ -641,12 +643,20 @@ impl Host {
                                 None => true,
                             }
                         });
-                        let response = orbital_core::EventResponse::from_process_results(
+                        let mut response = orbital_core::EventResponse::from_process_results(
                             &outcomes,
                             &site.trait_name,
                             event,
                         );
-                        broadcast_persisted(&tx, &response, None);
+                        if let Some(kernel) = stamping.upgrade() {
+                            kernel.stamp_emitted_sources(&mut response);
+                        }
+                        if let Some(client_id) = client_id {
+                            for item in LiveBroadcastItem::answered(&response, client_id) {
+                                let _ = tx.send(item);
+                            }
+                        }
+                        broadcast_persisted(&tx, &response, client_id);
                     }
                     Err(error) => tracing::warn!(
                         target: orbital_core::logging::ns::SERVER_DATA,
@@ -1110,7 +1120,8 @@ impl Host {
         started: Result<Progress<DispatchOutcomes>, DispatchError>,
     ) -> Result<DispatchOutcomes, HostError> {
         let host = self.host.read().clone();
-        let scope = self.sink.begin_dispatch();
+        let origin = self.origin_by_thread.read().get(&std::thread::current().id()).cloned();
+        let scope = self.sink.begin_dispatch_for(origin.as_deref());
         let answer = |request: &IoRequest| {
             let answered = scope.answer(&|request| host.answer(request), request);
             self.trace.record_ask(request, &answered);
@@ -2430,5 +2441,79 @@ mod tests {
         assert_eq!(answer["items"][1]["data"]["event"], "PONG");
         assert_eq!(answer["items"][2]["data"]["success"], answer["success"], "complete carries the response");
         assert!(dispatch_request(&runtime, base).unwrap().get("items").is_none(), "control: no items without stream");
+    }
+
+    fn scratch_dir() -> std::path::PathBuf {
+        static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+        let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!("orbital-deferred-reader-{}-{n}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir.canonicalize().unwrap()
+    }
+
+    fn deferred_reader(dir: &std::path::Path) -> orbital_core::OrbitalSchema {
+        let path = dir.join("note.txt");
+        std::fs::write(&path, "hello").unwrap();
+        serde_json::from_value(serde_json::json!({
+            "name": "Reader",
+            "osGrants": { "fs": [{ "glob": format!("{}/**", dir.display()), "modes": ["read"] }] },
+            "orbitals": [{
+                "name": "Reader",
+                "entity": { "name": "Doc", "persistence": "runtime", "fields": [{ "name": "id", "type": "string" }] },
+                "traits": [{
+                    "name": "Files", "linkedEntity": "Doc",
+                    "stateMachine": {
+                        "states": [{ "name": "idle", "isInitial": true }],
+                        "events": [{ "key": "READ", "name": "Read" }, { "key": "READ_DONE", "name": "Read done" },
+                            { "key": "READ_FAILED", "name": "Read failed" }, { "key": "SEEN", "name": "Seen" }],
+                        "transitions": [
+                            { "from": "idle", "to": "idle", "event": "READ", "effects": [["os/read-file", path.to_str().unwrap(), { "key": "r1", "emit": { "success": "READ_DONE", "failure": "READ_FAILED" } }]] },
+                            { "from": "idle", "to": "idle", "event": "READ_DONE", "effects": [["emit", "SEEN", { "text": "@payload.text" }]] },
+                            { "from": "idle", "to": "idle", "event": "READ_FAILED", "effects": [["emit", "SEEN", { "text": "@payload.error" }]] }
+                        ]
+                    }
+                }]
+            }]
+        }))
+        .expect("the program parses")
+    }
+
+    fn origin_items(live: &mut broadcast::Receiver<LiveBroadcastItem>, event: &str) -> Vec<LiveBroadcastItem> {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let mut seen = Vec::new();
+        while std::time::Instant::now() < deadline {
+            match live.try_recv() {
+                Ok(item) if item.event == event => seen.push(item),
+                Ok(_) => {}
+                Err(_) if !seen.is_empty() => break,
+                Err(_) => std::thread::sleep(std::time::Duration::from_millis(20)),
+            }
+        }
+        seen
+    }
+
+    #[test]
+    fn a_deferred_read_completion_emits_to_the_tab_whose_request_deferred_it() {
+        let dir = scratch_dir();
+        let runtime = Host::new(Arc::new(DriverAdapter::memory())).shared();
+        runtime.register_schema(deferred_reader(&dir)).unwrap();
+        let mut live = runtime.subscribe_live();
+        let answer = dispatch_request(&runtime, serde_json::json!({ "orbital": "Reader", "targetTrait": "Files", "event": "READ", "clientId": "tab-1" })).unwrap();
+        assert!(answer["emittedEvents"].as_array().is_none_or(|e| e.iter().all(|e| e["event"] != "SEEN")), "the read is deferred: {answer}");
+        let items = origin_items(&mut live, "SEEN");
+        assert_eq!(items.len(), 1, "{items:?}");
+        assert_eq!(items[0].target, orbital_core::effects::LiveTarget::Origin);
+        assert!(items[0].delivered_to(Some("tab-1"), |_| false));
+        assert!(!items[0].delivered_to(Some("tab-2"), |_| true), "control: another tab does not get it");
+    }
+
+    #[test]
+    fn control_a_deferred_read_with_no_requesting_tab_pushes_to_no_one() {
+        let dir = scratch_dir();
+        let runtime = Host::new(Arc::new(DriverAdapter::memory())).shared();
+        runtime.register_schema(deferred_reader(&dir)).unwrap();
+        let mut live = runtime.subscribe_live();
+        dispatch_request(&runtime, serde_json::json!({ "orbital": "Reader", "targetTrait": "Files", "event": "READ" })).unwrap();
+        assert!(origin_items(&mut live, "SEEN").iter().all(|i| i.target != orbital_core::effects::LiveTarget::Origin));
     }
 }
