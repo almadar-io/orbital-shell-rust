@@ -1,7 +1,7 @@
 //! Booting a program on the [`Host`]: register it, install its locales, configure tracing, sign-in, credentials and the
-//! tick invoker from the environment, refuse a production boot that lacks what it needs, bind the default viewer, seed.
+//! tick invoker from the environment, refuse a production boot that lacks what it needs.
 
-use super::store::{persistence_from_env, persistence_spec_from_env, DriverAdapter, PersistenceAdapter, PersistenceSpec};
+use super::store::{DriverAdapter, PersistenceAdapter};
 use super::{Host, HostConfig, SubstratePort};
 use orbital_core::schema::parse_schema_file;
 use std::path::Path;
@@ -91,58 +91,35 @@ fn configure_trace(
     Ok(())
 }
 
-/// Parse, register and (in `mock` mode) seed the program at `schema_path` on the in-memory store, with the host's
+/// Parse and register the program at `schema_path` on the in-memory store, with the host's
 /// substrate handler installed when one is given (`orb` answers `program/*` and `behavior/*` itself).
 pub fn boot_file(
     schema_path: &Path,
-    mock: bool,
     env: &orbital_core::runtime::auth::AuthEnv,
     trace_by_default: bool,
     substrate: Option<SubstratePort>,
 ) -> anyhow::Result<Arc<Host>> {
-    boot_file_with(schema_path, mock, env, trace_by_default, HostConfig { substrate, ..HostConfig::default() })
+    boot_file_with(schema_path, env, trace_by_default, HostConfig { substrate, ..HostConfig::default() })
 }
 
 /// [`boot_file`] with the whole host configuration given: a pinned dispatch clock (`HostConfig::clock`) as well as the
 /// substrate port.
 pub fn boot_file_with(
     schema_path: &Path,
-    mock: bool,
     env: &orbital_core::runtime::auth::AuthEnv,
     trace_by_default: bool,
     config: HostConfig,
 ) -> anyhow::Result<Arc<Host>> {
     let schema = parse_schema_file(schema_path)?;
-    boot(schema, schema_path, Arc::new(DriverAdapter::memory()), mock, env, trace_by_default, config, None)
-}
-
-/// Programs composed into one app by the host's `program/compose` (the substrate `port` answers it, as `orb` does), then
-/// booted with that same port installed and its ticks driven: how `orb serve` boots an app beside `std-http-server`.
-/// Under `mock` the store is in memory with sample rows; otherwise the environment selects it (`DATA_BACKEND`, ...), as
-/// `orb serve --no-mock` asks. `overrides` are the explicit compose overrides (`"<Trait>.<knob>"` values and `grants`) the
-/// port records in the composed program. `catalogs` must hold every locale the composed app declares.
-pub fn boot_composed(
-    programs: Vec<orbital_core::Value>,
-    app_name: &str,
-    overrides: Option<serde_json::Value>,
-    port: SubstratePort,
-    catalogs: Catalogs,
-    mock: bool,
-    env: &orbital_core::runtime::auth::AuthEnv,
-    trace_by_default: bool,
-) -> anyhow::Result<Arc<Host>> {
-    let schema = compose(programs, app_name, overrides, &port)?;
-    boot_app(schema, port, catalogs, mock, env, trace_by_default)
+    boot(schema, schema_path, Arc::new(DriverAdapter::memory()), env, trace_by_default, config, None)
 }
 
 /// A composed app booted with the substrate `port` installed and its ticks driven (`orb serve`, and a cli program's
-/// `orb-run: server` hand-off): under `mock` the store is in memory with sample rows, otherwise the environment selects
-/// it. `catalogs` must hold every locale the app declares.
+/// `orb-run: server` hand-off): the store is the kernel's in-memory store. `catalogs` must hold every locale the app declares.
 pub fn boot_app(
     schema: orbital_core::OrbitalSchema,
     port: SubstratePort,
     catalogs: Catalogs,
-    mock: bool,
     env: &orbital_core::runtime::auth::AuthEnv,
     trace_by_default: bool,
 ) -> anyhow::Result<Arc<Host>> {
@@ -153,8 +130,7 @@ pub fn boot_app(
     let runtime = boot(
         schema,
         Path::new(&path),
-        store_from_env(env, mock)?,
-        mock,
+        Arc::new(DriverAdapter::memory()),
         env,
         trace_by_default,
         HostConfig { substrate: Some(port), ..HostConfig::default() },
@@ -164,30 +140,8 @@ pub fn boot_app(
     Ok(runtime)
 }
 
-/// Programs composed into one app by the substrate `port`'s `program/compose`, with the explicit compose `overrides`
-/// (`"<Trait>.<knob>"` values and `grants`) recorded in the composed program.
-pub fn compose(
-    programs: Vec<orbital_core::Value>,
-    app_name: &str,
-    overrides: Option<serde_json::Value>,
-    port: &SubstratePort,
-) -> anyhow::Result<orbital_core::OrbitalSchema> {
-    let mut options = orbital_core::ValueMap::new();
-    options.insert("appName".to_string(), orbital_core::Value::String(app_name.to_string()));
-    if let Some(overrides) = overrides {
-        let overrides = serde_json::from_value(overrides).map_err(|e| anyhow::anyhow!("the compose overrides: {e}"))?;
-        options.insert("overrides".to_string(), overrides);
-    }
-    let composed = port
-        .0
-        .run("program/compose", &[orbital_core::Value::Array(programs), orbital_core::Value::Object(options)])
-        .map_err(|failure| anyhow::anyhow!("program/compose: {}", failure.message))?;
-    serde_json::from_value(orbital_core::json_value::value_to_json(&composed))
-        .map_err(|e| anyhow::anyhow!("program/compose answered no program: {e}"))
-}
-
-/// A program a host embeds (the Node and Python kernel add-ons): parsed from `program_json`, its store the environment
-/// selects (`DATA_BACKEND`, ...; the memory store seeds sample rows), its message catalogs given, its ticks driven.
+/// A program a host embeds (the Node and Python kernel add-ons): parsed from `program_json`, on the kernel's in-memory
+/// store, its message catalogs given, its ticks driven.
 pub fn boot_embedded(
     program_json: &str,
     env: &orbital_core::runtime::auth::AuthEnv,
@@ -195,13 +149,10 @@ pub fn boot_embedded(
 ) -> anyhow::Result<Arc<Host>> {
     let schema: orbital_core::OrbitalSchema =
         serde_json::from_str(program_json).map_err(|e| anyhow::anyhow!("parse the program: {e}"))?;
-    let spec = persistence_spec_from_env(&|key| env.get(key).cloned()).map_err(anyhow::Error::msg)?;
-    let mock = matches!(spec, PersistenceSpec::Mock);
     let runtime = boot(
         schema,
         Path::new("program.orb"),
-        store_from_env(env, false)?,
-        mock,
+        Arc::new(DriverAdapter::memory()),
         env,
         false,
         HostConfig::default(),
@@ -219,7 +170,6 @@ pub fn boot(
     schema: orbital_core::OrbitalSchema,
     schema_path: &Path,
     persistence: Arc<dyn PersistenceAdapter>,
-    mock: bool,
     env: &orbital_core::runtime::auth::AuthEnv,
     trace_by_default: bool,
     config: HostConfig,
@@ -265,7 +215,6 @@ pub fn boot(
     let problems = boot_env_problems(
         env,
         production,
-        mock,
         &orbital_core::credential_admin::schema_invoked_services(&schema),
         &|| runtime.credential_catalog(),
         &|name| matches!(orbital_core::runtime::http_service::SecretSource::secret(secrets.as_ref(), name), Ok(Some(_))),
@@ -276,21 +225,6 @@ pub fn boot(
     for problem in &problems {
         tracing::warn!(target: orbital_core::logging::ns::SERVER_DATA, %problem, "deployment config");
     }
-    // With no sign-in `@user` is the viewer `ALMADAR_PERSONA` names, else the unauthenticated viewer.
-    if runtime.sign_in().is_none() {
-        let viewer =
-            orbital_core::runtime::host_default_viewer(&schema).map_err(anyhow::Error::msg)?;
-        runtime.set_current_user(viewer);
-    }
-
-    // Seed sample data via the ONE canonical seeder (after registration so authored
-    // instances are kept and only instance-less entities are synthesized). The seeder
-    // emits per-entity `seed:sample` logs on the `almadar:runtime:seed` namespace.
-    if mock {
-        tracing::info!(target: orbital_core::logging::ns::SEED, count = 3, "mock mode: seeding sample data");
-        runtime.seed_sample(&schema, 3);
-    }
-
     let orbitals = runtime.list_orbitals();
     for orbital in &orbitals {
         tracing::debug!(
@@ -322,60 +256,13 @@ pub fn start_tick_driver(runtime: &Arc<Host>) {
         .unwrap_or_else(|error| tracing::error!(target: orbital_core::logging::ns::SERVER_DATA, %error, "the tick driver did not start"));
 }
 
-/// The origins the server's own configuration names for local services (`FIRESTORE_EMULATOR_HOST`,
-/// `FIREBASE_AUTH_EMULATOR_HOST`, `COUCHDB_URL`): the store may reach them although they are not public addresses.
-fn configured_local_origins(env: &orbital_core::runtime::auth::AuthEnv) -> Vec<String> {
-    let mut origins: Vec<String> = ["FIRESTORE_EMULATOR_HOST", "FIREBASE_AUTH_EMULATOR_HOST"]
-        .iter()
-        .filter_map(|key| {
-            env.get(*key)
-                .filter(|v| !v.is_empty())
-                .map(|host| format!("http://{}", host.to_ascii_lowercase()))
-        })
-        .collect();
-    let couch = env.get("COUCHDB_URL").and_then(|url| {
-        let (scheme, rest) = url.split_once("://")?;
-        let authority = rest.split(['/', '?', '#']).next()?;
-        orbital_core::runtime::auth::origin_of(&format!(
-            "{scheme}://{}",
-            authority
-                .rsplit_once('@')
-                .map_or(authority, |(_, host)| host)
-        ))
-    });
-    origins.extend(couch);
-    origins
-}
-
-/// The standalone store: the in-memory store under `mock`, else the driver the environment selects (`DATA_BACKEND`, ...).
-pub fn store_from_env(
-    env: &orbital_core::runtime::auth::AuthEnv,
-    mock: bool,
-) -> anyhow::Result<Arc<dyn PersistenceAdapter>> {
-    if mock {
-        return Ok(Arc::new(DriverAdapter::memory()));
-    }
-    let transport = Arc::new(
-        orbital_core::runtime::native_transport::UreqTransport::with_egress(
-            configured_local_origins(env),
-        ),
-    );
-    persistence_from_env(
-        &|key| env.get(key).cloned(),
-        &|path| std::fs::read_to_string(path).map_err(|e| format!("{path}: {e}")),
-        transport,
-    )
-    .map_err(anyhow::Error::msg)
-}
-
 /// What a deployment lacks beyond its sign-in (which [`configure_sign_in`] refuses itself): under `production` a
-/// Firestore emulator host (it serves no real data), and, unless integrations are mocked (`mock`, or
-/// `ALMADAR_INTEGRATIONS_MODE=mock` / `USE_MOCK_DATA=true`), every required credential of a service the program calls
+/// Firestore emulator host (it serves no real data), and, unless integrations are mocked
+/// (`ALMADAR_INTEGRATIONS_MODE=mock` / `USE_MOCK_DATA=true`), every required credential of a service the program calls
 /// that `present` (the credential store, then the environment) does not hold.
 pub fn boot_env_problems(
     env: &orbital_core::runtime::auth::AuthEnv,
     production: bool,
-    mock: bool,
     called: &std::collections::BTreeSet<String>,
     catalog: &dyn Fn() -> Result<orbital_core::credential_admin::Catalog, String>,
     present: &dyn Fn(&str) -> bool,
@@ -384,7 +271,7 @@ pub fn boot_env_problems(
     if production && env.get("FIRESTORE_EMULATOR_HOST").is_some_and(|v| !v.is_empty()) {
         problems.push("FIRESTORE_EMULATOR_HOST is set: the Firestore emulator is for local dev only".to_string());
     }
-    let mocked = mock || orbital_core::credential_admin::env_mock(&|k| env.get(k).cloned());
+    let mocked = orbital_core::credential_admin::env_mock(&|k| env.get(k).cloned());
     if called.is_empty() || mocked {
         return problems;
     }
@@ -454,7 +341,7 @@ mod boot_env_tests {
 
     #[test]
     fn production_names_the_emulator_and_each_missing_required_credential() {
-        let problems = boot_env_problems(&env(&[("FIRESTORE_EMULATOR_HOST", "127.0.0.1:8080")]), true, false, &stripe(), &catalog, &|_| false);
+        let problems = boot_env_problems(&env(&[("FIRESTORE_EMULATOR_HOST", "127.0.0.1:8080")]), true, &stripe(), &catalog, &|_| false);
         assert_eq!(
             problems,
             [
@@ -466,19 +353,19 @@ mod boot_env_tests {
 
     #[test]
     fn control_held_credentials_and_local_dev_emulators_are_no_problem() {
-        assert!(boot_env_problems(&env(&[]), true, false, &stripe(), &catalog, &|_| true).is_empty());
-        assert!(boot_env_problems(&env(&[("FIRESTORE_EMULATOR_HOST", "h:1")]), false, false, &BTreeSet::new(), &catalog, &|_| false).is_empty());
+        assert!(boot_env_problems(&env(&[]), true, &stripe(), &catalog, &|_| true).is_empty());
+        assert!(boot_env_problems(&env(&[("FIRESTORE_EMULATOR_HOST", "h:1")]), false, &BTreeSet::new(), &catalog, &|_| false).is_empty());
     }
 
     #[test]
     fn mocked_integrations_owe_no_credentials_and_an_unreadable_catalog_is_named() {
-        for (mock, pairs) in [(true, vec![]), (false, vec![("ALMADAR_INTEGRATIONS_MODE", "mock")]), (false, vec![("USE_MOCK_DATA", "true")])] {
-            assert!(boot_env_problems(&env(&pairs), true, mock, &stripe(), &catalog, &|_| false).is_empty(), "{pairs:?}");
+        for pairs in [vec![("ALMADAR_INTEGRATIONS_MODE", "mock")], vec![("USE_MOCK_DATA", "true")]] {
+            assert!(boot_env_problems(&env(&pairs), true, &stripe(), &catalog, &|_| false).is_empty(), "{pairs:?}");
         }
-        let unreadable = boot_env_problems(&env(&[]), true, false, &stripe(), &|| Err("no registry".into()), &|_| false);
+        let unreadable = boot_env_problems(&env(&[]), true, &stripe(), &|| Err("no registry".into()), &|_| false);
         assert_eq!(unreadable, ["the declared integration credentials could not be read: no registry"]);
         assert!(
-            boot_env_problems(&env(&[]), true, false, &BTreeSet::new(), &|| Err("no registry".into()), &|_| false).is_empty(),
+            boot_env_problems(&env(&[]), true, &BTreeSet::new(), &|| Err("no registry".into()), &|_| false).is_empty(),
             "control: a program calling no service never reads the catalog"
         );
     }
@@ -507,7 +394,7 @@ mod auth_boot_tests {
     fn a_hook_answered_after_a_keyed_completion_reaches_a_caller_that_awaits_it() {
         let program =
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/late-answer.orb");
-        let runtime = boot_file(&program, false, &env(&[]), false, None).unwrap();
+        let runtime = boot_file(&program, &env(&[]), false, None).unwrap();
         let awaited = runtime.deliver_inbound_awaiting(
             "cli-echo",
             [],
@@ -532,40 +419,6 @@ mod auth_boot_tests {
             Some(std::time::Duration::from_secs(1)),
         );
         assert_eq!(unknown.status, 404, "an undeclared hook is refused at once");
-    }
-
-    #[test]
-    fn the_server_reaches_only_the_local_services_its_configuration_names() {
-        let named = env(&[
-            ("FIRESTORE_EMULATOR_HOST", "127.0.0.1:8080"),
-            ("FIREBASE_AUTH_EMULATOR_HOST", "127.0.0.1:9099"),
-            ("COUCHDB_URL", "http://admin:secret@127.0.0.1:5984/app"),
-        ]);
-        assert_eq!(
-            configured_local_origins(&named),
-            vec![
-                "http://127.0.0.1:8080",
-                "http://127.0.0.1:9099",
-                "http://127.0.0.1:5984"
-            ]
-        );
-        assert!(configured_local_origins(&env(&[("FIRESTORE_EMULATOR_HOST", "")])).is_empty());
-        assert!(configured_local_origins(&env(&[])).is_empty());
-    }
-
-    #[test]
-    fn mock_is_the_in_memory_store_and_otherwise_the_environment_picks_it() {
-        assert!(store_from_env(&env(&[]), true).is_ok());
-        assert!(store_from_env(
-            &env(&[("DATA_BACKEND", "mock"), ("NODE_ENV", "development")]),
-            false
-        )
-        .is_ok());
-        let error = store_from_env(&env(&[]), false)
-            .err()
-            .expect("no store configured refuses to boot")
-            .to_string();
-        assert!(error.contains("FIREBASE_PROJECT_ID"), "{error}");
     }
 
     #[test]
@@ -604,13 +457,12 @@ mod auth_boot_tests {
     #[test]
     fn booting_a_program_file_configures_sign_in_from_the_environment() {
         let path = program_file("auth");
-        let error = boot_file(&path, false, &env(&[("NODE_ENV", "production")]), false, None)
+        let error = boot_file(&path, &env(&[("NODE_ENV", "production")]), false, None)
             .err()
             .expect("production without a declaration refuses to boot");
         assert!(error.to_string().contains("FIREBASE_PROJECT_ID"), "{error}");
         let signed_in = boot_file(
             &path,
-            false,
             &env(&[
                 ("NODE_ENV", "production"),
                 ("FIREBASE_PROJECT_ID", "prod-app"),
@@ -623,7 +475,7 @@ mod auth_boot_tests {
             signed_in.sign_in().is_some(),
             "a declared provider is configured by the boot"
         );
-        let open = boot_file(&path, false, &env(&[]), false, None).unwrap();
+        let open = boot_file(&path, &env(&[]), false, None).unwrap();
         assert!(
             open.sign_in().is_none(),
             "control: nothing declared stays open"
@@ -634,24 +486,24 @@ mod auth_boot_tests {
     fn tracing_follows_the_operator_and_otherwise_the_entry_points_default() {
         let path = program_file("trace");
         assert!(
-            boot_file(&path, false, &env(&[]), true, None)
+            boot_file(&path, &env(&[]), true, None)
                 .unwrap()
                 .tracing(),
             "the dev server traces by default"
         );
         assert!(
-            !boot_file(&path, false, &env(&[]), false, None)
+            !boot_file(&path, &env(&[]), false, None)
                 .unwrap()
                 .tracing(),
             "orb serve does not"
         );
         assert!(
-            boot_file(&path, false, &env(&[("ORBITAL_TRACE", "memory")]), false, None)
+            boot_file(&path, &env(&[("ORBITAL_TRACE", "memory")]), false, None)
                 .unwrap()
                 .tracing()
         );
         assert!(
-            !boot_file(&path, false, &env(&[("ORBITAL_TRACE", "off")]), true, None)
+            !boot_file(&path, &env(&[("ORBITAL_TRACE", "off")]), true, None)
                 .unwrap()
                 .tracing()
         );
@@ -659,7 +511,6 @@ mod auth_boot_tests {
             std::env::temp_dir().join(format!("orbital-boot-trace-{}.jsonl", std::process::id()));
         let traced = boot_file(
             &path,
-            false,
             &env(&[("ORBITAL_TRACE_FILE", file.to_str().unwrap())]),
             false,
         None,
@@ -667,7 +518,7 @@ mod auth_boot_tests {
         .unwrap();
         assert_eq!(traced.trace_file_path().as_deref(), Some(file.as_path()));
         assert!(
-            boot_file(&path, false, &env(&[("ORBITAL_TRACE", "always")]), false, None).is_err(),
+            boot_file(&path, &env(&[("ORBITAL_TRACE", "always")]), false, None).is_err(),
             "edge: an unknown mode refuses to boot"
         );
         let _ = std::fs::remove_file(&file);
@@ -738,45 +589,12 @@ mod composed_tests {
         serde_json::from_value(json).unwrap()
     }
 
+    fn schema_of(program: orbital_core::Value) -> orbital_core::OrbitalSchema {
+        serde_json::from_value(orbital_core::json_value::value_to_json(&program)).unwrap()
+    }
+
     fn port() -> SubstratePort {
         SubstratePort(Arc::new(Appending))
-    }
-
-    #[test]
-    fn composed_programs_boot_as_one_app_and_mount_their_boot_endpoint_traits() {
-        let host = boot_composed(
-            vec![program("app", "Notes", serde_json::json!({})), program("server", "Http", serde_json::json!({}))],
-            "served",
-            None,
-            port(),
-            Catalogs::new(),
-            true,
-            &Default::default(),
-            false,
-        )
-        .unwrap();
-        let names: Vec<String> = host.list_orbitals().into_iter().map(|o| o.name).collect();
-        assert_eq!(names.len(), 2, "{names:?}");
-        assert!(names.contains(&"Notes".to_string()) && names.contains(&"Http".to_string()), "{names:?}");
-        super::super::run::mount_init(&host, super::super::run::ProtocolSide::Server).unwrap();
-        for t in ["NotesTrait", "HttpTrait"] {
-            let state = host.get_state(t, super::super::run::RUN_ENTITY).map(|s| s.current_state);
-            assert_eq!(state.as_deref(), Some("ready"), "{t} mounted");
-        }
-    }
-
-    #[test]
-    fn control_a_compose_the_port_refuses_names_why_and_boots_nothing() {
-        struct Refusing;
-        impl SubstrateHandler for Refusing {
-            fn run(&self, _: &str, _: &[orbital_core::Value]) -> Result<orbital_core::Value, SubstrateFailure> {
-                Err(SubstrateFailure { message: "duplicate orbital Notes".to_string(), errors: Vec::new() })
-            }
-        }
-        let error = boot_composed(vec![], "served", None, SubstratePort(Arc::new(Refusing)), Catalogs::new(), true, &Default::default(), false)
-            .err()
-            .expect("a refused compose does not boot");
-        assert!(error.to_string().contains("duplicate orbital Notes"), "{error}");
     }
 
     #[test]
@@ -784,7 +602,7 @@ mod composed_tests {
         let app = program("app", "Notes", serde_json::json!({ "locales": ["en", "ar"] }));
         let mut catalogs = Catalogs::new();
         catalogs.insert("en".to_string(), std::collections::HashMap::new());
-        let error = boot_composed(vec![app], "served", None, port(), catalogs, true, &Default::default(), false)
+        let error = boot_app(schema_of(app), port(), catalogs, &Default::default(), false)
             .err()
             .expect("a missing catalog refuses the boot");
         assert!(error.to_string().contains("\"ar\""), "{error}");
@@ -810,34 +628,16 @@ mod composed_tests {
     }
 
     #[test]
-    fn under_mock_the_composed_app_runs_on_sample_rows_in_memory() {
-        let host = boot_composed(vec![persistent_program(serde_json::json!([]))], "served", None, port(), Catalogs::new(), true, &Default::default(), false)
-            .unwrap();
-        assert!(!memos(&host).is_empty(), "mock seeds sample rows");
-    }
-
-    #[test]
-    fn control_without_mock_the_environment_picks_the_store_and_names_what_it_lacks() {
-        let error = boot_composed(vec![persistent_program(serde_json::json!([]))], "served", None, port(), Catalogs::new(), false, &Default::default(), false)
-            .err()
-            .expect("no store configured refuses to boot");
-        assert!(error.to_string().contains("FIREBASE_PROJECT_ID"), "{error:#}");
-        let env: orbital_core::runtime::auth::AuthEnv =
-            [("DATA_BACKEND", "mock"), ("NODE_ENV", "development")].iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
-        let host = boot_composed(vec![persistent_program(serde_json::json!([]))], "served", None, port(), Catalogs::new(), false, &env, false).unwrap();
-        assert!(memos(&host).is_empty(), "edge: the environment's in-memory store is not seeded without mock");
-    }
-
-    #[test]
     fn the_composed_boot_drives_its_background_ticks() {
         let ticks = serde_json::json!([{ "name": "beat", "interval": 10, "runsInBackground": true, "effects": [["persist", "create", "Memo", { "n": 1 }]] }]);
-        let host = boot_composed(vec![persistent_program(ticks)], "served", None, port(), Catalogs::new(), true, &Default::default(), true).unwrap();
-        let seeded = memos(&host).len();
+        let host = boot_app(schema_of(persistent_program(ticks)), port(), Catalogs::new(), &Default::default(), true).unwrap();
+        let first: orbital_core::Value = serde_json::from_value(serde_json::json!({ "id": "m0", "n": 0 })).unwrap();
+        host.persistence().create("Memo", &first).unwrap();
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-        while memos(&host).len() <= seeded {
+        while memos(&host).len() < 2 {
             assert!(
                 std::time::Instant::now() < deadline,
-                "no tick ran over the {seeded} seeded rows: nothing drove the background tick; trace {}",
+                "no tick ran: nothing drove the background tick; trace {}",
                 serde_json::to_string(&host.trace()).unwrap()
             );
             std::thread::sleep(std::time::Duration::from_millis(20));

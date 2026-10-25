@@ -17,6 +17,7 @@ use orbital_core::runtime::os_host::OsHandles;
 use orbital_core::runtime::resumable::{
     drive_concurrent, CallSite, DispatchError, DispatchOutcomes, IoAnswer, IoRequest, Progress,
 };
+use orbital_core::runtime::entity_source::QueryAnswer;
 use orbital_core::runtime::row_query::{
     RowIdPage, RowPage, RowQuery, RowSetRef, RowWriteBatch, RowWriteOp, RowWriteOutcome,
 };
@@ -433,11 +434,11 @@ impl EntitySource for PersistenceEntitySource {
         self.adapter.create(entity_type, &data_with_id)
     }
 
-    fn query_page(&self, entity_type: &str, query: &RowQuery) -> Option<Result<RowPage, String>> {
+    fn query_page(&self, entity_type: &str, query: &RowQuery) -> QueryAnswer<RowPage> {
         self.adapter.query_page(entity_type, query)
     }
 
-    fn query_ids(&self, entity_type: &str, query: &RowQuery) -> Option<Result<RowIdPage, String>> {
+    fn query_ids(&self, entity_type: &str, query: &RowQuery) -> QueryAnswer<RowIdPage> {
         self.adapter.query_ids(entity_type, query)
     }
 
@@ -506,8 +507,7 @@ pub struct Host {
     /// The tab each request thread serves (`EventRequest.client_id`): where a running call's live messages go.
     origin_by_thread: Arc<RwLock<std::collections::HashMap<std::thread::ThreadId, String>>>,
     persistence: Arc<dyn PersistenceAdapter>,
-    /// The same `EntitySource` the kernel reads through — kept so sample data can be
-    /// seeded via the ONE canonical seeder (`orbital_core::runtime::seed_sample_data`).
+    /// The same `EntitySource` the kernel reads through.
     entity_source: Arc<dyn EntitySource>,
     /// The `/api/events` live-broadcast channel (`routes::live_events`). One sender
     /// shared by every subscriber connection; dropped receivers are pruned by `tokio`
@@ -705,36 +705,6 @@ impl Host {
     /// this ignores — mirrors the TS sink's fire-and-forget `liveBroadcastSink?.(...)`).
     pub fn broadcast_live(&self, item: LiveBroadcastItem) {
         let _ = self.live_tx.send(item);
-    }
-
-    /// Seed synthesized sample rows for every inline entity lacking authored `instances`,
-    /// via the ONE canonical seeder (`orbital_core::runtime::seed_sample_data`) — the same
-    /// path the in-process client uses, so server + client see identical data.
-    pub fn seed_sample(&self, schema: &orbital_core::OrbitalSchema, count: usize) {
-        orbital_core::runtime::seed_sample_data(
-            self.kernel.entity_source().as_ref(),
-            schema,
-            count,
-        );
-    }
-
-    /// [`seed_sample`](Self::seed_sample) stamping owner columns with an explicitly
-    /// supplied viewer instead of `ALMADAR_PERSONA`. Mirrors
-    /// `orbital_client::bridge::KernelBridge::seed_sample_as` — pairs with
-    /// [`set_current_user`](Self::set_current_user) so a harness-bound viewer seeds
-    /// rows it actually owns.
-    pub fn seed_sample_as(
-        &self,
-        schema: &orbital_core::OrbitalSchema,
-        count: usize,
-        viewer_id: Option<String>,
-    ) {
-        orbital_core::runtime::seed_sample_data_as(
-            self.kernel.entity_source().as_ref(),
-            schema,
-            count,
-            viewer_id,
-        );
     }
 
     /// Bind `@user` for every subsequent event this runtime processes. Mirrors
@@ -968,7 +938,8 @@ impl Host {
         let Some(detail) = self.get_orbital(&orbital) else {
             return Err((format!("Orbital not found: {orbital}"), "ORBITAL_NOT_FOUND", 404));
         };
-        let respond = |outcomes: &[(String, ProcessEventResult)], response: EventResponse| -> Result<Value, (String, &'static str, u16)> {
+        let respond = |outcomes: &[(String, ProcessEventResult)], mut response: EventResponse| -> Result<Value, (String, &'static str, u16)> {
+            self.kernel.stamp_emitted_sources(&mut response);
             let mut answer = serde_json::to_value(&response).map_err(|e| (e.to_string(), "EVENT_PROCESSING_ERROR", 500))?;
             if flag("stream") {
                 let items = serde_json::to_value(stream_items(outcomes, &response)).map_err(|e| (e.to_string(), "EVENT_PROCESSING_ERROR", 500))?;
@@ -1738,7 +1709,7 @@ mod tests {
                         serde_json::json!([{ "key": "ADD_NOTE", "name": "Add note", "input": true,
                             "payloadSchema": [{ "name": "title", "type": "string", "required": true }] }]),
                         serde_json::json!([{ "from": "idle", "to": "idle", "event": "ADD_NOTE", "guard": ["=", "@user.id", "u1"],
-                            "effects": [["persist", "create", "Note", { "title": "@payload.title" }]] }]))
+                            "effects": [["persist", "create", "Note", { "title": "@payload.title" }], ["emit", "NOTED", {}]] }]))
                 }]
             }]
         }))
@@ -2351,6 +2322,15 @@ mod tests {
         let outcome = dispatch_request(&runtime, serde_json::json!({ "orbital": "Desk", "targetTrait": "Notes", "event": "ADD_NOTE", "viewer": { "id": "u1" } })).unwrap();
         assert_eq!(outcome["success"], true, "without wire the host still answers the raw EventResponse; the kernel shapes the model's outcome: {outcome}");
         assert!(outcome.get("ok").is_none(), "control: the host shapes nothing: {outcome}");
+    }
+
+    #[test]
+    fn a_wire_answer_stamps_each_emit_with_the_orbital_that_emitted_it() {
+        let runtime = desk();
+        let answer = dispatch_request(&runtime, serde_json::json!({ "wire": true, "orbital": "Desk", "targetTrait": "Notes", "event": "ADD_NOTE", "viewer": { "id": "u1" } })).unwrap();
+        let noted = answer["emittedEvents"].as_array().unwrap().iter().find(|e| e["event"] == "NOTED").cloned().expect("NOTED is answered");
+        assert_eq!(noted["source"]["trait"], "Notes", "{noted}");
+        assert_eq!(noted["source"]["orbital"], "Desk", "a client hears a name-only `Notes.NOTED` listen only from its own orbital (EXEC-QUEUE-6): {noted}");
     }
 
     #[test]

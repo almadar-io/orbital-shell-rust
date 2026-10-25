@@ -1,21 +1,16 @@
 //! Kernel store drivers as the server's persistence: a driver is an `EntitySource` over raw ports (sockets, HTTP),
 //! so no host process stands between the kernel and the data. [`DriverAdapter`] presents one as a
-//! [`PersistenceAdapter`], and [`persistence_from_env`] picks the driver the way `@almadar/db`'s
-//! `persistenceSpecFromEnv` does: `DATA_BACKEND` (`mock` | `firebase` | `postgres` | `couchdb`, default `firebase`),
-//! the `USE_MOCK_DATA` flag, `DATABASE_URL`, `PGPOOL_MAX`, `COUCHDB_URL` and the Firebase variables.
+//! [`PersistenceAdapter`].
 //!
 //! [`PersistenceAdapter`] is the interface every store backend presents to the host.
 
-use orbital_core::runtime::couchdb::CouchRows;
-use orbital_core::runtime::entity_source::{EntitySource, InMemoryEntityCache};
-use orbital_core::runtime::firestore::FirestoreRows;
-use orbital_core::runtime::http_service::Transport;
-use orbital_core::runtime::pg_rows::PostgresRows;
+use orbital_core::runtime::entity_source::{
+    EntitySource, InMemoryEntityCache, QueryAnswer, NO_QUERY_PUSHDOWN,
+};
 use orbital_core::runtime::row_query::{
     QueryCapabilities, RowIdPage, RowPage, RowQuery, RowWriteBatch, RowWriteOp, RowWriteOutcome,
     WriteCapabilities,
 };
-use orbital_core::runtime::store_config::driver_store;
 use orbital_core::{PersistenceHandler, Value};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -72,18 +67,14 @@ pub trait PersistenceAdapter: PersistenceHandler + Send + Sync {
         None
     }
 
-    /// The page of rows matching `query`, run by the store. `None` = this store cannot.
-    fn query_page(&self, _entity_type: &str, _query: &RowQuery) -> Option<Result<RowPage, String>> {
-        None
+    /// The page of rows matching `query`, run by the store. A store that cannot declines with its reason.
+    fn query_page(&self, _entity_type: &str, _query: &RowQuery) -> QueryAnswer<RowPage> {
+        QueryAnswer::Declined(NO_QUERY_PUSHDOWN.to_string())
     }
 
-    /// The ids of the page `query_page` would return. `None` = this store cannot.
-    fn query_ids(
-        &self,
-        _entity_type: &str,
-        _query: &RowQuery,
-    ) -> Option<Result<RowIdPage, String>> {
-        None
+    /// The ids of the page `query_page` would return. A store that cannot declines with its reason.
+    fn query_ids(&self, _entity_type: &str, _query: &RowQuery) -> QueryAnswer<RowIdPage> {
+        QueryAnswer::Declined(NO_QUERY_PUSHDOWN.to_string())
     }
 }
 
@@ -117,24 +108,6 @@ impl DriverAdapter {
             write: WriteCapabilities::full(),
             durable: false,
         }
-    }
-
-    /// The Postgres row store, declaring what its SQL and transactions honour.
-    pub fn postgres(rows: PostgresRows) -> Self {
-        let (query, write) = (rows.query_capabilities(), rows.write_capabilities());
-        Self::new(Arc::new(rows), query, write)
-    }
-
-    /// The CouchDB row store, declaring what Mango and `_rev`-guarded writes honour.
-    pub fn couchdb(rows: CouchRows) -> Self {
-        let (query, write) = (rows.query_capabilities(), rows.write_capabilities());
-        Self::new(Arc::new(rows), query, write)
-    }
-
-    /// The Firestore driver, declaring what its plan and transactions honour.
-    pub fn firestore(rows: FirestoreRows) -> Self {
-        let (query, write) = (rows.query_capabilities(), rows.write_capabilities());
-        Self::new(Arc::new(rows), query, write)
     }
 }
 
@@ -258,202 +231,18 @@ impl PersistenceAdapter for DriverAdapter {
         Some(self.write.clone())
     }
 
-    fn query_page(&self, entity_type: &str, query: &RowQuery) -> Option<Result<RowPage, String>> {
+    fn query_page(&self, entity_type: &str, query: &RowQuery) -> QueryAnswer<RowPage> {
         self.source.query_page(entity_type, query)
     }
 
-    fn query_ids(&self, entity_type: &str, query: &RowQuery) -> Option<Result<RowIdPage, String>> {
+    fn query_ids(&self, entity_type: &str, query: &RowQuery) -> QueryAnswer<RowIdPage> {
         self.source.query_ids(entity_type, query)
     }
-}
-
-pub use orbital_core::runtime::store_config::{persistence_spec_from_env, PersistenceSpec};
-
-/// The persistence the environment selects, its drivers speaking over `transport`. A backend whose driver has not
-/// landed in the kernel yet is an error naming it.
-pub fn persistence_from_env(
-    get: &dyn Fn(&str) -> Option<String>,
-    read_file: &dyn Fn(&str) -> Result<String, String>,
-    transport: Arc<dyn Transport>,
-) -> Result<Arc<dyn PersistenceAdapter>, String> {
-    let spec = persistence_spec_from_env(get)?;
-    Ok(match driver_store(&spec, get, read_file, transport)? {
-        None => Arc::new(DriverAdapter::memory()),
-        Some(store) => Arc::new(DriverAdapter::new(
-            store.source,
-            store
-                .query
-                .ok_or("the store driver declares no query capabilities")?,
-            store
-                .write
-                .ok_or("the store driver declares no write capabilities")?,
-        )),
-    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use orbital_core::runtime::http_service::{HttpRequest, HttpResponse, TransportError};
-
-    fn env(pairs: &'static [(&'static str, &'static str)]) -> impl Fn(&str) -> Option<String> {
-        move |name| {
-            pairs
-                .iter()
-                .find(|(k, _)| *k == name)
-                .map(|(_, v)| v.to_string())
-        }
-    }
-
-    struct Dead;
-
-    impl Transport for Dead {
-        fn send(&self, _: &HttpRequest) -> Result<HttpResponse, TransportError> {
-            Err(TransportError::Failed("no network in this test".into()))
-        }
-    }
-
-    #[test]
-    fn the_backend_comes_from_data_backend_and_defaults_to_firebase() {
-        assert_eq!(
-            persistence_spec_from_env(&env(&[])),
-            Ok(PersistenceSpec::Firestore)
-        );
-        assert_eq!(
-            persistence_spec_from_env(&env(&[
-                ("DATA_BACKEND", "postgres"),
-                ("DATABASE_URL", "postgres://x"),
-                ("PGPOOL_MAX", "7")
-            ])),
-            Ok(PersistenceSpec::Postgres {
-                connection_string: "postgres://x".into(),
-                pool_max: Some(7)
-            })
-        );
-        assert_eq!(
-            persistence_spec_from_env(&env(&[
-                ("DATA_BACKEND", "couchdb"),
-                ("COUCHDB_URL", "http://c:5984")
-            ])),
-            Ok(PersistenceSpec::CouchDb {
-                url: "http://c:5984".into()
-            })
-        );
-        assert!(
-            persistence_spec_from_env(&env(&[("DATA_BACKEND", "postgres")]))
-                .unwrap_err()
-                .contains("requires DATABASE_URL")
-        );
-        assert!(
-            persistence_spec_from_env(&env(&[("DATA_BACKEND", "oracle")]))
-                .unwrap_err()
-                .contains("must be one of")
-        );
-    }
-
-    #[test]
-    fn mock_is_refused_in_production_and_an_unset_node_env_counts_as_production() {
-        for pairs in [
-            &[("DATA_BACKEND", "mock")][..],
-            &[("USE_MOCK_DATA", "true")][..],
-            &[("DATA_BACKEND", "mock"), ("NODE_ENV", "production")][..],
-        ] {
-            let leaked: &'static [(&'static str, &'static str)] =
-                Box::leak(pairs.to_vec().into_boxed_slice());
-            assert!(
-                persistence_spec_from_env(&env(leaked))
-                    .unwrap_err()
-                    .contains("not permitted"),
-                "{pairs:?}"
-            );
-        }
-        assert_eq!(
-            persistence_spec_from_env(&env(&[
-                ("DATA_BACKEND", "mock"),
-                ("NODE_ENV", "development")
-            ])),
-            Ok(PersistenceSpec::Mock),
-            "control: development allows mock"
-        );
-        assert!(persistence_spec_from_env(&env(&[("USE_MOCK_DATA", "yes")]))
-            .unwrap_err()
-            .contains("'true' or 'false'"));
-    }
-
-    #[test]
-    fn the_environment_builds_the_firestore_driver_and_a_missing_driver_names_itself() {
-        let no_file = |_: &str| -> Result<String, String> { Err("no file".into()) };
-        let built = persistence_from_env(
-            &env(&[("FIRESTORE_EMULATOR_HOST", "127.0.0.1:8080")]),
-            &no_file,
-            Arc::new(Dead),
-        )
-        .unwrap();
-        let caps = built
-            .query_capabilities()
-            .expect("the driver declares its push-down");
-        assert!(caps.window && caps.exact_total);
-        assert!(built.write_capabilities().is_some_and(|w| w.atomic_batch));
-        assert!(
-            persistence_from_env(&env(&[]), &no_file, Arc::new(Dead)).is_err(),
-            "control: no credentials builds nothing"
-        );
-        let postgres = persistence_from_env(
-            &env(&[
-                ("DATA_BACKEND", "postgres"),
-                ("DATABASE_URL", "postgres://u:p@127.0.0.1:1/db"),
-            ]),
-            &no_file,
-            Arc::new(Dead),
-        )
-        .unwrap();
-        assert!(
-            postgres
-                .write_capabilities()
-                .is_some_and(|w| w.atomic_batch),
-            "the Postgres driver declares its transactions"
-        );
-        assert!(
-            postgres
-                .query_capabilities()
-                .is_some_and(|q| q.nearest.is_none()),
-            "and leaves nearest to the kernel"
-        );
-        let couch = persistence_from_env(
-            &env(&[
-                ("DATA_BACKEND", "couchdb"),
-                ("COUCHDB_URL", "http://c:5984"),
-            ]),
-            &no_file,
-            Arc::new(Dead),
-        )
-        .unwrap();
-        assert!(
-            couch.write_capabilities().is_some_and(|w| !w.atomic_batch),
-            "CouchDB cannot make a batch atomic"
-        );
-        for (backend, key, value) in [
-            ("postgres", "DATABASE_URL", "mysql://x"),
-            ("couchdb", "COUCHDB_URL", "ftp://c"),
-        ] {
-            let leaked: &'static [(&'static str, &'static str)] =
-                Box::leak(vec![("DATA_BACKEND", backend), (key, value)].into_boxed_slice());
-            assert!(
-                persistence_from_env(&env(leaked), &no_file, Arc::new(Dead)).is_err(),
-                "control: a {backend} url of another scheme builds nothing"
-            );
-        }
-        let mock = persistence_from_env(
-            &env(&[("DATA_BACKEND", "mock"), ("NODE_ENV", "development")]),
-            &no_file,
-            Arc::new(Dead),
-        )
-        .unwrap();
-        assert!(
-            !mock.durable() && mock.entity_types().is_empty(),
-            "control: development builds the in-memory adapter"
-        );
-    }
 
     fn row(pairs: &[(&str, &str)]) -> Value {
         let mut m = orbital_core::ValueMap::new();

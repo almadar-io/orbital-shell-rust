@@ -72,7 +72,7 @@ fn run_app(
 
 
 /// The transport for a terminal app: a server at `server_url`, else the
-/// in-process kernel (offline, seeded like every headless client).
+/// in-process kernel (offline).
 fn bridge(
     schema: &OrbitalSchema,
     server_url: Option<&str>,
@@ -82,7 +82,6 @@ fn bridge(
         None => {
             let kernel = KernelBridge::new(schema.clone())
                 .map_err(|e| anyhow::anyhow!("kernel bridge: {e}"))?;
-            kernel.seed_sample(schema, 3);
             Arc::new(kernel)
         }
     })

@@ -42,10 +42,9 @@ impl Renderer {
     }
 }
 
-/// A seeded in-process kernel: `count` sample rows per entity.
-fn kernel(schema: &OrbitalSchema, count: usize) -> Result<Arc<dyn ServerBridge>, String> {
+/// An in-process kernel over the app's own rows.
+fn kernel(schema: &OrbitalSchema) -> Result<Arc<dyn ServerBridge>, String> {
     let kernel = KernelBridge::new(schema.clone()).map_err(|e| format!("kernel bridge: {e}"))?;
-    kernel.seed_sample(schema, count);
     Ok(Arc::new(kernel))
 }
 
@@ -92,10 +91,10 @@ impl Surface {
     }
 }
 
-/// Every orbital, seeded and initialised, captured once.
+/// Every orbital, initialised, captured once.
 fn screenshot(renderer: Renderer, item: &str, schema: &OrbitalSchema, out_dir: &Path) -> Result<Vec<PathBuf>, String> {
     std::fs::create_dir_all(out_dir).map_err(|e| format!("{}: {e}", out_dir.display()))?;
-    let mut surface = Surface::mount(renderer, schema, kernel(schema, 3)?)?;
+    let mut surface = Surface::mount(renderer, schema, kernel(schema)?)?;
     let mut written = Vec::new();
     for idx in 0..schema.orbitals.len().max(1) {
         surface.drive(|core| {
@@ -146,7 +145,7 @@ fn frames(renderer: Renderer, item: &str, schema: &OrbitalSchema, out_dir: &Path
         .collect();
 
     let build = || -> Result<Surface, String> {
-        let mut surface = Surface::mount(renderer, schema, kernel(schema, 3)?)?;
+        let mut surface = Surface::mount(renderer, schema, kernel(schema)?)?;
         surface.drive(|core| {
             core.set_active_trait(&trait_name);
             core.init_all_traits_blocking();
