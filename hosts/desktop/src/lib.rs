@@ -10,7 +10,7 @@ use orbital_core::client::http::SyncServerBridge;
 use orbital_core::client::render_probe::{GameCanvasOutcome, RenderTarget};
 use orbital_core::desktop_protocol::{DesktopProgram, DesktopReply, DesktopRequest, RENDERERS};
 use orbital_core::shell_protocol::{ShellFailure, CODE_BAD_REQUEST, CODE_GENERATE_FAILED};
-use orbital_core::{OrbitalSchema, TraitDefinition, Value};
+use orbital_core::OrbitalSchema;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -107,98 +107,6 @@ fn screenshot(renderer: Renderer, item: &str, schema: &OrbitalSchema, out_dir: &
     Ok(written)
 }
 
-/// The trait that drives the visible `main` slot the most (so frames differ as it
-/// transitions); ties broken by state count.
-fn frames_trait(schema: &OrbitalSchema) -> Option<&TraitDefinition> {
-    let renders_main = |t: &TraitDefinition| -> usize {
-        t.state_machine
-            .transitions
-            .iter()
-            .filter(|tr| {
-                tr.effects.as_ref().is_some_and(|effs| {
-                    effs.iter().any(|e| {
-                        let effect = serde_json::to_value(e).unwrap_or(serde_json::Value::Null);
-                        effect.get(0).and_then(serde_json::Value::as_str) == Some("render-ui")
-                            && effect.get(1).and_then(serde_json::Value::as_str) == Some("main")
-                    })
-                })
-            })
-            .count()
-    };
-    orbital_core::planner::inline_traits(schema)
-        .into_iter()
-        .max_by_key(|t| (renders_main(t), t.state_machine.states.len()))
-}
-
-/// One hermetic capture per planned transition of the richest trait, plus a
-/// `<item>.frames.json` manifest (the vision-review input). Progress goes to stderr.
-fn frames(renderer: Renderer, item: &str, schema: &OrbitalSchema, out_dir: &Path) -> Result<Vec<PathBuf>, String> {
-    std::fs::create_dir_all(out_dir).map_err(|e| format!("{}: {e}", out_dir.display()))?;
-    let td = frames_trait(schema).ok_or("no inline traits to walk")?;
-    let trait_name = td.name.clone();
-    let owner_fields = orbital_core::runtime::owner_fields_from_schema(schema);
-    let ctx = orbital_core::planner::EntityCtx { schema, owner_fields: &owner_fields, viewer_id: None };
-    // A reply-route step is never driven: the reply arrives inside its request's own dispatch.
-    let steps: Vec<_> = orbital_core::planner::plan_trait(td, &ctx, None)
-        .into_iter()
-        .filter(|step| step.reply.is_none())
-        .collect();
-
-    let build = || -> Result<Surface, String> {
-        let mut surface = Surface::mount(renderer, schema, kernel(schema)?)?;
-        surface.drive(|core| {
-            core.set_active_trait(&trait_name);
-            core.init_all_traits_blocking();
-        })?;
-        Ok(surface)
-    };
-
-    let mut written = Vec::new();
-    let mut manifest = Vec::new();
-    let mut record = |idx: usize, from: &str, event: &str, to: &str, path: &Path| {
-        manifest.push(serde_json::json!({
-            "frame": idx, "trait": trait_name, "from": from, "event": event, "to": to,
-            "png": path.to_string_lossy(),
-        }));
-    };
-
-    let mut surface = build()?;
-    let state = surface.drive(|core| {
-        core.settle(8);
-        core.current_state.clone()
-    })?;
-    let path = surface.capture(&out_dir.join(format!("{item}.frame00.initial")))?;
-    eprintln!("    📸 frame 0 INIT → {state} — {}", path.display());
-    record(0, "·", "INIT", &state, &path);
-    written.push(path);
-
-    for (n, step) in steps.iter().take(10).enumerate() {
-        let idx = n + 1;
-        let mut surface = build()?;
-        let replay = orbital_core::planner::replay_path(td, &step.from, &ctx, None);
-        surface.drive(|core| {
-            for (event, payload) in replay.into_iter().flatten() {
-                let value = serde_json::from_value(payload).unwrap_or(Value::Null);
-                core.drive_blocking(&event, Some(&trait_name), value);
-            }
-            let payload = serde_json::from_value(step.payload.clone()).unwrap_or(Value::Null);
-            core.drive_blocking(&step.event, Some(&trait_name), payload);
-        })?;
-        let path = surface.capture(&out_dir.join(format!("{item}.frame{idx:02}.{}", step.event)))?;
-        eprintln!("    📸 frame {idx} {} --{}--> {} — {}", step.from, step.event, step.to, path.display());
-        record(idx, &step.from, &step.event, &step.to, &path);
-        written.push(path);
-    }
-
-    let manifest_path = out_dir.join(format!("{item}.frames.json"));
-    let manifest = serde_json::json!({ "item": item, "trait": td.name, "frames": manifest });
-    std::fs::write(&manifest_path, serde_json::to_string_pretty(&manifest).map_err(|e| e.to_string())?)
-        .map_err(|e| format!("{}: {e}", manifest_path.display()))?;
-    eprintln!("    📋 manifest: {}", manifest_path.display());
-    written.push(manifest_path);
-    Ok(written)
-}
-
 fn coverage(renderer: Renderer) -> DesktopReply {
     match renderer {
         Renderer::Dioxus => {
@@ -225,9 +133,6 @@ impl DesktopProgram for Desktop {
             })),
             DesktopRequest::Screenshot { renderer, item, schema, out_dir } => {
                 screenshot(Renderer::parse(&renderer)?, &item, &schema, &out_dir).map(DesktopReply::Files).map_err(failed)
-            }
-            DesktopRequest::Frames { renderer, item, schema, out_dir } => {
-                frames(Renderer::parse(&renderer)?, &item, &schema, &out_dir).map(DesktopReply::Files).map_err(failed)
             }
         }
     }

@@ -148,9 +148,17 @@ impl SelfSubstrate {
 }
 
 /// One live item as a `program/live` stream event: `{ event, payload?, source }`, the `/api/events` frame without its
-/// transport fields.
+/// transport fields, or `{ type: dispatch, orbitalName, request, response }` for a dispatch the host ran on its own.
 fn live_item_value(item: &LiveBroadcastItem) -> Value {
     let mut fields = ValueMap::new();
+    if let Some(dispatch) = &item.dispatch {
+        fields.insert("type".to_string(), Value::String("dispatch".to_string()));
+        fields.insert("orbitalName".to_string(), Value::String(dispatch.orbital_name.clone()));
+        fields.insert("request".to_string(), dispatch.request.clone());
+        let response = serde_json::to_value(&dispatch.response).ok().and_then(|json| serde_json::from_value::<Value>(json).ok());
+        fields.insert("response".to_string(), response.unwrap_or(Value::Null));
+        return Value::Object(fields);
+    }
     fields.insert("event".to_string(), Value::String(item.event.clone()));
     if let Some(payload) = &item.payload {
         fields.insert("payload".to_string(), payload.clone());
@@ -629,6 +637,7 @@ impl Host {
             Arc::new(
                 move |site: &CallSite,
                       event: &str,
+                      payload: &Value,
                       client_id: Option<&str>,
                       result: Result<DispatchOutcomes, DispatchError>| {
                     match result
@@ -648,15 +657,15 @@ impl Host {
                             &site.trait_name,
                             event,
                         );
-                        if let Some(kernel) = stamping.upgrade() {
+                        let kernel = stamping.upgrade();
+                        if let Some(kernel) = &kernel {
                             kernel.stamp_emitted_sources(&mut response);
                         }
-                        if let Some(client_id) = client_id {
-                            for item in LiveBroadcastItem::answered(&response, client_id) {
-                                let _ = tx.send(item);
-                            }
-                        }
                         broadcast_persisted(&tx, &response, client_id);
+                        let orbital = site.orbital.clone().or_else(|| kernel.as_ref().and_then(|k| k.orbital_of_trait(&site.trait_name)));
+                        if let (Some(client_id), Some(orbital)) = (client_id, orbital) {
+                            let _ = tx.send(LiveBroadcastItem::dispatched(orbital, &site.trait_name, event, payload, &site.entity_id, response, client_id));
+                        }
                     }
                     Err(error) => tracing::warn!(
                         target: orbital_core::logging::ns::SERVER_DATA,
@@ -1820,6 +1829,7 @@ mod tests {
             source: orbital_core::effects::BusEventSource::from_trait("Elsewhere".to_string()),
             origin_client_id: None,
             target: orbital_core::effects::LiveTarget::Peers,
+            dispatch: None,
         });
     }
 
@@ -2478,7 +2488,7 @@ mod tests {
         .expect("the program parses")
     }
 
-    fn origin_items(live: &mut broadcast::Receiver<LiveBroadcastItem>, event: &str) -> Vec<LiveBroadcastItem> {
+    fn items_of(live: &mut broadcast::Receiver<LiveBroadcastItem>, event: &str) -> Vec<LiveBroadcastItem> {
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
         let mut seen = Vec::new();
         while std::time::Instant::now() < deadline {
@@ -2493,18 +2503,33 @@ mod tests {
     }
 
     #[test]
-    fn a_deferred_read_completion_emits_to_the_tab_whose_request_deferred_it() {
+    fn a_deferred_read_completion_goes_to_the_tab_that_deferred_it_as_a_dispatch_it_folds() {
         let dir = scratch_dir();
         let runtime = Host::new(Arc::new(DriverAdapter::memory())).shared();
         runtime.register_schema(deferred_reader(&dir)).unwrap();
         let mut live = runtime.subscribe_live();
         let answer = dispatch_request(&runtime, serde_json::json!({ "orbital": "Reader", "targetTrait": "Files", "event": "READ", "clientId": "tab-1" })).unwrap();
         assert!(answer["emittedEvents"].as_array().is_none_or(|e| e.iter().all(|e| e["event"] != "SEEN")), "the read is deferred: {answer}");
-        let items = origin_items(&mut live, "SEEN");
+        let items = items_of(&mut live, "READ_DONE");
         assert_eq!(items.len(), 1, "{items:?}");
-        assert_eq!(items[0].target, orbital_core::effects::LiveTarget::Origin);
         assert!(items[0].delivered_to(Some("tab-1"), |_| false));
         assert!(!items[0].delivered_to(Some("tab-2"), |_| true), "control: another tab does not get it");
+        let frame = serde_json::to_value(live_item_value(&items[0])).unwrap();
+        assert_eq!(frame["type"], "dispatch");
+        assert_eq!(frame["orbitalName"], "Reader");
+        assert_eq!(frame["request"]["targetTrait"], "Files");
+        assert_eq!(frame["request"]["event"], "READ_DONE");
+        assert!(frame["response"]["emittedEvents"].as_array().is_some_and(|e| e.iter().any(|e| e["event"] == "SEEN")), "{frame}");
+    }
+
+    #[test]
+    fn control_a_deferred_completions_emits_are_not_pushed_to_be_run_again() {
+        let dir = scratch_dir();
+        let runtime = Host::new(Arc::new(DriverAdapter::memory())).shared();
+        runtime.register_schema(deferred_reader(&dir)).unwrap();
+        let mut live = runtime.subscribe_live();
+        dispatch_request(&runtime, serde_json::json!({ "orbital": "Reader", "targetTrait": "Files", "event": "READ", "clientId": "tab-1" })).unwrap();
+        assert!(items_of(&mut live, "SEEN").is_empty(), "SEEN already ran on the server; it is inside the dispatch item");
     }
 
     #[test]
@@ -2514,6 +2539,47 @@ mod tests {
         runtime.register_schema(deferred_reader(&dir)).unwrap();
         let mut live = runtime.subscribe_live();
         dispatch_request(&runtime, serde_json::json!({ "orbital": "Reader", "targetTrait": "Files", "event": "READ" })).unwrap();
-        assert!(origin_items(&mut live, "SEEN").iter().all(|i| i.target != orbital_core::effects::LiveTarget::Origin));
+        assert!(items_of(&mut live, "READ_DONE").is_empty());
+    }
+    fn deferred_counter_reader(dir: &std::path::Path, done_rewrites_list: bool) -> orbital_core::OrbitalSchema {
+        let mut program = serde_json::to_value(deferred_reader(dir)).unwrap();
+        let items: Vec<serde_json::Value> = (0..50).map(|i| serde_json::json!({ "k": format!("item-{i}") })).collect();
+        let mut done = vec![serde_json::json!(["set", "@entity.count", ["+", "@entity.count", 1]]), serde_json::json!(["emit", "SEEN", { "text": "@payload.text" }])];
+        if done_rewrites_list {
+            done.insert(0, serde_json::json!(["set", "@entity.items", "@entity.items"]));
+        }
+        let orbital = &mut program["orbitals"][0];
+        orbital["entity"]["fields"] = serde_json::json!([
+            { "name": "id", "type": "string" },
+            { "name": "count", "type": "number", "default": 0 },
+            { "name": "items", "type": "array", "default": items }
+        ]);
+        orbital["traits"][0]["stateMachine"]["transitions"][1]["effects"] = serde_json::Value::Array(done);
+        serde_json::from_value(program).expect("the program parses")
+    }
+
+    fn completion_row(done_rewrites_list: bool) -> serde_json::Value {
+        let dir = scratch_dir();
+        let runtime = Host::new(Arc::new(DriverAdapter::memory())).shared();
+        runtime.register_schema(deferred_counter_reader(&dir, done_rewrites_list)).unwrap();
+        let mut live = runtime.subscribe_live();
+        dispatch_request(&runtime, serde_json::json!({ "orbital": "Reader", "targetTrait": "Files", "event": "READ", "clientId": "tab-1" })).unwrap();
+        let items = items_of(&mut live, "READ_DONE");
+        assert_eq!(items.len(), 1, "{items:?}");
+        let frame = serde_json::to_value(live_item_value(&items[0])).unwrap();
+        frame["response"]["entityByTrait"]["Files"].clone()
+    }
+
+    #[test]
+    fn a_deferred_completion_that_only_writes_a_counter_pushes_a_row_without_the_held_list() {
+        let row = completion_row(false);
+        assert!(row.get("count").is_some(), "{row}");
+        assert!(row.get("items").is_none(), "the unchanged list rode the pushed dispatch: {row}");
+    }
+
+    #[test]
+    fn control_a_deferred_completion_that_rewrites_the_list_pushes_it() {
+        let row = completion_row(true);
+        assert_eq!(row["items"].as_array().map(Vec::len), Some(50), "{row}");
     }
 }

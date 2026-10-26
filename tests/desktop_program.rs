@@ -68,15 +68,3 @@ fn screenshots_write_one_png_per_orbital_and_text_for_the_terminal() {
     assert!(std::fs::read_to_string(&txt[0]).unwrap().contains("Hello frames"));
     std::fs::remove_dir_all(&out).unwrap();
 }
-
-#[test]
-fn frames_capture_each_planned_transition_with_a_manifest() {
-    let out = std::env::temp_dir().join(format!("orb-desktop-frames-{}", std::process::id()));
-    let written = files(request(Path::new(BINARY), DesktopRequest::Frames { renderer: "tui".into(), item: "t".into(), schema: Box::new(program()), out_dir: out.clone() }).unwrap());
-    let manifest = written.last().unwrap();
-    assert!(manifest.ends_with("t.frames.json"));
-    let frames: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(manifest).unwrap()).unwrap();
-    assert!(frames["frames"].as_array().unwrap().iter().any(|f| f["event"] == "OPEN"));
-    assert!(written.iter().any(|p| std::fs::read_to_string(p).is_ok_and(|t| t.contains("Opened"))));
-    std::fs::remove_dir_all(&out).unwrap();
-}
