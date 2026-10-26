@@ -131,7 +131,12 @@ impl SelfSubstrate {
         let client_id = options.get("clientId").and_then(Value::as_str).map(str::to_string);
         let mut receiver = runtime.subscribe_live();
         let host = Arc::downgrade(&runtime);
+        let _stream = client_id.as_deref().map(|session| {
+            runtime.stream_opened(session);
+            StreamGuard { host: host.clone(), session: session.to_string() }
+        });
         Some(Box::new(move || loop {
+            let _held = &_stream;
             let Some(runtime) = host.upgrade() else { return StreamPoll::Ended };
             let item = match receiver.try_recv() {
                 Ok(item) => item,
@@ -532,6 +537,46 @@ pub struct Host {
     started: std::time::Instant,
     /// Who may run a tick pass over HTTP (`POST /api/tick`); none named, the route is not served.
     tick_invoker: RwLock<Option<Arc<orbital_core::runtime::auth::TickInvoker>>>,
+    /// Each `clientId` session's live streams and running requests; a session is freed when its streams have all
+    /// dropped and it is quiet (EXEC-DIST-9).
+    sessions: Mutex<std::collections::HashMap<String, SessionLife>>,
+}
+
+/// What the host knows of one client session's lifetime.
+#[derive(Default)]
+struct SessionLife {
+    streams: usize,
+    dropped: bool,
+    active: usize,
+}
+
+/// Holds one open live stream of a session; dropping it is the stream's end.
+struct StreamGuard {
+    host: std::sync::Weak<Host>,
+    session: String,
+}
+
+impl Drop for StreamGuard {
+    fn drop(&mut self) {
+        if let Some(host) = self.host.upgrade() {
+            host.stream_dropped(&self.session);
+        }
+    }
+}
+
+/// Holds one running request of a session, so the session is not freed under it.
+struct ActiveRequest<'a> {
+    host: &'a Host,
+    session: String,
+}
+
+impl Drop for ActiveRequest<'_> {
+    fn drop(&mut self) {
+        if let Some(life) = self.host.sessions.lock().get_mut(&self.session) {
+            life.active = life.active.saturating_sub(1);
+        }
+        self.host.free_quiet_sessions();
+    }
 }
 
 type InboundWaiters = Arc<
@@ -634,6 +679,7 @@ impl Host {
             let tx = live_tx.clone();
             let stamping = Arc::downgrade(&kernel);
             let waiters = inbound_waiters.clone();
+            let substrate = substrate.clone();
             Arc::new(
                 move |site: &CallSite,
                       event: &str,
@@ -668,7 +714,7 @@ impl Host {
                                 Some(kernel) => (kernel.client_view(response), kernel.browser_completion_payload(&site.trait_name, payload)),
                                 None => (response, payload.clone()),
                             };
-                            let _ = tx.send(LiveBroadcastItem::dispatched(orbital, &site.trait_name, event, &payload, &site.entity_id, response, client_id));
+                            let _ = tx.send(LiveBroadcastItem::dispatched(orbital, &site.trait_name, event, &payload, orbital_core::public_entity_id(&site.entity_id), response, client_id));
                         }
                     }
                     Err(error) => tracing::warn!(
@@ -679,6 +725,9 @@ impl Host {
                         "deferred completion dispatch failed",
                     ),
                 }
+                    if let Some(host) = substrate.shared() {
+                        host.free_quiet_sessions();
+                    }
                 },
             )
         };
@@ -706,6 +755,43 @@ impl Host {
             ticks: Mutex::new(orbital_core::TickClock::from_orbitals(&[])),
             started: std::time::Instant::now(),
             tick_invoker: RwLock::new(None),
+            sessions: Mutex::default(),
+        }
+    }
+
+    fn stream_opened(&self, session: &str) {
+        let mut sessions = self.sessions.lock();
+        let life = sessions.entry(session.to_string()).or_default();
+        life.streams += 1;
+        life.dropped = false;
+    }
+
+    fn stream_dropped(&self, session: &str) {
+        if let Some(life) = self.sessions.lock().get_mut(session) {
+            life.streams = life.streams.saturating_sub(1);
+            life.dropped = life.streams == 0;
+        }
+        self.free_quiet_sessions();
+    }
+
+    fn hold_session(&self, session: &str) -> ActiveRequest<'_> {
+        self.sessions.lock().entry(session.to_string()).or_default().active += 1;
+        ActiveRequest { host: self, session: session.to_string() }
+    }
+
+    /// Free every session whose live streams have dropped and that is quiet: no running request, no pending keyed
+    /// ask, stream or subscription of its own (EXEC-DIST-9).
+    fn free_quiet_sessions(&self) {
+        let live = self.handles.completions.live_keys();
+        let mut sessions = self.sessions.lock();
+        let quiet: Vec<String> = sessions
+            .iter()
+            .filter(|(session, life)| life.dropped && life.active == 0 && !self.sink.session_pending(session, &live))
+            .map(|(session, _)| session.clone())
+            .collect();
+        for session in quiet {
+            sessions.remove(&session);
+            self.kernel.free_session(&session);
         }
     }
 
@@ -940,7 +1026,7 @@ impl Host {
         };
         let mut request = serde_json::Map::new();
         request.insert("payload".to_string(), orbital_core::json_value::value_to_json(payload));
-        for key in ["event", "entityId", "targetTrait", "clientId", "locale", "delivery", "dispatchLog", "mount"] {
+        for key in ["event", "entityId", "targetTrait", "clientId", "locale", "delivery", "dispatchLog", "mount", "entityByTrait"] {
             if let Some(value) = json(key).filter(present) {
                 request.insert(key.to_string(), value);
             }
@@ -957,6 +1043,18 @@ impl Host {
         let payload = request.payload.clone().unwrap_or(Value::Null);
         let failed = |e: HostError| (e.to_string(), "EVENT_PROCESSING_ERROR", e.status_code());
         let _origin = self.enter_origin(request.client_id.as_deref());
+        let mounting = request.mount.as_deref().is_some_and(|seeds| !seeds.is_empty());
+        let revived = match request.client_id.as_deref() {
+            Some(client) if self.kernel.session_ended(client) => {
+                if !mounting {
+                    return Err((format!("session {client} ended: mount again with the frames the client holds"), "SESSION_ENDED", 409));
+                }
+                self.kernel.revive_session(client);
+                true
+            }
+            _ => false,
+        };
+        let _active = request.client_id.as_deref().map(|client| self.hold_session(client));
         let _session = match request.client_id.as_deref() {
             Some(client) => Some(self.kernel.enter_session(client)),
             None if flag("wire") => Some(self.kernel.enter_scratch_session()),
@@ -1005,8 +1103,18 @@ impl Host {
         let _locale = self.enter_locale(request.locale.as_deref()).map_err(|e| (e.to_string(), "LOCALE_NOT_DECLARED", 400))?;
         let client_id = request.client_id.as_deref();
         let (outcomes, response): Ran = if let Some(seeds) = request.mount.as_deref().filter(|seeds| !seeds.is_empty()) {
-            let outcomes = self.dispatch_mount(seeds, &entity_id, payload.clone()).map_err(failed)?;
+            let carried: std::collections::HashSet<String> = if revived {
+                self.kernel.seed_leg(request.traits.as_deref().unwrap_or_default(), request.entity_by_trait.as_ref(), Some(&entity_id));
+                request.traits.iter().flatten().map(|t| t.r#trait.clone()).chain(request.entity_by_trait.iter().flat_map(|rows| rows.keys().cloned())).collect()
+            } else {
+                Default::default()
+            };
+            let unseeded: Vec<orbital_core::effects::MountSeed> = seeds.iter().filter(|seed| !carried.contains(&seed.r#trait)).cloned().collect();
+            let outcomes = if unseeded.is_empty() { Vec::new() } else { self.dispatch_mount(&unseeded, &entity_id, payload.clone()).map_err(failed)? };
             let mut response = EventResponse::from_process_results_mount(&outcomes, &seeds[0].r#trait, seeds[0].event.as_str());
+            for (trait_name, row) in request.entity_by_trait.iter().flatten().filter(|(t, _)| revived && seeds.iter().any(|s| &s.r#trait == *t)) {
+                response.entity_by_trait.get_or_insert_with(Default::default).insert(trait_name.clone(), row.clone());
+            }
             self.echo_held_states(&mut response, &seeds[0].r#trait, &entity_id);
             (outcomes, response)
         } else if let Some(trait_name) = request.target_trait.as_deref() {
@@ -2784,11 +2892,12 @@ mod tests {
                 "traits": [
                     { "name": "Viewer", "linkedEntity": "Topic", "stateMachine": machine(
                         serde_json::json!([{ "key": "SET_TOPIC", "name": "Set", "payloadSchema": [{ "name": "topic", "type": "string", "required": true }] },
-                            { "key": "READ_BACK", "name": "Read" }, { "key": "OPEN", "name": "Open" }, { "key": "ITEM", "name": "Item" }, { "key": "LIVE_FAILED", "name": "Failed" }]),
+                            { "key": "READ_BACK", "name": "Read" }, { "key": "OPEN", "name": "Open" }, { "key": "CLOSE_FEED", "name": "Close feed" }, { "key": "ITEM", "name": "Item" }, { "key": "LIVE_FAILED", "name": "Failed" }]),
                         serde_json::json!([
                             arm("SET_TOPIC", serde_json::json!([["set", "@entity.topic", "@payload.topic"]])),
                             arm("READ_BACK", serde_json::json!([["set", "@entity.seen", "@entity.topic"]])),
                             arm("OPEN", serde_json::json!([["program/live", {}, { "key": "feed", "emit": { "onMessage": "ITEM", "failure": "LIVE_FAILED" } }]])),
+                            arm("CLOSE_FEED", serde_json::json!([["cancel-call", "feed"]])),
                             arm("ITEM", serde_json::json!([])),
                             arm("LIVE_FAILED", serde_json::json!([]))])) },
                     { "name": "Sibling", "linkedEntity": "Topic", "stateMachine": machine(
@@ -2976,6 +3085,126 @@ mod tests {
             .collect();
         orbital_core::effects::executor::SubstrateHandler::run(runtime.substrate.as_ref(), "program/dispatch", &args).expect("the dispatch runs");
         assert_eq!(runtime.kernel.stats().active_instances, before, "a scratch session's trait instance outlived its dispatch");
+    }
+
+    fn revive_host() -> Arc<Host> {
+        let mut program = serde_json::to_value(session_program(false)).unwrap();
+        let viewer = &mut program["orbitals"][0]["traits"][0]["stateMachine"];
+        viewer["events"].as_array_mut().unwrap().push(serde_json::json!({ "key": "INIT", "name": "Init" }));
+        viewer["transitions"].as_array_mut().unwrap().push(serde_json::json!(
+            { "from": "idle", "to": "idle", "event": "INIT", "effects": [["set", "@entity.topic", "from-init"]] }));
+        let runtime = Host::new(Arc::new(DriverAdapter::memory())).shared();
+        runtime.register_schema(serde_json::from_value(program).unwrap()).unwrap();
+        runtime
+    }
+
+    fn reconnect_mount(runtime: &Host, tab: &str, carried: Option<serde_json::Value>) -> Result<serde_json::Value, (String, serde_json::Value)> {
+        let mut extra = serde_json::json!({ "clientId": tab, "mount": [{ "trait": "Viewer", "event": "INIT" }] });
+        if let (Some(carried), serde_json::Value::Object(extra)) = (carried, &mut extra) {
+            extra.insert("traits".to_string(), serde_json::json!([{ "trait": "Viewer", "from": "idle" }]));
+            extra.insert("entityByTrait".to_string(), serde_json::json!({ "Viewer": carried }));
+        }
+        session_dispatch(runtime, "Viewer", "INIT", None, extra)
+    }
+
+    #[test]
+    fn a_sessions_frame_is_freed_once_its_live_stream_drops_and_it_is_quiet() {
+        let runtime = session_host(false);
+        session_dispatch(&runtime, "Viewer", "SET_TOPIC", Some("app"), as_tab("tab-a")).unwrap();
+        let stream = open_client_stream(&runtime, "tab-a");
+        assert!(runtime.kernel.frame_sessions().contains(&"tab-a".to_string()), "control: the frame exists while the stream is open");
+        drop(stream);
+        assert!(!runtime.kernel.frame_sessions().contains(&"tab-a".to_string()), "the ended quiet session's frame was kept");
+    }
+
+    #[test]
+    fn a_sessions_trait_state_is_freed_with_its_frames() {
+        let runtime = stepper_host();
+        step(&runtime, "ADVANCE", "tab-a", serde_json::json!({}));
+        let held = runtime.kernel.stats().active_instances;
+        let Value::Object(options) = serde_json::from_value(serde_json::json!({ "clientId": "tab-a" })).unwrap() else { panic!("options") };
+        let stream = runtime.substrate.live_source("program/live", &[Value::Object(options)]).expect("the client's live stream");
+        drop(stream);
+        assert!(runtime.kernel.stats().active_instances < held, "the ended session's trait instance was kept");
+    }
+
+    #[test]
+    fn a_session_is_kept_while_a_keyed_subscription_it_opened_is_pending() {
+        let runtime = session_host(false);
+        session_dispatch(&runtime, "Viewer", "SET_TOPIC", Some("app"), as_tab("tab-a")).unwrap();
+        session_dispatch(&runtime, "Viewer", "OPEN", None, as_tab("tab-a")).unwrap();
+        drop(open_client_stream(&runtime, "tab-a"));
+        assert!(runtime.kernel.frame_sessions().contains(&"tab-a".to_string()), "a session with a pending subscription was freed");
+    }
+
+    #[test]
+    fn a_session_is_freed_once_the_subscription_it_held_has_been_cancelled() {
+        let runtime = session_host(false);
+        session_dispatch(&runtime, "Viewer", "SET_TOPIC", Some("app"), as_tab("tab-a")).unwrap();
+        session_dispatch(&runtime, "Viewer", "OPEN", None, as_tab("tab-a")).unwrap();
+        session_dispatch(&runtime, "Viewer", "CLOSE_FEED", None, as_tab("tab-a")).unwrap();
+        drop(open_client_stream(&runtime, "tab-a"));
+        assert!(!runtime.kernel.frame_sessions().contains(&"tab-a".to_string()), "a quiet session stayed");
+    }
+
+    #[test]
+    fn a_request_to_a_freed_session_is_refused_with_a_named_error_and_never_rebuilt_from_defaults() {
+        let runtime = session_host(false);
+        session_dispatch(&runtime, "Viewer", "SET_TOPIC", Some("app"), as_tab("tab-a")).unwrap();
+        drop(open_client_stream(&runtime, "tab-a"));
+        let (_, errors) = session_dispatch(&runtime, "Viewer", "READ_BACK", None, as_tab("tab-a")).unwrap_err();
+        assert_eq!(errors[0]["code"], "SESSION_ENDED", "{errors}");
+        assert_eq!(errors[0]["status"], 409, "{errors}");
+    }
+
+    #[test]
+    fn control_a_never_seen_client_starts_a_fresh_session_not_a_refusal() {
+        let runtime = session_host(false);
+        assert!(session_dispatch(&runtime, "Viewer", "READ_BACK", None, as_tab("tab-new")).is_ok());
+    }
+
+    #[test]
+    fn a_reconnect_mount_carrying_the_frame_rebuilds_it_exactly() {
+        let runtime = revive_host();
+        session_dispatch(&runtime, "Viewer", "SET_TOPIC", Some("app"), as_tab("tab-a")).unwrap();
+        drop(open_client_stream(&runtime, "tab-a"));
+        let mounted = reconnect_mount(&runtime, "tab-a", Some(serde_json::json!({ "topic": "app" }))).unwrap();
+        assert_eq!(mounted["entityByTrait"]["Viewer"]["topic"], "app", "the carried frame was not rebuilt: {mounted}");
+        assert_eq!(seen_by(&runtime, "Viewer", "READ_BACK", "tab-a"), "app", "the rebuilt session was reset by INIT");
+    }
+
+    #[test]
+    fn a_reconnect_mount_without_a_carried_frame_starts_from_init_as_a_fresh_tab_does() {
+        let runtime = revive_host();
+        session_dispatch(&runtime, "Viewer", "SET_TOPIC", Some("app"), as_tab("tab-a")).unwrap();
+        drop(open_client_stream(&runtime, "tab-a"));
+        reconnect_mount(&runtime, "tab-a", None).unwrap();
+        assert_eq!(seen_by(&runtime, "Viewer", "READ_BACK", "tab-a"), "from-init");
+    }
+
+    #[test]
+    fn control_a_mount_into_a_live_session_ignores_a_carried_frame_and_runs_init() {
+        let runtime = revive_host();
+        session_dispatch(&runtime, "Viewer", "SET_TOPIC", Some("app"), as_tab("tab-a")).unwrap();
+        let _stream = open_client_stream(&runtime, "tab-a");
+        reconnect_mount(&runtime, "tab-a", Some(serde_json::json!({ "topic": "stale" }))).unwrap();
+        assert_eq!(seen_by(&runtime, "Viewer", "READ_BACK", "tab-a"), "from-init");
+    }
+
+    #[test]
+    fn a_row_literally_named_singleton_keeps_its_own_state_beside_the_unaddressed_instance() {
+        let runtime = stepper_host();
+        step(&runtime, "ADVANCE", "tab-a", serde_json::json!({}));
+        let row = step(&runtime, "ADVANCE", "tab-a", serde_json::json!({ "entityId": "singleton" }));
+        assert_eq!(row["transitioned"], true, "the row named singleton shared the unaddressed instance's state: {row}");
+    }
+
+    #[test]
+    fn control_the_unaddressed_instance_keeps_its_state_across_requests() {
+        let runtime = stepper_host();
+        step(&runtime, "ADVANCE", "tab-a", serde_json::json!({}));
+        let again = step(&runtime, "ADVANCE", "tab-a", serde_json::json!({}));
+        assert_eq!(again["transitioned"], false, "{again}");
     }
 
 }
