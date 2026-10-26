@@ -664,7 +664,11 @@ impl Host {
                         broadcast_persisted(&tx, &response, client_id);
                         let orbital = site.orbital.clone().or_else(|| kernel.as_ref().and_then(|k| k.orbital_of_trait(&site.trait_name)));
                         if let (Some(client_id), Some(orbital)) = (client_id, orbital) {
-                            let _ = tx.send(LiveBroadcastItem::dispatched(orbital, &site.trait_name, event, payload, &site.entity_id, response, client_id));
+                            let (response, payload) = match &kernel {
+                                Some(kernel) => (kernel.client_view(response), kernel.browser_completion_payload(&site.trait_name, payload)),
+                                None => (response, payload.clone()),
+                            };
+                            let _ = tx.send(LiveBroadcastItem::dispatched(orbital, &site.trait_name, event, &payload, &site.entity_id, response, client_id));
                         }
                     }
                     Err(error) => tracing::warn!(
@@ -953,18 +957,26 @@ impl Host {
         let payload = request.payload.clone().unwrap_or(Value::Null);
         let failed = |e: HostError| (e.to_string(), "EVENT_PROCESSING_ERROR", e.status_code());
         let _origin = self.enter_origin(request.client_id.as_deref());
+        let _session = match request.client_id.as_deref() {
+            Some(client) => Some(self.kernel.enter_session(client)),
+            None if flag("wire") => Some(self.kernel.enter_scratch_session()),
+            None => None,
+        };
         let _viewer = options.get("viewer").filter(|v| matches!(v, Value::Object(_))).map(|user| self.enter_viewer(user.clone()));
         let Some(detail) = self.get_orbital(&orbital) else {
             return Err((format!("Orbital not found: {orbital}"), "ORBITAL_NOT_FOUND", 404));
         };
         let respond = |outcomes: &[(String, ProcessEventResult)], mut response: EventResponse| -> Result<Value, (String, &'static str, u16)> {
             self.kernel.stamp_emitted_sources(&mut response);
+            let items = if flag("stream") {
+                Some(serde_json::to_value(stream_items(outcomes, &response)).map_err(|e| (e.to_string(), "EVENT_PROCESSING_ERROR", 500))?)
+            } else {
+                None
+            };
+            let response = if flag("wire") { self.kernel.client_view(response) } else { response };
             let mut answer = serde_json::to_value(&response).map_err(|e| (e.to_string(), "EVENT_PROCESSING_ERROR", 500))?;
-            if flag("stream") {
-                let items = serde_json::to_value(stream_items(outcomes, &response)).map_err(|e| (e.to_string(), "EVENT_PROCESSING_ERROR", 500))?;
-                if let serde_json::Value::Object(fields) = &mut answer {
-                    fields.insert("items".to_string(), items);
-                }
+            if let (Some(items), serde_json::Value::Object(fields)) = (items, &mut answer) {
+                fields.insert("items".to_string(), items);
             }
             serde_json::from_value(answer).map_err(|e| (e.to_string(), "EVENT_PROCESSING_ERROR", 500))
         };
@@ -994,7 +1006,7 @@ impl Host {
         let client_id = request.client_id.as_deref();
         let (outcomes, response): Ran = if let Some(seeds) = request.mount.as_deref().filter(|seeds| !seeds.is_empty()) {
             let outcomes = self.dispatch_mount(seeds, &entity_id, payload.clone()).map_err(failed)?;
-            let mut response = EventResponse::from_process_results(&outcomes, &seeds[0].r#trait, seeds[0].event.as_str());
+            let mut response = EventResponse::from_process_results_mount(&outcomes, &seeds[0].r#trait, seeds[0].event.as_str());
             self.echo_held_states(&mut response, &seeds[0].r#trait, &entity_id);
             (outcomes, response)
         } else if let Some(trait_name) = request.target_trait.as_deref() {
@@ -2304,6 +2316,23 @@ mod tests {
         assert_eq!(bare["inputs"], answer["inputs"], "control: no options is the same reflection");
     }
 
+    /// `desk()` plus a `[client]` trait that listens to `Notes.NOTED`, so the client view keeps the emit (EXEC-DIST-8).
+    fn desk_with_a_client_listener() -> Arc<Host> {
+        let mut program = serde_json::to_value(dispatching_program()).unwrap();
+        program["orbitals"][0]["traits"].as_array_mut().unwrap().push(serde_json::json!({
+            "name": "Wall", "linkedEntity": "Note", "dispatch": "client",
+            "listens": [{ "event": "NOTED", "triggers": "SEEN_NOTE", "source": { "kind": "trait", "trait": "Notes" } }],
+            "stateMachine": {
+                "states": [{ "name": "idle", "isInitial": true }],
+                "events": [{ "key": "SEEN_NOTE", "name": "Seen note" }],
+                "transitions": [{ "from": "idle", "to": "idle", "event": "SEEN_NOTE", "effects": [] }]
+            }
+        }));
+        let runtime = Host::new(Arc::new(DriverAdapter::memory())).shared();
+        runtime.register_schema(serde_json::from_value(program).unwrap()).unwrap();
+        runtime
+    }
+
     fn desk() -> Arc<Host> {
         let runtime = Host::new(Arc::new(DriverAdapter::memory())).shared();
         runtime.register_schema(dispatching_program()).unwrap();
@@ -2347,7 +2376,7 @@ mod tests {
 
     #[test]
     fn a_wire_answer_stamps_each_emit_with_the_orbital_that_emitted_it() {
-        let runtime = desk();
+        let runtime = desk_with_a_client_listener();
         let answer = dispatch_request(&runtime, serde_json::json!({ "wire": true, "orbital": "Desk", "targetTrait": "Notes", "event": "ADD_NOTE", "viewer": { "id": "u1" } })).unwrap();
         let noted = answer["emittedEvents"].as_array().unwrap().iter().find(|e| e["event"] == "NOTED").cloned().expect("NOTED is answered");
         assert_eq!(noted["source"]["trait"], "Notes", "{noted}");
@@ -2391,9 +2420,12 @@ mod tests {
     #[test]
     fn a_request_addresses_its_entity_and_runs_a_mount_batch() {
         let runtime = desk();
-        dispatch_request(&runtime, serde_json::json!({ "wire": true, "orbital": "Desk", "targetTrait": "Notes", "event": "ADD_NOTE", "entityId": "n9", "viewer": { "id": "u1" } })).unwrap();
-        assert_eq!(runtime.kernel.snapshot_trait("Notes", Some("n9")).state, "idle");
-        assert_eq!(runtime.kernel.snapshot_trait("Notes", Some("n8")).state, "", "control: another entity was never addressed");
+        dispatch_request(&runtime, serde_json::json!({ "wire": true, "orbital": "Desk", "targetTrait": "Notes", "event": "ADD_NOTE", "entityId": "n9", "viewer": { "id": "u1" }, "clientId": "tab-a" })).unwrap();
+        {
+            let _tab = runtime.kernel.enter_session("tab-a");
+            assert_eq!(runtime.kernel.snapshot_trait("Notes", Some("n9")).state, "idle");
+            assert_eq!(runtime.kernel.snapshot_trait("Notes", Some("n8")).state, "", "control: another entity was never addressed");
+        }
         let mounted = dispatch_request(&runtime, serde_json::json!({ "wire": true, "orbital": "Desk", "event": "INIT", "mount": [{ "trait": "Agent", "event": "INIT" }] })).unwrap();
         assert!(mounted.get("success").is_some(), "a mount batch answers one EventResponse: {mounted}");
     }
@@ -2519,7 +2551,7 @@ mod tests {
         assert_eq!(frame["orbitalName"], "Reader");
         assert_eq!(frame["request"]["targetTrait"], "Files");
         assert_eq!(frame["request"]["event"], "READ_DONE");
-        assert!(frame["response"]["emittedEvents"].as_array().is_some_and(|e| e.iter().any(|e| e["event"] == "SEEN")), "{frame}");
+        assert_eq!(frame["response"]["states"]["Files"], "idle", "the completion's states fold on the tab: {frame}");
     }
 
     #[test]
@@ -2582,4 +2614,368 @@ mod tests {
         let row = completion_row(true);
         assert_eq!(row["items"].as_array().map(Vec::len), Some(50), "{row}");
     }
+    fn topic_program() -> orbital_core::OrbitalSchema {
+        serde_json::from_value(serde_json::json!({
+            "name": "Topics",
+            "orbitals": [{
+                "name": "Topics",
+                "entity": { "name": "Topic", "persistence": "runtime", "fields": [
+                    { "name": "id", "type": "string" }, { "name": "topic", "type": "string" }, { "name": "seen", "type": "string" }] },
+                "traits": [{
+                    "name": "Viewer", "linkedEntity": "Topic",
+                    "stateMachine": {
+                        "states": [{ "name": "idle", "isInitial": true }],
+                        "events": [{ "key": "SET_TOPIC", "name": "Set topic", "payloadSchema": [{ "name": "topic", "type": "string", "required": true }] },
+                            { "key": "READ_BACK", "name": "Read back" }],
+                        "transitions": [
+                            { "from": "idle", "to": "idle", "event": "SET_TOPIC", "effects": [["set", "@entity.topic", "@payload.topic"]] },
+                            { "from": "idle", "to": "idle", "event": "READ_BACK", "effects": [["set", "@entity.seen", "@entity.topic"]] }
+                        ]
+                    }
+                }]
+            }]
+        }))
+        .expect("the program parses")
+    }
+
+    fn topic_dispatch(runtime: &Host, event: &str, topic: Option<&str>, tab: &str) -> serde_json::Value {
+        let options = serde_json::json!({ "orbital": "Topics", "targetTrait": "Viewer", "event": event, "clientId": tab, "viewer": { "id": tab } });
+        let args: Vec<Value> = [serde_json::json!(format!("Topics.Viewer.{event}")), serde_json::json!(topic.map_or(serde_json::json!({}), |t| serde_json::json!({ "topic": t }))), options]
+            .iter()
+            .map(|a| serde_json::from_value(a.clone()).unwrap())
+            .collect();
+        let answer = orbital_core::effects::executor::SubstrateHandler::run(runtime.substrate.as_ref(), "program/dispatch", &args).expect("the dispatch runs");
+        orbital_core::json_value::value_to_json(&answer)
+    }
+
+    fn topic_host() -> Arc<Host> {
+        let runtime = Host::new(Arc::new(DriverAdapter::memory())).shared();
+        runtime.register_schema(topic_program()).unwrap();
+        runtime
+    }
+
+    #[test]
+    fn a_tabs_server_trait_frame_is_not_overwritten_by_another_tabs_dispatch() {
+        let runtime = topic_host();
+        topic_dispatch(&runtime, "SET_TOPIC", Some("app"), "tab-a");
+        topic_dispatch(&runtime, "SET_TOPIC", Some("cli"), "tab-b");
+        let read = topic_dispatch(&runtime, "READ_BACK", None, "tab-a");
+        assert_eq!(read["entityByTrait"]["Viewer"]["seen"], "app", "tab-b's write reached tab-a's frame: {read}");
+    }
+
+    #[test]
+    fn control_one_tab_reads_back_its_own_last_write() {
+        let runtime = topic_host();
+        topic_dispatch(&runtime, "SET_TOPIC", Some("app"), "tab-a");
+        let read = topic_dispatch(&runtime, "READ_BACK", None, "tab-a");
+        assert_eq!(read["entityByTrait"]["Viewer"]["seen"], "app", "{read}");
+    }
+    fn handoff_program() -> orbital_core::OrbitalSchema {
+        let machine = |events: serde_json::Value, arms: serde_json::Value| serde_json::json!({ "states": [{ "name": "idle", "isInitial": true }], "events": events, "transitions": arms });
+        serde_json::from_value(serde_json::json!({
+            "name": "Handoff",
+            "orbitals": [{
+                "name": "Handoff",
+                "entity": { "name": "Job", "persistence": "runtime", "fields": [{ "name": "id", "type": "string" }] },
+                "traits": [
+                    { "name": "Source", "linkedEntity": "Job", "stateMachine": machine(
+                        serde_json::json!([{ "key": "GO", "name": "Go" }]),
+                        serde_json::json!([{ "from": "idle", "to": "idle", "event": "GO", "effects": [
+                            ["emit", "HANDOFF", { "blob": "server-only-payload" }], ["emit", "PAINT", { "label": "for-the-client" }]] }])) },
+                    { "name": "Sink", "linkedEntity": "Job",
+                      "listens": [{ "event": "HANDOFF", "triggers": "TAKE", "source": { "kind": "trait", "trait": "Source" } }],
+                      "stateMachine": machine(serde_json::json!([{ "key": "TAKE", "name": "Take" }]), serde_json::json!([{ "from": "idle", "to": "idle", "event": "TAKE", "effects": [] }])) },
+                    { "name": "Painter", "linkedEntity": "Job", "dispatch": "client",
+                      "listens": [{ "event": "PAINT", "triggers": "SHOW", "source": { "kind": "trait", "trait": "Source" } }],
+                      "stateMachine": machine(serde_json::json!([{ "key": "SHOW", "name": "Show" }]), serde_json::json!([{ "from": "idle", "to": "idle", "event": "SHOW", "effects": [] }])) }
+                ]
+            }]
+        }))
+        .expect("the program parses")
+    }
+
+    fn handoff_answer(wire: bool) -> Vec<String> {
+        let runtime = Host::new(Arc::new(DriverAdapter::memory())).shared();
+        runtime.register_schema(handoff_program()).unwrap();
+        let answer = dispatch_request(&runtime, serde_json::json!({ "wire": wire, "orbital": "Handoff", "targetTrait": "Source", "event": "GO" })).unwrap();
+        answer["emittedEvents"].as_array().unwrap().iter().map(|e| e["event"].as_str().unwrap().to_string()).collect()
+    }
+
+    #[test]
+    fn a_wire_answer_drops_an_emit_only_server_traits_listen_to() {
+        let emitted = handoff_answer(true);
+        assert!(!emitted.contains(&"HANDOFF".to_string()), "{emitted:?}");
+    }
+
+    #[test]
+    fn control_a_wire_answer_keeps_an_emit_a_client_trait_listens_to() {
+        assert!(handoff_answer(true).contains(&"PAINT".to_string()));
+    }
+
+    #[test]
+    fn control_a_request_that_is_not_for_a_browser_keeps_every_emit() {
+        let emitted = handoff_answer(false);
+        assert!(emitted.contains(&"HANDOFF".to_string()) && emitted.contains(&"PAINT".to_string()), "{emitted:?}");
+    }
+
+    #[test]
+    fn a_pushed_server_trait_completion_drops_its_server_only_emits_and_its_payload() {
+        let dir = scratch_dir();
+        let runtime = Host::new(Arc::new(DriverAdapter::memory())).shared();
+        runtime.register_schema(deferred_reader(&dir)).unwrap();
+        let mut live = runtime.subscribe_live();
+        dispatch_request(&runtime, serde_json::json!({ "orbital": "Reader", "targetTrait": "Files", "event": "READ", "clientId": "tab-1" })).unwrap();
+        let items = items_of(&mut live, "READ_DONE");
+        assert_eq!(items.len(), 1, "{items:?}");
+        let frame = serde_json::to_value(live_item_value(&items[0])).unwrap();
+        assert!(frame["request"].get("payload").is_none(), "the completion payload rode the push: {frame}");
+        assert!(frame["response"]["emittedEvents"].as_array().is_none_or(|e| e.iter().all(|e| e["event"] != "SEEN")), "SEEN has no client listener: {frame}");
+    }
+    fn card_program(persistence: &str) -> orbital_core::OrbitalSchema {
+        serde_json::from_value(serde_json::json!({
+            "name": "Cards",
+            "orbitals": [{
+                "name": "Cards",
+                "entity": { "name": "Card", "persistence": persistence, "fields": [{ "name": "id", "type": "string" }, { "name": "label", "type": "string" }] },
+                "traits": [{
+                    "name": "Deck", "linkedEntity": "Card",
+                    "stateMachine": {
+                        "states": [{ "name": "idle", "isInitial": true }],
+                        "events": [{ "key": "SAVE", "name": "Save" }, { "key": "LIST", "name": "List" }, { "key": "L", "name": "Listed" }],
+                        "transitions": [
+                            { "from": "idle", "to": "idle", "event": "SAVE", "effects": [["persist", "create", "Card", { "id": "c1", "label": "x" }]] },
+                            { "from": "idle", "to": "idle", "event": "LIST", "effects": [["fetch", "Card", { "emit": { "success": "L" } }]] }
+                        ]
+                    }
+                }]
+            }]
+        }))
+        .expect("the program parses")
+    }
+
+    fn listed_card_ids(persistence: &str) -> Vec<String> {
+        let runtime = Host::new(Arc::new(DriverAdapter::memory())).shared();
+        runtime.register_schema(card_program(persistence)).unwrap();
+        dispatch_request(&runtime, serde_json::json!({ "orbital": "Cards", "targetTrait": "Deck", "event": "SAVE" })).unwrap();
+        let listed = dispatch_request(&runtime, serde_json::json!({ "orbital": "Cards", "targetTrait": "Deck", "event": "LIST" })).unwrap();
+        let rows = listed["data"]["Card"].as_array().cloned().unwrap_or_default();
+        rows.iter().filter_map(|r| r["id"].as_str().map(str::to_string)).collect()
+    }
+
+    #[test]
+    fn a_runtime_entity_created_by_one_dispatch_is_listed_by_the_next() {
+        assert_eq!(listed_card_ids("runtime"), ["c1"]);
+    }
+
+    #[test]
+    fn control_a_persistent_entity_created_by_one_dispatch_is_listed_by_the_next() {
+        assert_eq!(listed_card_ids("persistent"), ["c1"]);
+    }
+
+    fn session_program(shared: bool) -> orbital_core::OrbitalSchema {
+        let machine = |events: serde_json::Value, arms: serde_json::Value| serde_json::json!({ "states": [{ "name": "idle", "isInitial": true }], "events": events, "transitions": arms });
+        let arm = |event: &str, effects: serde_json::Value| serde_json::json!({ "from": "idle", "to": "idle", "event": event, "effects": effects });
+        serde_json::from_value(serde_json::json!({
+            "name": "Sessions",
+            "orbitals": [{
+                "name": "Sessions",
+                "entity": { "name": "Topic", "persistence": "runtime", "shared": shared, "fields": [
+                    { "name": "id", "type": "string" }, { "name": "topic", "type": "string", "default": "" }, { "name": "seen", "type": "string", "default": "" }] },
+                "traits": [
+                    { "name": "Viewer", "linkedEntity": "Topic", "stateMachine": machine(
+                        serde_json::json!([{ "key": "SET_TOPIC", "name": "Set", "payloadSchema": [{ "name": "topic", "type": "string", "required": true }] },
+                            { "key": "READ_BACK", "name": "Read" }, { "key": "OPEN", "name": "Open" }, { "key": "ITEM", "name": "Item" }, { "key": "LIVE_FAILED", "name": "Failed" }]),
+                        serde_json::json!([
+                            arm("SET_TOPIC", serde_json::json!([["set", "@entity.topic", "@payload.topic"]])),
+                            arm("READ_BACK", serde_json::json!([["set", "@entity.seen", "@entity.topic"]])),
+                            arm("OPEN", serde_json::json!([["program/live", {}, { "key": "feed", "emit": { "onMessage": "ITEM", "failure": "LIVE_FAILED" } }]])),
+                            arm("ITEM", serde_json::json!([])),
+                            arm("LIVE_FAILED", serde_json::json!([]))])) },
+                    { "name": "Sibling", "linkedEntity": "Topic", "stateMachine": machine(
+                        serde_json::json!([{ "key": "PEEK", "name": "Peek" }]),
+                        serde_json::json!([arm("PEEK", serde_json::json!([["set", "@entity.seen", "@entity.topic"]]))])) }
+                ]
+            }]
+        }))
+        .expect("the program parses")
+    }
+
+    fn session_host(shared: bool) -> Arc<Host> {
+        let runtime = Host::new(Arc::new(DriverAdapter::memory())).shared();
+        runtime.register_schema(session_program(shared)).unwrap();
+        runtime
+    }
+
+    fn session_dispatch(runtime: &Host, trait_name: &str, event: &str, topic: Option<&str>, extra: serde_json::Value) -> Result<serde_json::Value, (String, serde_json::Value)> {
+        let mut options = serde_json::json!({ "orbital": "Sessions", "targetTrait": trait_name, "event": event });
+        if let (serde_json::Value::Object(options), serde_json::Value::Object(extra)) = (&mut options, extra) {
+            options.extend(extra);
+        }
+        let payload = topic.map_or(serde_json::json!({}), |t| serde_json::json!({ "topic": t }));
+        let args: Vec<Value> = [serde_json::json!(format!("Sessions.{trait_name}.{event}")), payload, options]
+            .iter()
+            .map(|a| serde_json::from_value(a.clone()).unwrap())
+            .collect();
+        orbital_core::effects::executor::SubstrateHandler::run(runtime.substrate.as_ref(), "program/dispatch", &args)
+            .map(|v| orbital_core::json_value::value_to_json(&v))
+            .map_err(|f| (f.message, serde_json::Value::Array(f.errors.iter().map(orbital_core::json_value::value_to_json).collect())))
+    }
+
+    fn as_tab(tab: &str) -> serde_json::Value {
+        serde_json::json!({ "clientId": tab })
+    }
+
+    fn seen_by(runtime: &Host, trait_name: &str, event: &str, tab: &str) -> serde_json::Value {
+        let answer = session_dispatch(runtime, trait_name, event, None, as_tab(tab)).expect("the dispatch runs");
+        answer["entityByTrait"][trait_name]["seen"].clone()
+    }
+
+    fn open_client_stream(runtime: &Host, tab: &str) -> orbital_core::runtime::native_host::SubstrateSource {
+        let Value::Object(options) = serde_json::from_value(serde_json::json!({ "clientId": tab })).unwrap() else { panic!("options") };
+        runtime.substrate.live_source("program/live", &[Value::Object(options)]).expect("the client's live stream")
+    }
+
+    #[test]
+    fn control_a_sessions_frame_is_kept_while_its_live_stream_is_open() {
+        let runtime = session_host(false);
+        session_dispatch(&runtime, "Viewer", "SET_TOPIC", Some("app"), as_tab("tab-a")).unwrap();
+        let _stream = open_client_stream(&runtime, "tab-a");
+        assert_eq!(seen_by(&runtime, "Viewer", "READ_BACK", "tab-a"), "app");
+    }
+
+    #[test]
+    fn control_a_client_whose_stream_never_opened_keeps_its_frame() {
+        let runtime = session_host(false);
+        session_dispatch(&runtime, "Viewer", "SET_TOPIC", Some("app"), as_tab("tab-a")).unwrap();
+        assert_eq!(seen_by(&runtime, "Viewer", "READ_BACK", "tab-a"), "app");
+    }
+
+    #[test]
+    fn a_request_naming_no_client_is_its_own_scratch_session() {
+        let runtime = session_host(false);
+        let wire = serde_json::json!({ "wire": true });
+        session_dispatch(&runtime, "Viewer", "SET_TOPIC", Some("app"), wire.clone()).unwrap();
+        let read = session_dispatch(&runtime, "Viewer", "READ_BACK", None, wire).unwrap();
+        assert_ne!(read["entityByTrait"]["Viewer"]["seen"], "app", "a clientId-less request left a frame behind");
+        assert!(runtime.kernel.frame_sessions().is_empty(), "a scratch session outlived its dispatch: {:?}", runtime.kernel.frame_sessions());
+    }
+
+    #[test]
+    fn control_an_ask_naming_no_client_and_no_wire_runs_in_the_program_session() {
+        let runtime = session_host(false);
+        session_dispatch(&runtime, "Viewer", "SET_TOPIC", Some("app"), serde_json::json!({})).unwrap();
+        let read = session_dispatch(&runtime, "Viewer", "READ_BACK", None, serde_json::json!({})).unwrap();
+        assert_eq!(read["entityByTrait"]["Viewer"]["seen"], "app");
+    }
+
+    #[test]
+    fn control_a_request_naming_a_client_keeps_its_frame_across_requests() {
+        let runtime = session_host(false);
+        session_dispatch(&runtime, "Viewer", "SET_TOPIC", Some("app"), as_tab("tab-a")).unwrap();
+        assert_eq!(seen_by(&runtime, "Viewer", "READ_BACK", "tab-a"), "app");
+    }
+
+    #[test]
+    fn a_shared_entitys_frame_is_one_per_session_across_its_bound_traits() {
+        let runtime = session_host(true);
+        session_dispatch(&runtime, "Viewer", "SET_TOPIC", Some("app"), as_tab("tab-a")).unwrap();
+        assert_eq!(seen_by(&runtime, "Sibling", "PEEK", "tab-a"), "app", "a sibling in the same session reads the shared frame");
+        session_dispatch(&runtime, "Viewer", "SET_TOPIC", Some("cli"), as_tab("tab-b")).unwrap();
+        assert_eq!(seen_by(&runtime, "Sibling", "PEEK", "tab-a"), "app", "another session's write reached this session's shared frame");
+        assert_eq!(seen_by(&runtime, "Sibling", "PEEK", "tab-b"), "cli");
+    }
+
+    #[test]
+    fn a_mount_seeds_the_frames_of_the_session_that_mounted() {
+        let runtime = session_host(false);
+        session_dispatch(&runtime, "Viewer", "SET_TOPIC", Some("app"), as_tab("tab-a")).unwrap();
+        let mounted = session_dispatch(&runtime, "Viewer", "INIT", None, serde_json::json!({ "clientId": "tab-b", "mount": [{ "trait": "Viewer", "event": "INIT" }] })).unwrap();
+        assert_eq!(mounted["entityByTrait"]["Viewer"]["topic"], "", "tab-b's mount was seeded from tab-a's frame: {mounted}");
+    }
+
+    fn stepper_host() -> Arc<Host> {
+        let runtime = Host::new(Arc::new(DriverAdapter::memory())).shared();
+        runtime.register_schema(serde_json::from_value(serde_json::json!({
+            "name": "Steps",
+            "orbitals": [{
+                "name": "Steps",
+                "entity": { "name": "Step", "persistence": "runtime", "fields": [{ "name": "id", "type": "string" }] },
+                "traits": [{
+                    "name": "Stepper", "linkedEntity": "Step",
+                    "stateMachine": {
+                        "states": [{ "name": "a", "isInitial": true }, { "name": "b" }],
+                        "events": [{ "key": "ADVANCE", "name": "Advance" }, { "key": "INIT", "name": "Init" }, { "key": "PING", "name": "Ping" }],
+                        "transitions": [
+                            { "from": "a", "to": "b", "event": "ADVANCE", "effects": [] },
+                            { "from": "a", "to": "a", "event": "INIT", "effects": [] }
+                        ]
+                    }
+                }]
+            }]
+        })).expect("the program parses")).unwrap();
+        runtime
+    }
+
+    fn step(runtime: &Host, event: &str, tab: &str, extra: serde_json::Value) -> serde_json::Value {
+        let mut options = serde_json::json!({ "orbital": "Steps", "targetTrait": "Stepper", "event": event, "clientId": tab });
+        if let (serde_json::Value::Object(options), serde_json::Value::Object(extra)) = (&mut options, extra) {
+            options.extend(extra);
+        }
+        let args: Vec<Value> = [serde_json::json!(format!("Steps.Stepper.{event}")), serde_json::json!({}), options]
+            .iter()
+            .map(|a| serde_json::from_value(a.clone()).unwrap())
+            .collect();
+        let answer = orbital_core::effects::executor::SubstrateHandler::run(runtime.substrate.as_ref(), "program/dispatch", &args).expect("the dispatch runs");
+        orbital_core::json_value::value_to_json(&answer)
+    }
+
+    #[test]
+    fn a_tabs_trait_state_is_not_moved_by_another_tabs_transition() {
+        let runtime = stepper_host();
+        step(&runtime, "ADVANCE", "tab-b", serde_json::json!({}));
+        let own = step(&runtime, "ADVANCE", "tab-a", serde_json::json!({}));
+        assert_eq!(own["transitioned"], true, "tab-a was moved by tab-b's transition: {own}");
+        assert_eq!(own["states"]["Stepper"], "b");
+    }
+
+    #[test]
+    fn control_the_same_tab_sees_its_own_transition() {
+        let runtime = stepper_host();
+        step(&runtime, "ADVANCE", "tab-a", serde_json::json!({}));
+        let again = step(&runtime, "ADVANCE", "tab-a", serde_json::json!({}));
+        assert_eq!(again["transitioned"], false, "{again}");
+        assert_eq!(again["states"]["Stepper"], "b");
+    }
+
+    #[test]
+    fn a_held_state_echo_names_the_requesting_tabs_state() {
+        let runtime = stepper_host();
+        step(&runtime, "ADVANCE", "tab-b", serde_json::json!({}));
+        let quiet = step(&runtime, "PING", "tab-a", serde_json::json!({}));
+        assert_eq!(quiet["states"]["Stepper"], "a", "{quiet}");
+        let own = step(&runtime, "PING", "tab-b", serde_json::json!({}));
+        assert_eq!(own["states"]["Stepper"], "b", "control: tab-b holds its own state: {own}");
+    }
+
+    #[test]
+    fn a_mount_runs_from_the_state_of_the_session_that_mounts() {
+        let runtime = stepper_host();
+        step(&runtime, "ADVANCE", "tab-a", serde_json::json!({}));
+        let mounted = step(&runtime, "INIT", "tab-b", serde_json::json!({ "mount": [{ "trait": "Stepper", "event": "INIT" }] }));
+        assert_eq!(mounted["transitioned"], true, "tab-b's mount saw tab-a's state: {mounted}");
+    }
+
+    #[test]
+    fn a_scratch_request_leaves_no_trait_state_behind() {
+        let runtime = stepper_host();
+        let before = runtime.kernel.stats().active_instances;
+        let wire = serde_json::json!({ "wire": true });
+        let args: Vec<Value> = [serde_json::json!("Steps.Stepper.ADVANCE"), serde_json::json!({}), serde_json::json!({ "orbital": "Steps", "targetTrait": "Stepper", "event": "ADVANCE", "wire": wire["wire"] })]
+            .iter()
+            .map(|a| serde_json::from_value(a.clone()).unwrap())
+            .collect();
+        orbital_core::effects::executor::SubstrateHandler::run(runtime.substrate.as_ref(), "program/dispatch", &args).expect("the dispatch runs");
+        assert_eq!(runtime.kernel.stats().active_instances, before, "a scratch session's trait instance outlived its dispatch");
+    }
+
 }
