@@ -29,6 +29,6 @@ impl DioxusPatternRenderer for DateRangeSelectorRenderer {
         view: &DioxusView<'_>,
         _registry: &DioxusPatternRegistry,
     ) -> Element {
-        let __cn_merged = merge_class_name("almadar-date-range-selector", props); let event = get_string_or(props, "event", "RANGE"); let presets = { let mut p = get_string_array(props, "presets"); if p.is_empty() { p = vec!["Today".into(), "7d".into(), "30d".into(), "All".into()]; } p }; let sink = view.sink; rsx! { div { class: "{__cn_merged}", for preset in presets.iter() { { let label = preset.clone(); let ev = event.clone(); rsx! { span { class: "almadar-filter-pill", onclick: move |_| { if let Some(s) = sink { s.call((ev.clone(), Value::String(label.clone()))); } }, "{label}" } } } } } }
+        let __cn_merged = merge_class_name("almadar-date-range-selector", props); let event = get_string_or(props, "event", "RANGE"); let presets = { let mut p = get_string_array(props, "presets"); if p.is_empty() { p = vec!["Today".into(), "7d".into(), "30d".into(), "All".into()]; } p }; let sink = view.sink; rsx! { div { class: "{__cn_merged}", for preset in presets.iter() { { let label = preset.clone(); let ev = event.clone(); rsx! { span { class: "almadar-filter-pill", onclick: move |_| { if let Some(s) = sink { s.call((ev.clone(), Value::String(label.clone().into()))); } }, "{label}" } } } } } }
     }
 }

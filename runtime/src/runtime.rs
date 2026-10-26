@@ -122,7 +122,7 @@ impl SelfSubstrate {
         let runtime = self.shared()?;
         let options = match args.first() {
             Some(Value::Object(options)) => options.clone(),
-            _ => ValueMap::new(),
+            _ => ValueMap::new().into(),
         };
         if options.get("kind").and_then(Value::as_str) == Some("trace") {
             return Some(runtime.trace.source(&options));
@@ -157,20 +157,20 @@ impl SelfSubstrate {
 fn live_item_value(item: &LiveBroadcastItem) -> Value {
     let mut fields = ValueMap::new();
     if let Some(dispatch) = &item.dispatch {
-        fields.insert("type".to_string(), Value::String("dispatch".to_string()));
-        fields.insert("orbitalName".to_string(), Value::String(dispatch.orbital_name.clone()));
+        fields.insert("type".to_string(), Value::string("dispatch"));
+        fields.insert("orbitalName".to_string(), Value::string(dispatch.orbital_name.clone()));
         fields.insert("request".to_string(), dispatch.request.clone());
         let response = serde_json::to_value(&dispatch.response).ok().and_then(|json| serde_json::from_value::<Value>(json).ok());
         fields.insert("response".to_string(), response.unwrap_or(Value::Null));
-        return Value::Object(fields);
+        return Value::object(fields);
     }
-    fields.insert("event".to_string(), Value::String(item.event.clone()));
+    fields.insert("event".to_string(), Value::string(item.event.clone()));
     if let Some(payload) = &item.payload {
         fields.insert("payload".to_string(), payload.clone());
     }
     let source = serde_json::to_value(&item.source).ok().and_then(|json| serde_json::from_value::<Value>(json).ok());
     fields.insert("source".to_string(), source.unwrap_or(Value::Null));
-    Value::Object(fields)
+    Value::object(fields)
 }
 
 impl orbital_core::effects::executor::SubstrateHandler for SelfSubstrate {
@@ -442,7 +442,7 @@ impl EntitySource for PersistenceEntitySource {
         }
         let mut data_with_id = data.clone();
         if let Some(obj) = data_with_id.as_object_mut() {
-            obj.insert("id".to_string(), Value::String(id.to_string()));
+            obj.insert("id".to_string(), Value::string(id.to_string()));
         }
         self.adapter.create(entity_type, &data_with_id)
     }
@@ -1003,8 +1003,8 @@ impl Host {
         let answer = self.deliver_inbound(name, headers, body);
         let mut out = ValueMap::new();
         out.insert("status".to_string(), Value::Number(f64::from(answer.status)));
-        out.insert("body".to_string(), Value::String(answer.body));
-        Ok(Value::Object(out))
+        out.insert("body".to_string(), Value::string(answer.body));
+        Ok(Value::object(out))
     }
 
     /// A `program/dispatch` event request (owner, 2026-10-21): each option goes onto the seam the events and inputs
@@ -1737,18 +1737,18 @@ mod tests {
             .unwrap();
 
         let mut inner_data = ValueMap::new();
-        inner_data.insert("id".to_string(), Value::String("user-1".to_string()));
+        inner_data.insert("id".to_string(), Value::String(("user-1".to_string()).into()));
         inner_data.insert(
             "email".to_string(),
-            Value::String("test@example.com".to_string()),
+            Value::String(("test@example.com".to_string()).into()),
         );
-        inner_data.insert("name".to_string(), Value::String("Test User".to_string()));
+        inner_data.insert("name".to_string(), Value::String(("Test User".to_string()).into()));
 
         let mut payload = ValueMap::new();
-        payload.insert("data".to_string(), Value::Object(inner_data));
+        payload.insert("data".to_string(), Value::Object(inner_data.into()));
 
         let result = runtime
-            .process_event("UserManagement", "user-1", "SAVE", Value::Object(payload))
+            .process_event("UserManagement", "user-1", "SAVE", Value::Object(payload.into()))
             .unwrap();
 
         assert!(result.executed);
@@ -1869,8 +1869,8 @@ mod tests {
         let (inner, id) = (Arc::clone(&runtime), viewer.to_string());
         std::thread::spawn(move || {
             let mut user = ValueMap::new();
-            user.insert("id".to_string(), Value::String(id));
-            let _viewer = inner.enter_viewer(Value::Object(user));
+            user.insert("id".to_string(), Value::String(id.into()));
+            let _viewer = inner.enter_viewer(Value::Object(user.into()));
             let _ = tx.send(inner.dispatch_continuing("Agent", "default", "GO", Value::Null, None, None).map(|_| ()));
         });
         rx.recv_timeout(std::time::Duration::from_secs(20)).expect("the nested dispatch returns").unwrap();
@@ -1988,7 +1988,7 @@ mod tests {
 
     fn trace_source(runtime: &Host, options: serde_json::Value) -> orbital_core::runtime::native_host::SubstrateSource {
         let Value::Object(mut options) = serde_json::from_value(options).unwrap() else { panic!("options") };
-        options.insert("kind".into(), Value::String("trace".into()));
+        options.insert("kind".into(), Value::string("trace"));
         runtime.substrate.live_source("program/live", &[Value::Object(options)]).expect("shared trace source")
     }
 
@@ -2172,7 +2172,7 @@ mod tests {
         let failure = orbital_core::effects::executor::SubstrateHandler::run(
             runtime.substrate.as_ref(),
             "program/dispatch",
-            &[Value::String("Desk.Notes.ADD_NOTE".into()), Value::Null],
+            &[Value::string("Desk.Notes.ADD_NOTE"), Value::Null],
         )
         .unwrap_err();
         assert!(failure.message.contains("not shared"), "{}", failure.message);

@@ -34,7 +34,7 @@ impl DioxusPatternRenderer for ImportPreviewTreeRenderer {
                 Value::Null => "—".to_string(),
                 Value::Bool(b) => b.to_string(),
                 Value::Number(n) => if n.fract() == 0.0 { format!("{}", *n as i64) } else { format!("{n}") },
-                Value::String(s) => s.clone(),
+                Value::String(s) => s.clone().into_inner(),
                 Value::Array(items) => items.iter().map(fmt_field).collect::<Vec<_>>().join(", "),
                 Value::Object(_) => to_json(v).to_string(),
                 Value::Lambda { .. } => String::new(),
@@ -85,17 +85,17 @@ impl DioxusPatternRenderer for ImportPreviewTreeRenderer {
         let cancel_event = get_string(props, "onCancel");
         let action_button = |label: String, variant: &str, action: String| -> Value {
             let mut m = orbital_core::ValueMap::new();
-            m.insert("type".to_string(), Value::String("button".to_string()));
-            m.insert("label".to_string(), Value::String(label));
-            m.insert("variant".to_string(), Value::String(variant.to_string()));
-            m.insert("action".to_string(), Value::String(action));
-            Value::Object(m)
+            m.insert("type".to_string(), Value::String(("button".to_string()).into()));
+            m.insert("label".to_string(), Value::String(label.into()));
+            m.insert("variant".to_string(), Value::String(variant.to_string().into()));
+            m.insert("action".to_string(), Value::String(action.into()));
+            Value::Object(m.into())
         };
         let count_badge = |n: usize| -> Value {
             let mut m = orbital_core::ValueMap::new();
-            m.insert("type".to_string(), Value::String("badge".to_string()));
+            m.insert("type".to_string(), Value::String(("badge".to_string()).into()));
             m.insert("amount".to_string(), Value::Number(n as f64));
-            Value::Object(m)
+            Value::Object(m.into())
         };
         let cancel_button = cancel_event.map(|e| action_button(get_string_or(props, "cancelLabel", "Cancel"), "default", e));
         let confirm_button = confirm_event.map(|e| action_button(get_string_or(props, "confirmLabel", "Confirm import"), "primary", e));

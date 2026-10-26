@@ -33,12 +33,12 @@ impl DioxusPatternRenderer for GeometricPatternRenderer {
         let opacity = get_number_or(props, "opacity", 0.06);
         let scale = get_number_or(props, "scale", 1.0);
         let mut tile_props = orbital_core::ValueMap::new();
-        tile_props.insert("type".to_string(), Value::String("pattern-tile".to_string()));
-        tile_props.insert("variant".to_string(), Value::String(get_string_or(props, "variant", "star8")));
+        tile_props.insert("type".to_string(), Value::String(("pattern-tile".to_string()).into()));
+        tile_props.insert("variant".to_string(), Value::String(get_string_or(props, "variant", "star8").into()));
         tile_props.insert("size".to_string(), Value::Number(60.0 * scale));
-        tile_props.insert("color".to_string(), Value::String(get_string_or(props, "color", "var(--color-primary)")));
+        tile_props.insert("color".to_string(), Value::String(get_string_or(props, "color", "var(--color-primary)").into()));
         tile_props.insert("strokeWidth".to_string(), Value::Number(get_number_or(props, "strokeWidth", 0.5)));
-        let tile = Value::Object(tile_props);
+        let tile = Value::Object(tile_props.into());
         let frame = mode == "frame";
         let mask = match mode.as_str() {
             "left" => "mask-image:linear-gradient(to right, black 0%, transparent 60%);",

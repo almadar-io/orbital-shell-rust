@@ -35,7 +35,7 @@ impl DioxusPatternRenderer for AnimatedGraphicRenderer {
         let dim = |key: &str| -> Option<String> {
             match props.as_object().and_then(|o| o.get(key)) {
                 Some(Value::Number(n)) => Some(format!("{n}px")),
-                Some(Value::String(s)) if !s.is_empty() => Some(s.clone()),
+                Some(Value::String(s)) if !s.is_empty() => Some(s.clone().into_inner()),
                 _ => None,
             }
         };

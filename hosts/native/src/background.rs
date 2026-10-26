@@ -79,7 +79,7 @@ mod tests {
     #[test]
     fn readiness_uses_the_bound_address_and_validates_the_port() {
         let payload = |host: &str, port: f64| Value::Object([
-            ("host".to_string(), Value::String(host.to_string())),
+            ("host".to_string(), Value::String(host.to_string().into())),
             ("port".to_string(), Value::Number(port)),
         ].into_iter().collect());
         assert_eq!(listening(&payload("::1", 1234.0)).unwrap(), ("::1".to_string(), 1234));

@@ -51,7 +51,7 @@ fn seed_singletons(kernel: &KernelBridge, schema: &OrbitalSchema) {
                 row.insert(name.clone(), v);
             }
             let defaulted = row.len();
-            kernel.seed(&def.name, vec![Value::Object(row)]);
+            kernel.seed(&def.name, vec![Value::Object(row.into())]);
             tracing::debug!(target: NS, entity = %def.name, defaulted, "seeded singleton entity");
         }
     }

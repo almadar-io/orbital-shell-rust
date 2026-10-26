@@ -61,7 +61,7 @@ impl DioxusPatternRenderer for ImportSourcePickerRenderer {
                                 onclick: move |_| {
                                     if blocked { return; }
                                     if let (Some(s), Some(e)) = (sink, event.clone()) {
-                                        s.call((e, Value::String(picked.clone())));
+                                        s.call((e, Value::String(picked.clone().into())));
                                     }
                                 },
                                 if let Some(g) = glyph { span { class: "text-xl", "{g}" } }

@@ -72,7 +72,7 @@ impl DioxusPatternRenderer for GanttRenderer {
         fn text_of(v: Option<&Value>) -> String {
             match v {
                 None | Some(Value::Null) => String::new(),
-                Some(Value::String(s)) => s.clone(),
+                Some(Value::String(s)) => s.clone().into_inner(),
                 Some(other) => format_value(other),
             }
         }
@@ -228,8 +228,8 @@ impl DioxusPatternRenderer for GanttRenderer {
                                                     onclick: move |_| {
                                                         if let (Some(s), Some(e)) = (sink, ev.clone()) {
                                                             let mut payload = orbital_core::ValueMap::new();
-                                                            payload.insert("id".to_string(), Value::String(bar_id.clone()));
-                                                            s.call((e, Value::Object(payload)));
+                                                            payload.insert("id".to_string(), Value::String(bar_id.clone().into()));
+                                                            s.call((e, Value::Object(payload.into())));
                                                         }
                                                     },
                                                 }

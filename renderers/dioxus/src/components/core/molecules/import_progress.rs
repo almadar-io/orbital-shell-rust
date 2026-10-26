@@ -60,10 +60,10 @@ impl DioxusPatternRenderer for ImportProgressRenderer {
         };
         let badge = |label: String, variant: &str| -> Value {
             let mut m = orbital_core::ValueMap::new();
-            m.insert("type".to_string(), Value::String("badge".to_string()));
-            m.insert("label".to_string(), Value::String(label));
-            m.insert("variant".to_string(), Value::String(variant.to_string()));
-            Value::Object(m)
+            m.insert("type".to_string(), Value::String(("badge".to_string()).into()));
+            m.insert("label".to_string(), Value::String(label.into()));
+            m.insert("variant".to_string(), Value::String(variant.to_string().into()));
+            Value::Object(m.into())
         };
         let mut badges: Vec<Value> = Vec::new();
         if let Some(c) = counts.as_ref() {

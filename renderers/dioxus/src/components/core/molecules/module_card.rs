@@ -70,10 +70,10 @@ impl DioxusPatternRenderer for ModuleCardRenderer {
                 let tname = get_string_or(t, "name", "");
                 let machine = details.as_object().and_then(|d| d.get(&tname)).map(|detail| {
                     let mut m = orbital_core::ValueMap::new();
-                    m.insert("type".to_string(), Value::String("avl-state-machine".to_string()));
+                    m.insert("type".to_string(), Value::String(("avl-state-machine".to_string()).into()));
                     m.insert("trait".to_string(), detail.clone());
                     m.insert("showHeader".to_string(), Value::Bool(false));
-                    Value::Object(m)
+                    Value::Object(m.into())
                 });
                 let linked = |direction: &str| -> Vec<String> {
                     links.iter().filter(|l| get_string_or(l, "direction", "") == direction && get_string_or(l, "traitName", "") == tname).map(|l| get_string_or(l, "eventName", "")).collect()

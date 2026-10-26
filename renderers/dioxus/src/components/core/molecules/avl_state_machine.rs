@@ -34,7 +34,7 @@ impl DioxusPatternRenderer for AvlStateMachineRenderer {
                 Value::Null => "null".to_string(),
                 Value::Bool(b) => b.to_string(),
                 Value::Number(n) => if n.fract() == 0.0 { format!("{}", *n as i64) } else { format!("{n}") },
-                Value::String(s) => s.clone(),
+                Value::String(s) => s.clone().into_inner(),
                 Value::Array(items) => format!("({})", items.iter().map(sexpr).collect::<Vec<_>>().join(" ")),
                 Value::Object(_) => to_json(v).to_string(),
                 Value::Lambda { .. } => String::new(),
@@ -123,8 +123,8 @@ impl DioxusPatternRenderer for AvlStateMachineRenderer {
                                         onclick: move |_| {
                                             if let (Some(s), Some(e)) = (sink, ev.clone()) {
                                                 let mut payload = orbital_core::ValueMap::new();
-                                                payload.insert("stateId".to_string(), Value::String(name_for_click.clone()));
-                                                s.call((e, Value::Object(payload)));
+                                                payload.insert("stateId".to_string(), Value::String(name_for_click.clone().into()));
+                                                s.call((e, Value::Object(payload.into())));
                                             }
                                         },
                                         if let Some(v) = visit { span { class: "absolute -top-2 -left-2 flex items-center justify-center rounded-full border border-border bg-muted px-1 text-xs font-semibold text-muted-foreground", "{v + 1}" } }
@@ -157,10 +157,10 @@ impl DioxusPatternRenderer for AvlStateMachineRenderer {
                                             if let (Some(s), Some(e)) = (sink, click_event.clone()) {
                                                 let mut payload = orbital_core::ValueMap::new();
                                                 payload.insert("index".to_string(), Value::Number(payload_index));
-                                                payload.insert("event".to_string(), Value::String(payload_event.clone()));
-                                                payload.insert("from".to_string(), Value::String(payload_from.clone()));
-                                                payload.insert("to".to_string(), Value::String(payload_to.clone()));
-                                                s.call((e, Value::Object(payload)));
+                                                payload.insert("event".to_string(), Value::String(payload_event.clone().into()));
+                                                payload.insert("from".to_string(), Value::String(payload_from.clone().into()));
+                                                payload.insert("to".to_string(), Value::String(payload_to.clone().into()));
+                                                s.call((e, Value::Object(payload.into())));
                                             }
                                         },
                                         span { "{from}" }

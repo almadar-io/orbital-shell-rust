@@ -29,6 +29,6 @@ impl DioxusPatternRenderer for RelationSelectRenderer {
         view: &DioxusView<'_>,
         _registry: &DioxusPatternRegistry,
     ) -> Element {
-        let __cn_merged = merge_class_name("almadar-relation-select", props); let event = get_string_or(props, "event", "SELECT"); let label = get_string(props, "label"); let options = get_string_array(props, "options"); let sink = view.sink; rsx! { div { class: "{__cn_merged}", if let Some(l) = label { div { class: "almadar-relation-select__label", "{l}" } } for opt in options.iter() { { let opt_c = opt.clone(); let ev = event.clone(); rsx! { span { class: "almadar-filter-pill", onclick: move |_| { if let Some(s) = sink { s.call((ev.clone(), Value::String(opt_c.clone()))); } }, "{opt}" } } } } } }
+        let __cn_merged = merge_class_name("almadar-relation-select", props); let event = get_string_or(props, "event", "SELECT"); let label = get_string(props, "label"); let options = get_string_array(props, "options"); let sink = view.sink; rsx! { div { class: "{__cn_merged}", if let Some(l) = label { div { class: "almadar-relation-select__label", "{l}" } } for opt in options.iter() { { let opt_c = opt.clone(); let ev = event.clone(); rsx! { span { class: "almadar-filter-pill", onclick: move |_| { if let Some(s) = sink { s.call((ev.clone(), Value::String(opt_c.clone().into()))); } }, "{opt}" } } } } } }
     }
 }

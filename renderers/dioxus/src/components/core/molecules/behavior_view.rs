@@ -37,17 +37,17 @@ impl DioxusPatternRenderer for BehaviorViewRenderer {
             .filter_map(|n| details_map.as_object().and_then(|d| d.get(&n)).cloned())
             .map(|detail| {
                 let mut m = orbital_core::ValueMap::new();
-                m.insert("type".to_string(), Value::String("avl-state-machine".to_string()));
+                m.insert("type".to_string(), Value::String(("avl-state-machine".to_string()).into()));
                 m.insert("trait".to_string(), detail);
-                Value::Object(m)
+                Value::Object(m.into())
             })
             .collect();
         let empty = {
             let mut m = orbital_core::ValueMap::new();
-            m.insert("type".to_string(), Value::String("empty-state".to_string()));
-            m.insert("icon".to_string(), Value::String("workflow".to_string()));
-            m.insert("title".to_string(), Value::String("No trait data".to_string()));
-            Value::Object(m)
+            m.insert("type".to_string(), Value::String(("empty-state".to_string()).into()));
+            m.insert("icon".to_string(), Value::String(("workflow".to_string()).into()));
+            m.insert("title".to_string(), Value::String(("No trait data".to_string()).into()));
+            Value::Object(m.into())
         };
         rsx! {
             div { class: "{__cn_merged}",

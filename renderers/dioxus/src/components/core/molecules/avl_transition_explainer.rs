@@ -34,7 +34,7 @@ impl DioxusPatternRenderer for AvlTransitionExplainerRenderer {
                 Value::Null => "null".to_string(),
                 Value::Bool(b) => b.to_string(),
                 Value::Number(n) => if n.fract() == 0.0 { format!("{}", *n as i64) } else { format!("{n}") },
-                Value::String(s) => s.clone(),
+                Value::String(s) => s.clone().into_inner(),
                 Value::Array(items) => format!("({})", items.iter().map(sexpr).collect::<Vec<_>>().join(" ")),
                 Value::Object(_) => to_json(v).to_string(),
                 Value::Lambda { .. } => String::new(),
