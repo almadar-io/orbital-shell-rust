@@ -584,6 +584,7 @@ type InboundWaiters = Arc<
         Vec<(
             orbital_core::runtime::inbound::InboundRoute,
             std::sync::mpsc::Sender<orbital_core::runtime::inbound::InboundAnswer>,
+            Arc<Mutex<Vec<String>>>,
         )>,
     >,
 >;
@@ -689,7 +690,7 @@ impl Host {
                     match result
                 {
                     Ok(outcomes) => {
-                        waiters.lock().retain(|(route, answer)| {
+                        waiters.lock().retain(|(route, answer, _)| {
                             match RuntimeKernel::inbound_late_answer(route, &outcomes) {
                                 Some(late) => {
                                     let _ = answer.send(late);
@@ -717,13 +718,18 @@ impl Host {
                             let _ = tx.send(LiveBroadcastItem::dispatched(orbital, &site.trait_name, event, &payload, orbital_core::public_entity_id(&site.entity_id), response, client_id));
                         }
                     }
-                    Err(error) => tracing::warn!(
-                        target: orbital_core::logging::ns::SERVER_DATA,
-                        trait_name = %site.trait_name,
-                        event,
-                        %error,
-                        "deferred completion dispatch failed",
-                    ),
+                    Err(error) => {
+                        tracing::warn!(
+                            target: orbital_core::logging::ns::SERVER_DATA,
+                            trait_name = %site.trait_name,
+                            event,
+                            %error,
+                            "deferred completion dispatch failed",
+                        );
+                        for (_, _, failures) in waiters.lock().iter() {
+                            failures.lock().push(format!("{} {event}: {error}", site.trait_name));
+                        }
+                    }
                 }
                     if let Some(host) = substrate.shared() {
                         host.free_quiet_sessions();
@@ -1359,7 +1365,8 @@ impl Host {
             Err(failed) => return failed,
         };
         let (sender, receiver) = std::sync::mpsc::channel();
-        self.inbound_waiters.lock().push((route.clone(), sender));
+        let failures: Arc<Mutex<Vec<String>>> = Arc::default();
+        self.inbound_waiters.lock().push((route.clone(), sender, failures.clone()));
         let started = self
             .kernel
             .start_inbound(&route, headers, raw_body, credential.as_deref());
@@ -1368,14 +1375,14 @@ impl Host {
             Err(error) => {
                 self.inbound_waiters
                     .lock()
-                    .retain(|(waiting, _)| waiting != &route);
+                    .retain(|(waiting, _, _)| waiting != &route);
                 return dispatch_failed(&error.to_string());
             }
         };
         if RuntimeKernel::inbound_answered(&route, &outcomes) {
             self.inbound_waiters
                 .lock()
-                .retain(|(waiting, _)| waiting != &route);
+                .retain(|(waiting, _, _)| waiting != &route);
             return RuntimeKernel::inbound_answer(&route, &outcomes);
         }
         let answer = RuntimeKernel::await_inbound_answer(
@@ -1383,11 +1390,12 @@ impl Host {
             &outcomes,
             &receiver,
             || !self.open_calls().is_empty(),
+            &|| failures.lock().clone(),
             timeout,
         );
         self.inbound_waiters
             .lock()
-            .retain(|(waiting, _)| waiting != &route);
+            .retain(|(waiting, _, _)| waiting != &route);
         answer
     }
 
