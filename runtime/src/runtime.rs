@@ -131,10 +131,7 @@ impl SelfSubstrate {
         let client_id = options.get("clientId").and_then(Value::as_str).map(str::to_string);
         let mut receiver = runtime.subscribe_live();
         let host = Arc::downgrade(&runtime);
-        let _stream = client_id.as_deref().map(|session| {
-            runtime.stream_opened(session);
-            StreamGuard { host: host.clone(), session: session.to_string() }
-        });
+        let _stream = client_id.as_deref().map(|session| runtime.kernel.open_session_stream(session));
         Some(Box::new(move || loop {
             let _held = &_stream;
             let Some(runtime) = host.upgrade() else { return StreamPoll::Ended };
@@ -537,46 +534,6 @@ pub struct Host {
     started: std::time::Instant,
     /// Who may run a tick pass over HTTP (`POST /api/tick`); none named, the route is not served.
     tick_invoker: RwLock<Option<Arc<orbital_core::runtime::auth::TickInvoker>>>,
-    /// Each `clientId` session's live streams and running requests; a session is freed when its streams have all
-    /// dropped and it is quiet (EXEC-DIST-9).
-    sessions: Mutex<std::collections::HashMap<String, SessionLife>>,
-}
-
-/// What the host knows of one client session's lifetime.
-#[derive(Default)]
-struct SessionLife {
-    streams: usize,
-    dropped: bool,
-    active: usize,
-}
-
-/// Holds one open live stream of a session; dropping it is the stream's end.
-struct StreamGuard {
-    host: std::sync::Weak<Host>,
-    session: String,
-}
-
-impl Drop for StreamGuard {
-    fn drop(&mut self) {
-        if let Some(host) = self.host.upgrade() {
-            host.stream_dropped(&self.session);
-        }
-    }
-}
-
-/// Holds one running request of a session, so the session is not freed under it.
-struct ActiveRequest<'a> {
-    host: &'a Host,
-    session: String,
-}
-
-impl Drop for ActiveRequest<'_> {
-    fn drop(&mut self) {
-        if let Some(life) = self.host.sessions.lock().get_mut(&self.session) {
-            life.active = life.active.saturating_sub(1);
-        }
-        self.host.free_quiet_sessions();
-    }
 }
 
 type InboundWaiters = Arc<
@@ -732,13 +689,17 @@ impl Host {
                     }
                 }
                     if let Some(host) = substrate.shared() {
-                        host.free_quiet_sessions();
+                        host.kernel.free_quiet_sessions();
                     }
                 },
             )
         };
         let sink = Arc::new(KernelCompletionSink::new(kernel.clone(), answer, done));
         handles.completions.set_sink(sink.clone());
+        kernel.set_session_pending(Arc::new(orbital_core::runtime::os_host::completion::OsSessionPending::new(
+            handles.completions.clone(),
+            sink.clone(),
+        )));
 
         Self {
             config,
@@ -761,43 +722,6 @@ impl Host {
             ticks: Mutex::new(orbital_core::TickClock::from_orbitals(&[])),
             started: std::time::Instant::now(),
             tick_invoker: RwLock::new(None),
-            sessions: Mutex::default(),
-        }
-    }
-
-    fn stream_opened(&self, session: &str) {
-        let mut sessions = self.sessions.lock();
-        let life = sessions.entry(session.to_string()).or_default();
-        life.streams += 1;
-        life.dropped = false;
-    }
-
-    fn stream_dropped(&self, session: &str) {
-        if let Some(life) = self.sessions.lock().get_mut(session) {
-            life.streams = life.streams.saturating_sub(1);
-            life.dropped = life.streams == 0;
-        }
-        self.free_quiet_sessions();
-    }
-
-    fn hold_session(&self, session: &str) -> ActiveRequest<'_> {
-        self.sessions.lock().entry(session.to_string()).or_default().active += 1;
-        ActiveRequest { host: self, session: session.to_string() }
-    }
-
-    /// Free every session whose live streams have dropped and that is quiet: no running request, no pending keyed
-    /// ask, stream or subscription of its own (EXEC-DIST-9).
-    fn free_quiet_sessions(&self) {
-        let live = self.handles.completions.live_keys();
-        let mut sessions = self.sessions.lock();
-        let quiet: Vec<String> = sessions
-            .iter()
-            .filter(|(session, life)| life.dropped && life.active == 0 && !self.sink.session_pending(session, &live))
-            .map(|(session, _)| session.clone())
-            .collect();
-        for session in quiet {
-            sessions.remove(&session);
-            self.kernel.free_session(&session);
         }
     }
 
@@ -1050,21 +974,14 @@ impl Host {
         let failed = |e: HostError| (e.to_string(), "EVENT_PROCESSING_ERROR", e.status_code());
         let _origin = self.enter_origin(request.client_id.as_deref());
         let mounting = request.mount.as_deref().is_some_and(|seeds| !seeds.is_empty());
-        let revived = match request.client_id.as_deref() {
-            Some(client) if self.kernel.session_ended(client) => {
-                if !mounting {
-                    return Err((format!("session {client} ended: mount again with the frames the client holds"), "SESSION_ENDED", 409));
-                }
-                self.kernel.revive_session(client);
-                true
-            }
-            _ => false,
-        };
-        let _active = request.client_id.as_deref().map(|client| self.hold_session(client));
-        let _session = match request.client_id.as_deref() {
-            Some(client) => Some(self.kernel.enter_session(client)),
-            None if flag("wire") => Some(self.kernel.enter_scratch_session()),
-            None => None,
+        let admitted = self
+            .kernel
+            .admit_request(request.client_id.as_deref(), mounting, flag("wire"))
+            .map_err(|ended| (ended.to_string(), "SESSION_ENDED", 409))?;
+        let revived = matches!(admitted, orbital_core::runtime::kernel::RequestSession::Client { revived: true, .. });
+        let _session = match &admitted {
+            orbital_core::runtime::kernel::RequestSession::Client { active, .. } => Some(self.kernel.enter_session(active.session())),
+            _ => None,
         };
         let _viewer = options.get("viewer").filter(|v| matches!(v, Value::Object(_))).map(|user| self.enter_viewer(user.clone()));
         let Some(detail) = self.get_orbital(&orbital) else {
@@ -1111,7 +1028,7 @@ impl Host {
         let (outcomes, response): Ran = if let Some(seeds) = request.mount.as_deref().filter(|seeds| !seeds.is_empty()) {
             let carried: std::collections::HashSet<String> = if revived {
                 self.kernel.seed_leg(request.traits.as_deref().unwrap_or_default(), request.entity_by_trait.as_ref(), Some(&entity_id));
-                request.traits.iter().flatten().map(|t| t.r#trait.clone()).chain(request.entity_by_trait.iter().flat_map(|rows| rows.keys().cloned())).collect()
+                RuntimeKernel::carried_traits(request.traits.as_deref(), request.entity_by_trait.as_ref())
             } else {
                 Default::default()
             };
