@@ -51,7 +51,7 @@ fn server() -> KernelBridge {
             row("t2", "hidden-row", "u2"),
             row("t3", "gamma-row", "u1"),
         ],
-    );
+    ).unwrap();
     server.set_current_user(serde_json::from_value(json!({ "id": "u1" })).unwrap());
     server
 }

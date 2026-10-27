@@ -97,11 +97,11 @@ mod rows_by_reference {
     fn app() -> (TuiApp, Arc<ClientKernel>) {
         let schema = schema();
         let server = KernelBridge::new(schema.clone()).unwrap();
-        server.seed("Ticket", vec![row("t1", "alpha-row", "u1")]);
+        server.seed("Ticket", vec![row("t1", "alpha-row", "u1")]).unwrap();
         let bridge: Arc<dyn ServerBridge> = Arc::new(server);
         let kernel = Arc::new(ClientKernel::new(schema.clone(), Some(bridge)).unwrap());
         kernel.set_current_user(serde_json::from_value(json!({ "id": "u1" })).unwrap());
-        kernel.seed("Ticket", vec![row("t1", "alpha-row", "u1"), row("t2", "hidden-row", "u2"), row("t3", "gamma-row", "u1")]);
+        kernel.seed("Ticket", vec![row("t1", "alpha-row", "u1"), row("t2", "hidden-row", "u2"), row("t3", "gamma-row", "u1")]).unwrap();
         let app = TuiApp::with_core(ClientCore::with_client_kernel(schema, kernel.clone()), Vec::new());
         (app, kernel)
     }
@@ -128,7 +128,7 @@ mod rows_by_reference {
         list_all(&mut app);
         assert!(app.render_to_text(80, 12).unwrap().contains("alpha-row"));
         // the server runs the persist; the row it wrote reaches the client's rows before the repaint paints
-        kernel.seed("Ticket", vec![row("t1", "renamed", "u1")]);
+        kernel.seed("Ticket", vec![row("t1", "renamed", "u1")]).unwrap();
         app.send_event("RENAME", orbital_core::Value::Null);
         let text = app.render_to_text(80, 12).unwrap();
         assert!(text.contains("renamed") && !text.contains("alpha-row"), "{text}");

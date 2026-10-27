@@ -20,7 +20,7 @@ pub const NS: &str = "almadar::ui_wasm_dioxus";
 /// Seed one `singleton` row per inline entity with no authored `instances`,
 /// from each field's literal `default` — identical to the egui web shell so
 /// `@entity.X` bindings resolve for instance-scoped atoms (e.g. the counter).
-fn seed_singletons(kernel: &KernelBridge, schema: &OrbitalSchema) {
+fn seed_singletons(kernel: &KernelBridge, schema: &OrbitalSchema) -> Result<(), String> {
     let mut seen = std::collections::HashSet::new();
     for orbital in &schema.orbitals {
         let mut refs: Vec<&EntityRef> = vec![&orbital.entity];
@@ -51,10 +51,11 @@ fn seed_singletons(kernel: &KernelBridge, schema: &OrbitalSchema) {
                 row.insert(name.clone(), v);
             }
             let defaulted = row.len();
-            kernel.seed(&def.name, vec![Value::Object(row.into())]);
+            kernel.seed(&def.name, vec![Value::Object(row.into())])?;
             tracing::debug!(target: NS, entity = %def.name, defaulted, "seeded singleton entity");
         }
     }
+    Ok(())
 }
 
 /// Register a program `orb` resolved (`orb resolve`), build the circuit and
@@ -64,7 +65,7 @@ fn seed_singletons(kernel: &KernelBridge, schema: &OrbitalSchema) {
 pub fn mount_core(schema_json: &str) -> Result<(usize, usize), String> {
     let schema = orbital_core::schema::parse_schema(schema_json).map_err(|e| e.to_string())?;
     let kernel = KernelBridge::new(schema.clone()).map_err(|e| e.to_string())?;
-    seed_singletons(&kernel, &schema);
+    seed_singletons(&kernel, &schema)?;
     Ok(mount(schema, Arc::new(kernel)))
 }
 

@@ -46,7 +46,7 @@ fn row(id: &str, title: &str, owner: &str) -> Value {
 fn mount() -> Arc<ClientKernel> {
     let schema = schema();
     let server = KernelBridge::new(schema.clone()).unwrap();
-    server.seed("Ticket", vec![row("t1", "alpha-row", "u1")]);
+    server.seed("Ticket", vec![row("t1", "alpha-row", "u1")]).unwrap();
     let bridge: Arc<dyn ServerBridge> = Arc::new(server);
     let kernel = Arc::new(ClientKernel::new(schema.clone(), Some(bridge)).unwrap());
     kernel.set_current_user(serde_json::from_value(json!({ "id": "u1" })).unwrap());
@@ -57,7 +57,7 @@ fn mount() -> Arc<ClientKernel> {
             row("t2", "hidden-row", "u2"),
             row("t3", "gamma-row", "u1"),
         ],
-    );
+    ).unwrap();
     mount_circuit(ClientCore::with_client_kernel(schema, kernel.clone()));
     kernel
 }
@@ -127,7 +127,7 @@ fn rows_by_reference_paint_resolved_hide_unreadable_rows_and_re_resolve_on_a_row
     );
 
     // the server runs the persist; the row it wrote reaches the client's rows before the repaint paints
-    kernel.seed("Ticket", vec![row("t1", "renamed", "u1")]);
+    kernel.seed("Ticket", vec![row("t1", "renamed", "u1")]).unwrap();
     drive("RENAME", Value::Null);
     assert_eq!(
         painted_items(),
