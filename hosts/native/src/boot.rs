@@ -195,7 +195,11 @@ pub fn boot(
 
     configure_trace(&runtime, env, trace_by_default)?;
     // Register schema (materializes any authored `instances`).
-    runtime.register_schema(schema.clone())?;
+    let name = schema.name.clone();
+    runtime.register_schema(schema)?;
+    let schema = runtime
+        .registered_schema(&name)
+        .ok_or_else(|| anyhow::anyhow!("program '{name}' is not registered after registering it"))?;
     if let Some(locales) = schema.locales.clone() {
         let catalogs = match catalogs {
             Some(given) => given,

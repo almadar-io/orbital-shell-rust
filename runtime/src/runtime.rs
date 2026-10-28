@@ -794,6 +794,11 @@ impl Host {
     }
 
     /// Register a schema with the runtime
+    /// The program registered under `name`, shared with the kernel rather than copied.
+    pub fn registered_schema(&self, name: &str) -> Option<Arc<orbital_core::OrbitalSchema>> {
+        self.kernel.registered_schema(name)
+    }
+
     pub fn register_schema(&self, schema: orbital_core::OrbitalSchema) -> Result<(), HostError> {
         self.declare_capabilities(&schema);
         *self.ticks.lock() = orbital_core::TickClock::from_schema(&schema);
@@ -2362,6 +2367,22 @@ mod tests {
         let runtime = Host::new(Arc::new(DriverAdapter::memory())).shared();
         runtime.register_schema(dispatching_program()).unwrap();
         runtime
+    }
+
+    #[test]
+    fn dropping_the_host_frees_its_kernel_and_everything_the_kernel_holds() {
+        let runtime = desk();
+        let kernel = Arc::downgrade(&runtime.kernel);
+        drop(runtime);
+        assert!(kernel.upgrade().is_none(), "the completion sink must not keep the kernel alive");
+    }
+
+    #[test]
+    fn control_a_kernel_still_referenced_outlives_its_host() {
+        let runtime = desk();
+        let kernel = Arc::clone(&runtime.kernel);
+        drop(runtime);
+        assert_eq!(Arc::strong_count(&kernel), 1);
     }
 
     fn dispatch_request(runtime: &Host, options: serde_json::Value) -> Result<serde_json::Value, (String, serde_json::Value)> {
