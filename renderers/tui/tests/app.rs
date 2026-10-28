@@ -22,7 +22,7 @@ fn orbital(name: &str, text: &serde_json::Value) -> serde_json::Value {
 }
 
 fn app(orbitals: Vec<serde_json::Value>) -> TuiApp {
-    let schema: OrbitalSchema = serde_json::from_value(serde_json::json!({ "name": "t", "orbitals": orbitals })).unwrap();
+    let schema: OrbitalSchema = serde_json::from_value(serde_json::json!({ "name": "t", "typeContractVersion": 1, "orbitals": orbitals })).unwrap();
     let bridge: Arc<dyn ServerBridge> = Arc::new(KernelBridge::new(schema.clone()).unwrap());
     TuiApp::new(schema, Some(bridge), Vec::new()).unwrap()
 }
@@ -65,7 +65,7 @@ mod rows_by_reference {
 
     fn schema() -> OrbitalSchema {
         serde_json::from_value(json!({
-            "name": "rows", "orbitals": [{
+            "name": "rows", "typeContractVersion": 1, "orbitals": [{
                 "name": "Main",
                 "entity": {
                     "name": "Ticket", "persistence": "runtime",

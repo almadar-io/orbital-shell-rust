@@ -11,6 +11,7 @@ const BINARY: &str = env!("CARGO_BIN_EXE_orb-desktop");
 fn program() -> OrbitalSchema {
     serde_json::from_value(serde_json::json!({
         "name": "t",
+        "typeContractVersion": 1,
         "orbitals": [{
             "name": "Main",
             "entity": { "name": "Row", "persistence": "runtime", "fields": [{ "name": "id", "type": "string" }, { "name": "title", "type": "string" }] },

@@ -14,7 +14,7 @@ use std::sync::Arc;
 
 fn schema() -> OrbitalSchema {
     serde_json::from_value(json!({
-        "name": "rows", "orbitals": [{
+        "name": "rows", "typeContractVersion": 1, "orbitals": [{
             "name": "Main",
             "entity": {
                 "name": "Ticket", "persistence": "runtime",

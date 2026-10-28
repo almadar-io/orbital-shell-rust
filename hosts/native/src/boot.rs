@@ -136,6 +136,7 @@ pub fn boot_app(
         HostConfig { substrate: Some(port), ..HostConfig::default() },
         Some(catalogs),
     )?;
+    release_boot_memory();
     start_tick_driver(&runtime);
     Ok(runtime)
 }
@@ -158,8 +159,15 @@ pub fn boot_embedded(
         HostConfig::default(),
         Some(catalogs),
     )?;
+    release_boot_memory();
     start_tick_driver(&runtime);
     Ok(runtime)
+}
+
+/// Boot held the program in several transient forms; give their freed pages back so the process holds what it serves.
+fn release_boot_memory() {
+    let released = orbital_core::runtime::memory_release::release_freed_memory();
+    tracing::info!(target: orbital_core::logging::ns::SERVER_DATA, ?released, "released boot memory");
 }
 
 /// Message catalogs per locale, as `i18n/t` reads them.
@@ -387,7 +395,7 @@ mod auth_boot_tests {
     }
 
     fn empty() -> orbital_core::OrbitalSchema {
-        serde_json::from_value(serde_json::json!({ "name": "app", "orbitals": [] })).unwrap()
+        serde_json::from_value(serde_json::json!({ "name": "app", "typeContractVersion": 1, "orbitals": [] })).unwrap()
     }
 
     #[test]
@@ -450,7 +458,7 @@ mod auth_boot_tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("app.orb");
-        std::fs::write(&path, r#"{ "name": "app", "orbitals": [] }"#).unwrap();
+        std::fs::write(&path, r#"{ "name": "app", "typeContractVersion": 1, "orbitals": [] }"#).unwrap();
         path
     }
 
@@ -562,7 +570,7 @@ mod composed_tests {
                 orbitals.extend(json["orbitals"].as_array().cloned().unwrap_or_default());
                 locales.extend(json["locales"].as_array().cloned().unwrap_or_default());
             }
-            let mut app = serde_json::json!({ "name": name, "orbitals": orbitals });
+            let mut app = serde_json::json!({ "name": name, "typeContractVersion": 1, "orbitals": orbitals });
             if !locales.is_empty() {
                 app["locales"] = serde_json::Value::Array(locales);
             }
@@ -573,6 +581,7 @@ mod composed_tests {
     fn program(name: &str, orbital: &str, extra: serde_json::Value) -> orbital_core::Value {
         let mut json = serde_json::json!({
             "name": name,
+            "typeContractVersion": 1,
             "orbitals": [{
                 "name": orbital,
                 "entity": { "name": format!("{orbital}Row"), "persistence": "runtime", "fields": [{ "name": "id", "type": "string" }] },
@@ -611,6 +620,7 @@ mod composed_tests {
     fn persistent_program(ticks: serde_json::Value) -> orbital_core::Value {
         serde_json::from_value(serde_json::json!({
             "name": "desk",
+            "typeContractVersion": 1,
             "orbitals": [{
                 "name": "Desk",
                 "entity": { "name": "Memo", "persistence": "persistent", "fields": [{ "name": "id", "type": "string" }, { "name": "n", "type": "number" }] },

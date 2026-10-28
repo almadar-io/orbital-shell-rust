@@ -7,6 +7,7 @@ use orbital_client_dioxus::shell::mount_core;
 fn program(main: serde_json::Value) -> String {
     serde_json::json!({
         "name": "t",
+        "typeContractVersion": 1,
         "orbitals": [{
             "name": "Main",
             "entity": { "name": "Row", "persistence": "runtime", "fields": [{ "name": "id", "type": "string" }] },

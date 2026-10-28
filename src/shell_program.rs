@@ -117,6 +117,7 @@ mod tests {
     fn served(name: &str) -> orbital_core::schema::types::OrbitalSchema {
         serde_json::from_value(serde_json::json!({
             "name": name,
+            "typeContractVersion": 1,
             "orbitals": [{
                 "name": name,
                 "entity": {

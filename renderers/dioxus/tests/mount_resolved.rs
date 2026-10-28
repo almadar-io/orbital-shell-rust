@@ -5,6 +5,7 @@ use orbital_client_dioxus::shell::{mount_core, snapshot_json};
 fn program(traits: serde_json::Value) -> String {
     serde_json::json!({
         "name": "counter",
+        "typeContractVersion": 1,
         "orbitals": [{
             "name": "Main",
             "entity": { "name": "Counter", "persistence": "runtime", "fields": [{ "name": "id", "type": "string" }] },

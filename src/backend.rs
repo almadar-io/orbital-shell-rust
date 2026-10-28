@@ -157,7 +157,7 @@ mod tests {
     fn tui_renderer_emits_one_standalone_binary_with_the_program_embedded() {
         use crate::{RustRenderer, RustShell};
         use orbital_core::project::{write_project, WriteOptions};
-        let program = r#"{"name":"TestApp","orbitals":[]}"#;
+        let program = r#"{"name":"TestApp","typeContractVersion": 1,"orbitals":[]}"#;
         let output = std::env::temp_dir().join(format!("orb-agent-tui-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&output);
         let options = WriteOptions {

@@ -548,6 +548,18 @@ type InboundWaiters = Arc<
     >,
 >;
 
+/// The host's error for a kernel refusal.
+fn host_error(e: KernelError) -> HostError {
+    match e {
+        KernelError::TraitNotFound(name) => HostError::TraitNotFound(name),
+        KernelError::Internal(msg) => HostError::Internal(msg),
+        KernelError::PayloadInvalid(msg) => HostError::Validation(msg),
+        e @ (KernelError::LaneHeldByParkedDispatch { .. } | KernelError::UnresolvedProgram { .. }) => {
+            HostError::Internal(e.to_string())
+        }
+    }
+}
+
 impl Host {
     /// Create a new runtime with the given persistence adapter
     pub fn new<T>(adapter: Arc<T>) -> Self
@@ -1166,14 +1178,7 @@ impl Host {
         };
         let result = started.and_then(|progress| drive_concurrent(&self.kernel, progress, &answer));
         result.map_err(|e| match e {
-            DispatchError::Kernel(KernelError::TraitNotFound(name)) => {
-                HostError::TraitNotFound(name)
-            }
-            DispatchError::Kernel(KernelError::PayloadInvalid(msg)) => HostError::Validation(msg),
-            DispatchError::Kernel(KernelError::Internal(msg)) => HostError::Internal(msg),
-            DispatchError::Kernel(e @ KernelError::LaneHeldByParkedDispatch { .. }) => {
-                HostError::Internal(e.to_string())
-            }
+            DispatchError::Kernel(e) => host_error(e),
             DispatchError::Resume(e) => HostError::Internal(e.to_string()),
         })
     }
@@ -1212,12 +1217,7 @@ impl Host {
     ) -> Result<ProcessEventResult, HostError> {
         self.kernel
             .process_event(trait_name, Some(entity_id), event_name, payload)
-            .map_err(|e| match e {
-                KernelError::TraitNotFound(name) => HostError::TraitNotFound(name),
-                KernelError::Internal(msg) => HostError::Internal(msg),
-                KernelError::PayloadInvalid(msg) => HostError::Validation(msg),
-                e @ KernelError::LaneHeldByParkedDispatch { .. } => HostError::Internal(e.to_string()),
-            })
+            .map_err(host_error)
     }
 
     /// An inbound delivery (`/api/hooks/<name>`): the kernel decides whether the name is served, runs
@@ -1508,6 +1508,7 @@ mod tests {
             r#"{
             "name": "TestApp",
             "version": "1.0.0",
+            "typeContractVersion": 1,
             "orbitals": [
                 {
                     "name": "User Onboarding",
@@ -1687,6 +1688,7 @@ mod tests {
     fn an_orbital_detail_carries_the_entity_fields_and_none_of_its_rows() {
         let schema: orbital_core::OrbitalSchema = serde_json::from_value(serde_json::json!({
             "name": "App",
+            "typeContractVersion": 1,
             "orbitals": [{
                 "name": "Main",
                 "entity": { "name": "Row", "persistence": "persistent", "collection": "rows",
@@ -1736,6 +1738,7 @@ mod tests {
         };
         serde_json::from_value(serde_json::json!({
             "name": "Desk",
+            "typeContractVersion": 1,
             "orbitals": [{
                 "name": "Desk",
                 "entity": { "name": "Note", "persistence": "persistent", "fields": [
@@ -1828,6 +1831,7 @@ mod tests {
     fn live_program() -> orbital_core::OrbitalSchema {
         serde_json::from_value(serde_json::json!({
             "name": "Live",
+            "typeContractVersion": 1,
             "orbitals": [{
                 "name": "Live",
                 "entity": { "name": "Feed", "persistence": "runtime", "fields": [
@@ -2097,6 +2101,7 @@ mod tests {
     fn ticking_program_every(interval: u64) -> orbital_core::OrbitalSchema {
         serde_json::from_value(serde_json::json!({
             "name": "Clock",
+            "typeContractVersion": 1,
             "orbitals": [{
                 "name": "Clock",
                 "entity": { "name": "Beat", "persistence": "persistent", "collection": "beats", "fields": [{ "name": "id", "type": "string" }, { "name": "n", "type": "number" }] },
@@ -2160,6 +2165,7 @@ mod tests {
     fn owned_notes(runtime: &Host) {
         let schema: orbital_core::OrbitalSchema = serde_json::from_value(serde_json::json!({
             "name": "ResolveApp",
+            "typeContractVersion": 1,
             "orbitals": [{
                 "name": "Notes",
                 "entity": { "name": "Note", "persistence": "persistent", "read_policy": ["=", ["object/get", "@entity", "ownerId"], "@user.id"],
@@ -2198,6 +2204,7 @@ mod tests {
         serde_json::from_value(serde_json::json!({
             "name": "Hooked",
             "inbound": ["hook"],
+            "typeContractVersion": 1,
             "orbitals": [{
                 "name": "Hooked",
                 "entity": { "name": "Run", "persistence": "runtime", "fields": [{ "name": "id", "type": "string" }, { "name": "got", "type": "string" }] },
@@ -2472,6 +2479,7 @@ mod tests {
         let runtime = Host::new(Arc::new(DriverAdapter::memory())).shared();
         let schema: orbital_core::OrbitalSchema = serde_json::from_value(serde_json::json!({
             "name": "Board",
+            "typeContractVersion": 1,
             "orbitals": [{
                 "name": "Board",
                 "entity": { "name": "Tile", "persistence": "runtime", "fields": [{ "name": "id", "type": "string" }] },
@@ -2517,6 +2525,7 @@ mod tests {
         serde_json::from_value(serde_json::json!({
             "name": "Reader",
             "osGrants": { "fs": [{ "glob": format!("{}/**", dir.display()), "modes": ["read"] }] },
+            "typeContractVersion": 1,
             "orbitals": [{
                 "name": "Reader",
                 "entity": { "name": "Doc", "persistence": "runtime", "fields": [{ "name": "id", "type": "string" }] },
@@ -2635,6 +2644,7 @@ mod tests {
     fn topic_program() -> orbital_core::OrbitalSchema {
         serde_json::from_value(serde_json::json!({
             "name": "Topics",
+            "typeContractVersion": 1,
             "orbitals": [{
                 "name": "Topics",
                 "entity": { "name": "Topic", "persistence": "runtime", "fields": [
@@ -2692,6 +2702,7 @@ mod tests {
         let machine = |events: serde_json::Value, arms: serde_json::Value| serde_json::json!({ "states": [{ "name": "idle", "isInitial": true }], "events": events, "transitions": arms });
         serde_json::from_value(serde_json::json!({
             "name": "Handoff",
+            "typeContractVersion": 1,
             "orbitals": [{
                 "name": "Handoff",
                 "entity": { "name": "Job", "persistence": "runtime", "fields": [{ "name": "id", "type": "string" }] },
@@ -2752,6 +2763,7 @@ mod tests {
     fn card_program(persistence: &str) -> orbital_core::OrbitalSchema {
         serde_json::from_value(serde_json::json!({
             "name": "Cards",
+            "typeContractVersion": 1,
             "orbitals": [{
                 "name": "Cards",
                 "entity": { "name": "Card", "persistence": persistence, "fields": [{ "name": "id", "type": "string" }, { "name": "label", "type": "string" }] },
@@ -2795,6 +2807,7 @@ mod tests {
         let arm = |event: &str, effects: serde_json::Value| serde_json::json!({ "from": "idle", "to": "idle", "event": event, "effects": effects });
         serde_json::from_value(serde_json::json!({
             "name": "Sessions",
+            "typeContractVersion": 1,
             "orbitals": [{
                 "name": "Sessions",
                 "entity": { "name": "Topic", "persistence": "runtime", "shared": shared, "fields": [
@@ -2916,6 +2929,7 @@ mod tests {
         let runtime = Host::new(Arc::new(DriverAdapter::memory())).shared();
         runtime.register_schema(serde_json::from_value(serde_json::json!({
             "name": "Steps",
+            "typeContractVersion": 1,
             "orbitals": [{
                 "name": "Steps",
                 "entity": { "name": "Step", "persistence": "runtime", "fields": [{ "name": "id", "type": "string" }] },

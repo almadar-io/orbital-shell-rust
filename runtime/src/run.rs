@@ -99,6 +99,7 @@ mod tests {
         let program: orbital_core::OrbitalSchema = serde_json::from_value(serde_json::json!({
             "name": "Endpoints",
             "version": "1.0.0",
+            "typeContractVersion": 1,
             "orbitals": [{
                 "name": "Main",
                 "entity": { "name": "Note", "collection": "notes", "fields": [{ "name": "id", "type": "string", "primaryKey": true }] },
