@@ -949,25 +949,8 @@ impl Host {
         let json = |key: &str| options.get(key).map(orbital_core::json_value::value_to_json);
         let text = |key: &str| json(key).and_then(|v| v.as_str().filter(|s| !s.is_empty()).map(str::to_string));
         let flag = |key: &str| json(key).and_then(|v| v.as_bool()).unwrap_or(false);
-        let present = |v: &serde_json::Value| match v {
-            serde_json::Value::Null => false,
-            serde_json::Value::String(text) => !text.is_empty(),
-            serde_json::Value::Object(m) => !m.is_empty(),
-            serde_json::Value::Array(items) => !items.is_empty(),
-            _ => true,
-        };
-        let mut request = serde_json::Map::new();
-        request.insert("payload".to_string(), orbital_core::json_value::value_to_json(payload));
-        for key in ["event", "entityId", "targetTrait", "clientId", "locale", "delivery", "dispatchLog", "mount", "entityByTrait"] {
-            if let Some(value) = json(key).filter(present) {
-                request.insert(key.to_string(), value);
-            }
-        }
-        if let Some(traits) = json("traits").filter(|v| !v.is_null()) {
-            request.insert("traits".to_string(), traits);
-        }
-        let request: orbital_core::EventRequest = serde_json::from_value(serde_json::Value::Object(request))
-            .map_err(|e| (format!("program/dispatch: not an event request: {e}"), "INVALID_REQUEST", 400))?;
+        let request = orbital_core::EventRequest::from_dispatch(orbital_core::json_value::value_to_json(payload), &json)
+            .map_err(|message| (message, "INVALID_REQUEST", 400))?;
         let Some(orbital) = text("orbital") else {
             return Err(("program/dispatch: an event request names its orbital".to_string(), "INVALID_REQUEST", 400));
         };
