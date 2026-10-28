@@ -275,7 +275,9 @@ impl Drop for OriginGuard {
 /// A dispatch's stream items in execution order: each outcome's effect results in declaration order, a client effect or
 /// an emitted event each, then the whole response (`complete`), as orbital-server's `?stream` route replays them.
 fn stream_items(outcomes: &[(String, ProcessEventResult)], response: &orbital_core::EventResponse) -> Vec<orbital_core::StreamItem> {
-    orbital_core::StreamItem::of_outcomes(outcomes, response)
+    let mut items = orbital_core::StreamItem::of_outcomes(outcomes);
+    items.push(orbital_core::StreamItem::complete(response.clone()));
+    items
 }
 
 /// The most dispatches the trace keeps; the oldest drop first.
