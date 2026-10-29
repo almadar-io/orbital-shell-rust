@@ -54,7 +54,6 @@ pub mod catalog;
 pub use orbital_core::client::client_core;
 pub use orbital_core::client::helpers;
 pub use orbital_core::client::recurse;
-pub use orbital_core::client::tick;
 pub use orbital_core::client::helpers::{RenderContext, SlotContent};
 pub use renderer::{DioxusPatternRenderer, DioxusView, EventSink};
 pub use registry::DioxusPatternRegistry;

@@ -33,7 +33,7 @@ pub fn open_window(css_texts: Vec<String>, title: &str) {
     let attrs = dioxus_native::WindowAttributes::default().with_title(title.to_string());
     let cfg = dioxus_native::Config::new().with_window_attributes(attrs);
     // Game tick driver: the frame hook (vendored dioxus-native patch,
-    // dioxus_application.rs) runs the ClientCore TickScheduler on the vsync
+    // dioxus_application.rs) runs the kernel's tick clock through ClientCore on the vsync
     // cadence so `set`-effect loops advance without waiting on a user event.
     dioxus_native::set_frame_hook(Some(Box::new(|| {
         if shell::drive_ticks() {

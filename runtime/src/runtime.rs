@@ -31,7 +31,7 @@ use orbital_core::{
 };
 use parking_lot::{Mutex, RwLock};
 use serde::Serialize;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use tokio::sync::broadcast;
 
@@ -322,7 +322,7 @@ pub struct TraceOutbound {
 }
 
 fn outbound_of(request: &IoRequest, answer: &IoAnswer) -> Option<TraceOutbound> {
-    let (IoRequest::Http { request, .. } | IoRequest::HttpStream { request, .. }) = request else {
+    let IoRequest::Http { request, .. } = request else {
         return None;
     };
     let location = request.url.split(['?', '#']).next().unwrap_or(&request.url);
@@ -512,10 +512,6 @@ pub struct Host {
     sink: Arc<KernelCompletionSink>,
     trace: Arc<TraceJournal>,
     _trace_lifetime: Arc<()>,
-    /// The sign-in the environment configured: a host that serves requests verifies their bearer with it.
-    sign_in: RwLock<Option<Arc<orbital_core::runtime::auth::SignIn>>>,
-    /// How long a live-stream ticket may be redeemed after it is minted.
-    stream_ticket_ttl_ms: AtomicU64,
     /// The tab each request thread serves (`EventRequest.client_id`): where a running call's live messages go.
     origin_by_thread: Arc<RwLock<std::collections::HashMap<std::thread::ThreadId, String>>>,
     persistence: Arc<dyn PersistenceAdapter>,
@@ -534,8 +530,6 @@ pub struct Host {
     ticks: Mutex<orbital_core::TickClock>,
     /// The clock tick passes read: milliseconds since this runtime was made.
     started: std::time::Instant,
-    /// Who may run a tick pass over HTTP (`POST /api/tick`); none named, the route is not served.
-    tick_invoker: RwLock<Option<Arc<orbital_core::runtime::auth::TickInvoker>>>,
 }
 
 type InboundWaiters = Arc<
@@ -758,8 +752,6 @@ impl Host {
             sink,
             trace,
             _trace_lifetime: trace_lifetime,
-            sign_in: RwLock::new(None),
-            stream_ticket_ttl_ms: AtomicU64::new(orbital_core::runtime::stream_ticket::DEFAULT_TTL_MS),
             origin_by_thread,
             persistence,
             entity_source,
@@ -769,7 +761,6 @@ impl Host {
             credential_store_failure,
             ticks: Mutex::new(orbital_core::TickClock::from_orbitals(&[])),
             started: std::time::Instant::now(),
-            tick_invoker: RwLock::new(None),
         }
     }
 
@@ -875,20 +866,6 @@ impl Host {
         broadcast_persisted(&self.live_tx, response, client_id);
     }
 
-    /// The sign-in requests are verified with; without one a host serves its program open (a dev host).
-    pub fn set_sign_in(&self, sign_in: orbital_core::runtime::auth::SignIn) {
-        *self.sign_in.write() = Some(Arc::new(sign_in));
-    }
-
-    pub fn sign_in(&self) -> Option<Arc<orbital_core::runtime::auth::SignIn>> {
-        self.sign_in.read().clone()
-    }
-
-    /// How long a stream ticket minted from now on may be redeemed.
-    pub fn set_stream_ticket_ttl_ms(&self, ttl_ms: u64) {
-        self.stream_ticket_ttl_ms.store(ttl_ms, Ordering::SeqCst);
-    }
-
     /// Why the credential store `ALMADAR_CREDENTIAL_MASTER_KEY` asks for could not be opened, when it could not.
     pub fn credential_store_failure(&self) -> Option<&str> {
         self.credential_store_failure.as_deref()
@@ -897,16 +874,6 @@ impl Host {
     /// Milliseconds since this runtime was made: the monotonic clock of [`Self::tick_pass`].
     pub fn monotonic_ms(&self) -> u64 {
         u64::try_from(self.started.elapsed().as_millis()).unwrap_or(u64::MAX)
-    }
-
-    /// Name who may run a tick pass over HTTP.
-    pub fn set_tick_invoker(&self, invoker: Option<orbital_core::runtime::auth::TickInvoker>) {
-        *self.tick_invoker.write() = invoker.map(Arc::new);
-    }
-
-    /// The invoker `POST /api/tick` admits, when one is named.
-    pub fn tick_invoker(&self) -> Option<Arc<orbital_core::runtime::auth::TickInvoker>> {
-        self.tick_invoker.read().clone()
     }
 
     /// One tick pass at `now_ms` (a monotonic clock): every due `[background]` tick runs over its rows, as the JS host's
@@ -1143,22 +1110,6 @@ impl Host {
     /// resolve, or whose entity declares no policy, is visible to everyone.
     pub fn live_item_visible_to(&self, item: &LiveBroadcastItem, viewer: &Value) -> bool {
         self.kernel.live_item_visible_to(item, viewer)
-    }
-
-    /// A single-use ticket for the live-event stream, bound to `viewer` (`orbital_core::runtime::stream_ticket`).
-    pub fn mint_stream_ticket(&self, viewer: &Value) -> Result<String, String> {
-        let ttl_ms = self.stream_ticket_ttl_ms.load(Ordering::SeqCst);
-        let host = self.host.read().clone();
-        let bytes = match host.answer(&IoRequest::Random { bytes: 32 }) {
-            IoAnswer::Random(Ok(bytes)) => bytes,
-            other => return Err(format!("the host gave no random bytes: {other:?}")),
-        };
-        orbital_core::runtime::stream_ticket::mint(&bytes, self.secrets.as_ref(), viewer, ttl_ms)
-    }
-
-    /// The viewer a ticket was minted for, once: a forged, expired or already used ticket is `None`.
-    pub fn take_stream_ticket(&self, ticket: &str) -> Option<Value> {
-        orbital_core::runtime::stream_ticket::take(self.secrets.as_ref(), ticket)
     }
 
     /// Serve `client_id`'s tab from this thread until the guard drops: the live messages of the calls it runs go to that tab.

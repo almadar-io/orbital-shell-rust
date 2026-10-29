@@ -23,9 +23,6 @@ pub struct AppState {
     pub core: ClientCore,
     /// Dioxus pattern registry (built once at mount from the generated sets).
     pub registry: DioxusPatternRegistry,
-    /// Scheduled-tick driver built from the active orbital's `ticks` (the same
-    /// scheduler the egui game shell runs; fired by the native frame hook).
-    pub tick_scheduler: crate::tick::TickScheduler,
 }
 
 std::thread_local! {

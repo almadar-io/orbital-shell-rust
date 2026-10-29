@@ -54,8 +54,8 @@ fn main() {
         css_sheets = css_texts.len(),
         "native catalog launch"
     );
-    // Game tick driver (same as `native::start`): run the ClientCore
-    // TickScheduler on the vsync cadence so ticked behaviors animate.
+    // Game tick driver (same as `native::start`): run the kernel's tick clock
+    // through ClientCore on the vsync cadence so ticked behaviors animate.
     dioxus_native::set_frame_hook(Some(Box::new(|| {
         if orbital_client_dioxus::shell::drive_ticks() {
             orbital_client_dioxus::app::poke_rerender();

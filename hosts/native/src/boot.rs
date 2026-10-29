@@ -1,5 +1,5 @@
-//! Booting a program on the [`Host`]: register it, install its locales, configure tracing, sign-in, credentials and the
-//! tick invoker from the environment, refuse a production boot that lacks what it needs.
+//! Booting a program on the [`Host`]: register it, install its locales, configure tracing and credentials from the
+//! environment, refuse a production boot that lacks what it needs.
 
 use super::store::{DriverAdapter, PersistenceAdapter};
 use super::{Host, HostConfig, SubstratePort};
@@ -93,7 +93,7 @@ impl orbital_core::runtime::LazySource for FileLazySource {
 /// dispatches in memory, `ORBITAL_TRACE=off` traces nothing; with neither set, `trace_by_default` decides.
 fn configure_trace(
     runtime: &Host,
-    env: &orbital_core::runtime::auth::AuthEnv,
+    env: &BootEnv,
     trace_by_default: bool,
 ) -> anyhow::Result<()> {
     if let Some(path) = env.get("ORBITAL_TRACE_FILE").filter(|p| !p.is_empty()) {
@@ -116,7 +116,7 @@ fn configure_trace(
 /// substrate handler installed when one is given (`orb` answers `program/*` and `behavior/*` itself).
 pub fn boot_file(
     schema_path: &Path,
-    env: &orbital_core::runtime::auth::AuthEnv,
+    env: &BootEnv,
     trace_by_default: bool,
     substrate: Option<SubstratePort>,
 ) -> anyhow::Result<Arc<Host>> {
@@ -127,7 +127,7 @@ pub fn boot_file(
 /// substrate port.
 pub fn boot_file_with(
     schema_path: &Path,
-    env: &orbital_core::runtime::auth::AuthEnv,
+    env: &BootEnv,
     trace_by_default: bool,
     config: HostConfig,
 ) -> anyhow::Result<Arc<Host>> {
@@ -142,7 +142,7 @@ pub fn boot_app(
     schema_path: &Path,
     port: SubstratePort,
     catalogs: Catalogs,
-    env: &orbital_core::runtime::auth::AuthEnv,
+    env: &BootEnv,
     trace_by_default: bool,
 ) -> anyhow::Result<Arc<Host>> {
     if let Some(missing) = schema.locales.iter().flatten().find(|locale| !catalogs.contains_key(*locale)) {
@@ -166,7 +166,7 @@ pub fn boot_app(
 /// store, its message catalogs given, its ticks driven.
 pub fn boot_embedded(
     program_json: &str,
-    env: &orbital_core::runtime::auth::AuthEnv,
+    env: &BootEnv,
     catalogs: Catalogs,
 ) -> anyhow::Result<Arc<Host>> {
     let schema: orbital_core::OrbitalSchema =
@@ -194,6 +194,9 @@ fn release_boot_memory() {
     tracing::info!(target: orbital_core::logging::ns::SERVER_DATA, ?released, "released boot memory");
 }
 
+/// The process environment a host boots from.
+pub type BootEnv = std::collections::HashMap<String, String>;
+
 /// Message catalogs per locale, as `i18n/t` reads them.
 pub type Catalogs = std::collections::HashMap<String, std::collections::HashMap<String, String>>;
 
@@ -202,7 +205,7 @@ pub fn boot(
     schema: orbital_core::OrbitalSchema,
     schema_path: &Path,
     persistence: Arc<dyn PersistenceAdapter>,
-    env: &orbital_core::runtime::auth::AuthEnv,
+    env: &BootEnv,
     trace_by_default: bool,
     config: HostConfig,
     catalogs: Option<Catalogs>,
@@ -232,7 +235,6 @@ pub fn boot(
         };
         runtime.set_messages(locales, catalogs);
     }
-    configure_sign_in(&runtime, &schema, env)?;
     let production = env.get("NODE_ENV").is_some_and(|v| v == "production");
     if let Some(error) = runtime.credential_store_failure() {
         if production {
@@ -241,14 +243,6 @@ pub fn boot(
         tracing::warn!(target: orbital_core::logging::ns::SERVER_DATA, %error, "credential store unavailable; the environment answers");
     }
     let secrets = runtime.credentials();
-    let invoker = orbital_core::runtime::auth::TickInvoker::from_env(
-        env,
-        &orbital_core::runtime::native_transport::feed_host,
-        secrets.clone(),
-        Arc::new(orbital_core::time_util::now_millis),
-    )
-    .map_err(anyhow::Error::msg)?;
-    runtime.set_tick_invoker(invoker);
     let problems = boot_env_problems(
         env,
         production,
@@ -293,12 +287,12 @@ pub fn start_tick_driver(runtime: &Arc<Host>) {
         .unwrap_or_else(|error| tracing::error!(target: orbital_core::logging::ns::SERVER_DATA, %error, "the tick driver did not start"));
 }
 
-/// What a deployment lacks beyond its sign-in (which [`configure_sign_in`] refuses itself): under `production` a
+/// What a deployment lacks: under `production` a
 /// Firestore emulator host (it serves no real data), and, unless integrations are mocked
 /// (`ALMADAR_INTEGRATIONS_MODE=mock` / `USE_MOCK_DATA=true`), every required credential of a service the program calls
 /// that `present` (the credential store, then the environment) does not hold.
 pub fn boot_env_problems(
-    env: &orbital_core::runtime::auth::AuthEnv,
+    env: &BootEnv,
     production: bool,
     called: &std::collections::BTreeSet<String>,
     catalog: &dyn Fn() -> Result<orbital_core::credential_admin::Catalog, String>,
@@ -321,38 +315,6 @@ pub fn boot_env_problems(
         Err(error) => problems.push(format!("the declared integration credentials could not be read: {error}")),
     }
     problems
-}
-
-/// Sign-in from the environment (`AUTH_PROVIDER`, `FIREBASE_PROJECT_ID`, `OIDC_ISSUER_URL`, `OIDC_AUDIENCE`, and
-/// `ALMADAR_API_KEY_SALT` with `ALMADAR_API_KEY_ENTITY` for API keys). Under `NODE_ENV=production` the declaration is required
-/// and any problem in it stops the boot; elsewhere a server with none declared stays open, and a declaration with problems
-/// only warns.
-pub fn configure_sign_in(
-    runtime: &Arc<Host>,
-    schema: &orbital_core::OrbitalSchema,
-    env: &orbital_core::runtime::auth::AuthEnv,
-) -> anyhow::Result<()> {
-    use orbital_core::runtime::auth::{sign_in_from_env, Clock, RowFinder};
-    let clock: Clock = Arc::new(orbital_core::time_util::now_millis);
-    let persistence = runtime.persistence().clone();
-    let find: RowFinder = Arc::new(move |entity: &str, id: &str| {
-        persistence
-            .find(entity, id)
-            .map(|row| row.and_then(|row| serde_json::to_value(row).ok()))
-    });
-    let sign_in = sign_in_from_env(
-        env,
-        schema,
-        &orbital_core::runtime::native_transport::feed_host,
-        runtime.credentials(),
-        clock,
-        find,
-    )
-    .map_err(anyhow::Error::msg)?;
-    if let Some(sign_in) = sign_in {
-        runtime.set_sign_in(sign_in);
-    }
-    Ok(())
 }
 
 #[cfg(test)]
@@ -409,22 +371,14 @@ mod boot_env_tests {
 }
 
 #[cfg(test)]
-mod auth_boot_tests {
+mod boot_tests {
     use super::*;
 
-    fn runtime() -> Arc<Host> {
-        Arc::new(Host::new(Arc::new(DriverAdapter::memory())))
-    }
-
-    fn env(pairs: &[(&str, &str)]) -> orbital_core::runtime::auth::AuthEnv {
+    fn env(pairs: &[(&str, &str)]) -> BootEnv {
         pairs
             .iter()
             .map(|(k, v)| (k.to_string(), v.to_string()))
             .collect()
-    }
-
-    fn empty() -> orbital_core::OrbitalSchema {
-        serde_json::from_value(serde_json::json!({ "name": "app", "typeContractVersion": 1, "orbitals": [] })).unwrap()
     }
 
     #[test]
@@ -458,29 +412,6 @@ mod auth_boot_tests {
         assert_eq!(unknown.status, 404, "an undeclared hook is refused at once");
     }
 
-    #[test]
-    fn production_refuses_an_emulator_environment_and_a_missing_declaration() {
-        let production = [
-            ("NODE_ENV", "production"),
-            ("FIREBASE_PROJECT_ID", "prod-app"),
-        ];
-        assert!(configure_sign_in(&runtime(), &empty(), &env(&production)).is_ok());
-        let with_emulator = [
-            ("NODE_ENV", "production"),
-            ("FIREBASE_PROJECT_ID", "prod-app"),
-            ("FIREBASE_AUTH_EMULATOR_HOST", "localhost:9099"),
-        ];
-        let error = configure_sign_in(&runtime(), &empty(), &env(&with_emulator))
-            .unwrap_err()
-            .to_string();
-        assert!(error.contains("FIREBASE_AUTH_EMULATOR_HOST"), "{error}");
-        let nothing = [("NODE_ENV", "production")];
-        assert!(configure_sign_in(&runtime(), &empty(), &env(&nothing))
-            .unwrap_err()
-            .to_string()
-            .contains("FIREBASE_PROJECT_ID"));
-    }
-
     fn program_file(tag: &str) -> std::path::PathBuf {
         let dir =
             std::env::temp_dir().join(format!("orbital-host-boot-{tag}-{}", std::process::id()));
@@ -489,34 +420,6 @@ mod auth_boot_tests {
         let path = dir.join("app.orb");
         std::fs::write(&path, r#"{ "name": "app", "typeContractVersion": 1, "orbitals": [] }"#).unwrap();
         path
-    }
-
-    #[test]
-    fn booting_a_program_file_configures_sign_in_from_the_environment() {
-        let path = program_file("auth");
-        let error = boot_file(&path, &env(&[("NODE_ENV", "production")]), false, None)
-            .err()
-            .expect("production without a declaration refuses to boot");
-        assert!(error.to_string().contains("FIREBASE_PROJECT_ID"), "{error}");
-        let signed_in = boot_file(
-            &path,
-            &env(&[
-                ("NODE_ENV", "production"),
-                ("FIREBASE_PROJECT_ID", "prod-app"),
-            ]),
-            false,
-        None,
-        )
-        .unwrap();
-        assert!(
-            signed_in.sign_in().is_some(),
-            "a declared provider is configured by the boot"
-        );
-        let open = boot_file(&path, &env(&[]), false, None).unwrap();
-        assert!(
-            open.sign_in().is_none(),
-            "control: nothing declared stays open"
-        );
     }
 
     #[test]
@@ -559,20 +462,6 @@ mod auth_boot_tests {
             "edge: an unknown mode refuses to boot"
         );
         let _ = std::fs::remove_file(&file);
-    }
-
-    #[test]
-    fn control_a_dev_server_may_use_the_emulator_and_one_with_nothing_declared_stays_open() {
-        let dev = [
-            ("FIREBASE_PROJECT_ID", "demo-app"),
-            ("FIREBASE_AUTH_EMULATOR_HOST", "localhost:9099"),
-        ];
-        let open = runtime();
-        configure_sign_in(&open, &empty(), &env(&dev)).unwrap();
-        assert!(open.sign_in().is_some());
-        let none = runtime();
-        configure_sign_in(&none, &empty(), &env(&[])).unwrap();
-        assert!(none.sign_in().is_none());
     }
 }
 

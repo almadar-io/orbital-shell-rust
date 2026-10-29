@@ -92,13 +92,10 @@ pub fn mount_circuit(mut core: ClientCore) -> (usize, usize) {
 
     let registry = crate::registry::default_registry();
 
-    let tick_scheduler = crate::tick::TickScheduler::new(&core);
-
     APP.with(|cell| {
         *cell.borrow_mut() = Some(AppState {
             core,
             registry,
-            tick_scheduler,
         });
     });
     (orbital_count, trait_count)
@@ -179,11 +176,7 @@ pub fn drive_ticks() -> bool {
     let mut fired = false;
     APP.with(|cell| {
         if let Some(state) = cell.borrow_mut().as_mut() {
-            let due = state.tick_scheduler.poll_due();
-            if !due.is_empty() {
-                for (trait_name, tick_name) in due {
-                    state.core.drive_tick_blocking(&trait_name, &tick_name);
-                }
+            if state.core.drive_ticks_blocking() {
                 state.core.settle(8);
                 fired = true;
             }

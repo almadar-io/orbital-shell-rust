@@ -13,7 +13,7 @@ use crate::{contexts::DioxusNativeDocument, BlitzShellEvent, DioxusDocument, Win
 
 // ORBITAL PATCH (frame hook): one process-wide callback invoked on every
 // `RedrawRequested`, BEFORE blitz processes the frame. orbital-client-dioxus
-// installs it to drive scheduled game ticks (the ClientCore TickScheduler) on
+// installs it to drive scheduled game ticks (the kernel tick clock, through ClientCore) on
 // the vsync cadence, so `set`-effect loops advance without waiting on a DOM
 // event. Native-only (winit has no wasm32 RedrawRequested drive here).
 static FRAME_HOOK: RwLock<Option<Box<dyn FnMut() + Send + Sync>>> = RwLock::new(None);
