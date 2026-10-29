@@ -67,7 +67,7 @@ impl DioxusPatternRenderer for ImportPreviewTreeRenderer {
                         .as_object()
                         .and_then(|o| o.get("fields"))
                         .and_then(|f| f.as_object())
-                        .map(|f| f.iter().map(|(k, v)| (k.clone(), fmt_field(v))).collect())
+                        .map(|f| f.iter().map(|(k, v)| (k.to_string(), fmt_field(v))).collect())
                         .unwrap_or_default();
                     entries.sort_by(|a, b| a.0.cmp(&b.0));
                     let summary = entries.iter().map(|(k, v)| format!("{k}: {v}")).collect::<Vec<_>>().join(" · ");
@@ -85,16 +85,16 @@ impl DioxusPatternRenderer for ImportPreviewTreeRenderer {
         let cancel_event = get_string(props, "onCancel");
         let action_button = |label: String, variant: &str, action: String| -> Value {
             let mut m = orbital_core::ValueMap::new();
-            m.insert("type".to_string(), Value::String(("button".to_string()).into()));
-            m.insert("label".to_string(), Value::String(label.into()));
-            m.insert("variant".to_string(), Value::String(variant.to_string().into()));
-            m.insert("action".to_string(), Value::String(action.into()));
+            m.insert("type".to_string().into(), Value::String(("button".to_string()).into()));
+            m.insert("label".to_string().into(), Value::String(label.into()));
+            m.insert("variant".to_string().into(), Value::String(variant.to_string().into()));
+            m.insert("action".to_string().into(), Value::String(action.into()));
             Value::Object(m.into())
         };
         let count_badge = |n: usize| -> Value {
             let mut m = orbital_core::ValueMap::new();
-            m.insert("type".to_string(), Value::String(("badge".to_string()).into()));
-            m.insert("amount".to_string(), Value::Number(n as f64));
+            m.insert("type".to_string().into(), Value::String(("badge".to_string()).into()));
+            m.insert("amount".to_string().into(), Value::Number(n as f64));
             Value::Object(m.into())
         };
         let cancel_button = cancel_event.map(|e| action_button(get_string_or(props, "cancelLabel", "Cancel"), "default", e));

@@ -154,19 +154,19 @@ impl SelfSubstrate {
 fn live_item_value(item: &LiveBroadcastItem) -> Value {
     let mut fields = ValueMap::new();
     if let Some(dispatch) = &item.dispatch {
-        fields.insert("type".to_string(), Value::string("dispatch"));
-        fields.insert("orbitalName".to_string(), Value::string(dispatch.orbital_name.clone()));
-        fields.insert("request".to_string(), dispatch.request.clone());
+        fields.insert("type".to_string().into(), Value::string("dispatch"));
+        fields.insert("orbitalName".to_string().into(), Value::string(dispatch.orbital_name.clone()));
+        fields.insert("request".to_string().into(), dispatch.request.clone());
         let response = serde_json::to_value(&dispatch.response).ok().and_then(|json| serde_json::from_value::<Value>(json).ok());
-        fields.insert("response".to_string(), response.unwrap_or(Value::Null));
+        fields.insert("response".to_string().into(), response.unwrap_or(Value::Null));
         return Value::object(fields);
     }
-    fields.insert("event".to_string(), Value::string(item.event.clone()));
+    fields.insert("event".to_string().into(), Value::string(item.event.clone()));
     if let Some(payload) = &item.payload {
-        fields.insert("payload".to_string(), payload.clone());
+        fields.insert("payload".to_string().into(), payload.clone());
     }
     let source = serde_json::to_value(&item.source).ok().and_then(|json| serde_json::from_value::<Value>(json).ok());
-    fields.insert("source".to_string(), source.unwrap_or(Value::Null));
+    fields.insert("source".to_string().into(), source.unwrap_or(Value::Null));
     Value::object(fields)
 }
 
@@ -441,7 +441,7 @@ impl EntitySource for PersistenceEntitySource {
         }
         let mut data_with_id = data.clone();
         if let Some(obj) = data_with_id.as_object_mut() {
-            obj.insert("id".to_string(), Value::string(id.to_string()));
+            obj.insert("id".to_string().into(), Value::string(id.to_string()));
         }
         self.adapter.create(entity_type, &data_with_id)
     }
@@ -548,13 +548,42 @@ type InboundWaiters = Arc<
     >,
 >;
 
+fn declare_persistence_capabilities(
+    kernel: &RuntimeKernel,
+    persistence: &dyn PersistenceAdapter,
+    schema: &orbital_core::OrbitalSchema,
+) {
+    let query = persistence.query_capabilities();
+    let write = persistence.write_capabilities();
+    if query.is_none() && write.is_none() {
+        return;
+    }
+    for orbital in &schema.orbitals {
+        let entities =
+            std::iter::once(&orbital.entity).chain(orbital.auxiliary_entities.iter().flatten());
+        for entity in entities {
+            let orbital_core::EntityRef::Inline(def) = entity else {
+                continue;
+            };
+            if let Some(c) = &query {
+                kernel.set_query_capabilities(&def.name, c.clone());
+            }
+            if let Some(c) = &write {
+                kernel.set_write_capabilities(&def.name, c.clone());
+            }
+        }
+    }
+}
+
 /// The host's error for a kernel refusal.
 fn host_error(e: KernelError) -> HostError {
     match e {
         KernelError::TraitNotFound(name) => HostError::TraitNotFound(name),
         KernelError::Internal(msg) => HostError::Internal(msg),
         KernelError::PayloadInvalid(msg) => HostError::Validation(msg),
-        e @ (KernelError::LaneHeldByParkedDispatch { .. } | KernelError::UnresolvedProgram { .. }) => {
+        e @ (KernelError::LaneHeldByParkedDispatch { .. }
+        | KernelError::UnresolvedProgram { .. }
+        | KernelError::LazyLoad { .. }) => {
             HostError::Internal(e.to_string())
         }
     }
@@ -661,13 +690,16 @@ impl Host {
                     match result
                 {
                     Ok(outcomes) => {
-                        waiters.lock().retain(|(route, answer, _)| {
+                        waiters.lock().retain(|(route, answer, failures)| {
                             match RuntimeKernel::inbound_late_answer(route, &outcomes) {
                                 Some(late) => {
                                     let _ = answer.send(late);
                                     false
                                 }
-                                None => true,
+                                None => {
+                                    failures.lock().extend(RuntimeKernel::cascade_failures(&outcomes));
+                                    true
+                                }
                             }
                         });
                         let mut response = orbital_core::EventResponse::from_process_results(
@@ -678,6 +710,8 @@ impl Host {
                         let kernel = stamping.upgrade();
                         if let Some(kernel) = &kernel {
                             kernel.stamp_emitted_sources(&mut response);
+                            let _session = client_id.map(|client| kernel.enter_session(client));
+                            kernel.seal_outcomes(&mut response, &outcomes, None, false);
                         }
                         broadcast_persisted(&tx, &response, client_id);
                         let orbital = site.orbital.clone().or_else(|| kernel.as_ref().and_then(|k| k.orbital_of_trait(&site.trait_name)));
@@ -801,10 +835,10 @@ impl Host {
 
     pub fn register_schema(&self, schema: orbital_core::OrbitalSchema) -> Result<(), HostError> {
         self.declare_capabilities(&schema);
-        *self.ticks.lock() = orbital_core::TickClock::from_schema(&schema);
         self.kernel
             .register_schema(schema)
             .map_err(|e| HostError::Internal(e.to_string()))?;
+        *self.ticks.lock() = orbital_core::TickClock::from_programs(&self.kernel.registered_programs());
         if self.secrets.store_source() {
             let seeded = self
                 .kernel
@@ -931,7 +965,7 @@ impl Host {
             .map_err(|failure| failure.error)?;
         match (reflection, reads.trace) {
             (Value::Object(mut answer), Some(_)) => {
-                answer.insert("trace".to_string(), trace()?);
+                answer.insert("trace".to_string().into(), trace()?);
                 Ok(Value::Object(answer))
             }
             (reflection, _) => Ok(reflection),
@@ -951,8 +985,8 @@ impl Host {
             headers.iter().filter_map(|(k, v)| v.as_str().map(|v| (k.as_str(), v))).collect();
         let answer = self.deliver_inbound(name, headers, body);
         let mut out = ValueMap::new();
-        out.insert("status".to_string(), Value::Number(f64::from(answer.status)));
-        out.insert("body".to_string(), Value::string(answer.body));
+        out.insert("status".to_string().into(), Value::Number(f64::from(answer.status)));
+        out.insert("body".to_string().into(), Value::string(answer.body));
         Ok(Value::object(out))
     }
 
@@ -986,6 +1020,16 @@ impl Host {
             _ => None,
         };
         let _viewer = options.get("viewer").filter(|v| matches!(v, Value::Object(_))).map(|user| self.enter_viewer(user.clone()));
+        if let Some(since) = request.frames_since {
+            let answer = match self.kernel.frames_since(since) {
+                Some(frames) => EventResponse { success: true, frames: Some(frames), ..Default::default() },
+                None => EventResponse::error("this host keeps no frames for the session: mount again"),
+            };
+            return serde_json::to_value(&answer)
+                .and_then(serde_json::from_value)
+                .map_err(|e| (e.to_string(), "EVENT_PROCESSING_ERROR", 500));
+        }
+        self.kernel.ensure_orbital_loaded(&orbital).map_err(|e| (e.to_string(), "EVENT_PROCESSING_ERROR", 500))?;
         let Some(detail) = self.get_orbital(&orbital) else {
             return Err((format!("Orbital not found: {orbital}"), "ORBITAL_NOT_FOUND", 404));
         };
@@ -1007,6 +1051,7 @@ impl Host {
         let targeted = |trait_name: &str, delivery: Option<&DeliveryRecord>, log: Option<&DispatchLog>| -> Result<Ran, (String, &'static str, u16)> {
             let outcomes = self.dispatch_continuing(trait_name, &entity_id, &request.event, payload.clone(), delivery, log).map_err(failed)?;
             let mut response = EventResponse::from_process_results(&outcomes, trait_name, &request.event);
+            self.kernel.seal_outcomes(&mut response, &outcomes, Some(&entity_id), false);
             self.echo_held_states(&mut response, trait_name, &entity_id);
             Ok((outcomes, response))
         };
@@ -1036,10 +1081,12 @@ impl Host {
             };
             let unseeded: Vec<orbital_core::effects::MountSeed> = seeds.iter().filter(|seed| !carried.contains(&seed.r#trait)).cloned().collect();
             let outcomes = if unseeded.is_empty() { Vec::new() } else { self.dispatch_mount(&unseeded, &entity_id, payload.clone()).map_err(failed)? };
-            let mut response = EventResponse::from_process_results_mount(&outcomes, &seeds[0].r#trait, seeds[0].event.as_str());
-            for (trait_name, row) in request.entity_by_trait.iter().flatten().filter(|(t, _)| revived && seeds.iter().any(|s| &s.r#trait == *t)) {
-                response.entity_by_trait.get_or_insert_with(Default::default).insert(trait_name.clone(), row.clone());
-            }
+            let mut response = EventResponse::from_process_results(&outcomes, &seeds[0].r#trait, seeds[0].event.as_str());
+            let mut writes = self.kernel.frame_writes(&outcomes, Some(&entity_id), true);
+            writes.extend(request.entity_by_trait.iter().flatten().filter(|(t, _)| revived && seeds.iter().any(|s| &s.r#trait == *t)).filter_map(|(trait_name, row)| {
+                Some((self.kernel.trait_frame_key(trait_name), orbital_core::runtime::kernel::FrameWrite::Fields(row.as_object()?.clone())))
+            }));
+            self.kernel.seal_frames(&mut response, writes);
             self.echo_held_states(&mut response, &seeds[0].r#trait, &entity_id);
             (outcomes, response)
         } else if let Some(trait_name) = request.target_trait.as_deref() {
@@ -1050,6 +1097,7 @@ impl Host {
             let response = match names.first() {
                 Some(first) => {
                     let mut response = EventResponse::from_process_results(&outcomes, first, &request.event);
+                    self.kernel.seal_outcomes(&mut response, &outcomes, Some(&entity_id), false);
                     self.echo_held_states(&mut response, first, &entity_id);
                     response
                 }
@@ -1060,7 +1108,8 @@ impl Host {
             let handlers = self.discover_handlers(&detail.traits, &entity_id, &request.event);
             let held = self.held_states(&detail.traits, &entity_id);
             let outcomes = if handlers.is_empty() { Vec::new() } else { self.dispatch_each(&handlers, &entity_id, &request.event, payload.clone()).map_err(failed)? };
-            let response = EventResponse::from_discovery(&outcomes, &handlers, &request.event, held);
+            let mut response = EventResponse::from_discovery(&outcomes, &handlers, &request.event, held);
+            self.kernel.seal_outcomes(&mut response, &outcomes, Some(&entity_id), false);
             (outcomes, response)
         };
         self.broadcast_persisted(&response, client_id);
@@ -1190,26 +1239,17 @@ impl Host {
 
     /// Tell the kernel what the adapter's push-down honours, for each inline entity the schema declares.
     fn declare_capabilities(&self, schema: &orbital_core::OrbitalSchema) {
-        let query = self.persistence.query_capabilities();
-        let write = self.persistence.write_capabilities();
-        if query.is_none() && write.is_none() {
-            return;
-        }
-        for orbital in &schema.orbitals {
-            let entities =
-                std::iter::once(&orbital.entity).chain(orbital.auxiliary_entities.iter().flatten());
-            for entity in entities {
-                let orbital_core::EntityRef::Inline(def) = entity else {
-                    continue;
-                };
-                if let Some(c) = &query {
-                    self.kernel.set_query_capabilities(&def.name, c.clone());
-                }
-                if let Some(c) = &write {
-                    self.kernel.set_write_capabilities(&def.name, c.clone());
-                }
-            }
-        }
+        declare_persistence_capabilities(&self.kernel, self.persistence.as_ref(), schema);
+    }
+
+    /// Load this program's lazy orbitals through `source` (EXEC-LOAD-2): install it before the program is registered. A lazy
+    /// orbital the kernel registers later gets the persistence capabilities the booted program's entities got.
+    pub fn set_lazy_source(&self, source: Arc<dyn orbital_core::runtime::LazySource>) {
+        self.kernel.set_lazy_source(source);
+        let persistence = self.persistence.clone();
+        self.kernel.on_lazy_loaded(Arc::new(move |kernel, schema| {
+            declare_persistence_capabilities(kernel, persistence.as_ref(), schema)
+        }));
     }
 
     /// Process an event for a specific entity
@@ -1653,15 +1693,15 @@ mod tests {
             .unwrap();
 
         let mut inner_data = ValueMap::new();
-        inner_data.insert("id".to_string(), Value::String(("user-1".to_string()).into()));
+        inner_data.insert("id".to_string().into(), Value::String(("user-1".to_string()).into()));
         inner_data.insert(
-            "email".to_string(),
+            "email".to_string().into(),
             Value::String(("test@example.com".to_string()).into()),
         );
-        inner_data.insert("name".to_string(), Value::String(("Test User".to_string()).into()));
+        inner_data.insert("name".to_string().into(), Value::String(("Test User".to_string()).into()));
 
         let mut payload = ValueMap::new();
-        payload.insert("data".to_string(), Value::Object(inner_data.into()));
+        payload.insert("data".to_string().into(), Value::Object(inner_data.into()));
 
         let result = runtime
             .process_event("UserManagement", "user-1", "SAVE", Value::Object(payload.into()))
@@ -1787,7 +1827,7 @@ mod tests {
         let (inner, id) = (Arc::clone(&runtime), viewer.to_string());
         std::thread::spawn(move || {
             let mut user = ValueMap::new();
-            user.insert("id".to_string(), Value::String(id.into()));
+            user.insert("id".to_string().into(), Value::String(id.into()));
             let _viewer = inner.enter_viewer(Value::Object(user.into()));
             let _ = tx.send(inner.dispatch_continuing("Agent", "default", "GO", Value::Null, None, None).map(|_| ()));
         });
@@ -2450,6 +2490,42 @@ mod tests {
         assert!(dispatch_request(&runtime, serde_json::json!({ "wire": true, "orbital": "Desk", "targetTrait": "Notes", "event": "ADD_NOTE", "locale": "" })).is_ok(), "control: an empty locale is absent");
     }
 
+    struct OneLazy(std::sync::atomic::AtomicUsize);
+
+    impl orbital_core::runtime::LazySource for OneLazy {
+        fn read(&self, file: &str) -> Result<orbital_core::runtime::LazyProgram, String> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            assert_eq!(file, "lazy/Late.orb");
+            let schema = serde_json::from_value(serde_json::json!({
+                "name": "Late", "typeContractVersion": 1,
+                "orbitals": [{ "name": "Late",
+                    "entity": { "name": "Memo", "persistence": "runtime", "fields": [{ "name": "id", "type": "string" }] },
+                    "traits": [{ "name": "Hear", "linkedEntity": "Memo",
+                        "stateMachine": { "states": [{ "name": "idle", "isInitial": true }, { "name": "heard" }],
+                            "transitions": [{ "from": "idle", "to": "heard", "event": "HEARD" }] } }] }]
+            }))
+            .unwrap();
+            Ok(orbital_core::runtime::LazyProgram { schema, catalogs: Default::default() })
+        }
+    }
+
+    #[test]
+    fn the_first_request_naming_a_lazy_orbital_loads_it_and_a_name_no_page_declares_stays_not_found() {
+        let runtime = Host::new(Arc::new(DriverAdapter::memory())).shared();
+        let source = Arc::new(OneLazy(Default::default()));
+        runtime.set_lazy_source(source.clone());
+        let mut program = serde_json::to_value(dispatching_program()).unwrap();
+        program["lazyPages"] = serde_json::json!([{ "path": "/late", "orbital": "Late", "orbRef": "lazy/Late.orb", "traits": [{ "name": "Hear", "dispatchMode": "persistedAwaited" }] }]);
+        runtime.register_schema(serde_json::from_value(program).unwrap()).unwrap();
+        let (message, _) = dispatch_request(&runtime, serde_json::json!({ "wire": true, "orbital": "Nowhere", "targetTrait": "Hear", "event": "HEARD" })).unwrap_err();
+        assert_eq!(message, "Orbital not found: Nowhere");
+        assert_eq!(source.0.load(Ordering::SeqCst), 0, "control: an unknown name reads no lazy file");
+        let answer = dispatch_request(&runtime, serde_json::json!({ "wire": true, "orbital": "Late", "targetTrait": "Hear", "event": "HEARD" })).unwrap();
+        assert_eq!(answer["success"], true, "{answer}");
+        assert_eq!(answer["states"]["Hear"], "heard", "{answer}");
+        assert_eq!(source.0.load(Ordering::SeqCst), 1);
+    }
+
     #[test]
     fn a_request_without_a_trait_discovers_or_runs_its_declared_traits() {
         let runtime = desk();
@@ -2647,7 +2723,45 @@ mod tests {
         let items = items_of(&mut live, "READ_DONE");
         assert_eq!(items.len(), 1, "{items:?}");
         let frame = serde_json::to_value(live_item_value(&items[0])).unwrap();
-        frame["response"]["entityByTrait"]["Files"].clone()
+        frames_in(&frame["response"])["Files"].clone()
+    }
+
+    /// The frames a response's delta leaves a client that held none: its ops folded.
+    fn frames_in(response: &serde_json::Value) -> serde_json::Value {
+        let mut frames = serde_json::Map::new();
+        for op in response["frames"]["ops"].as_array().into_iter().flatten() {
+            let (name, frame) = (op[0].as_str().unwrap(), op[1].as_str().unwrap_or_default());
+            match name {
+                "clear" => frames.clear(),
+                "del" => {
+                    frames.remove(frame);
+                }
+                "put" => {
+                    frames.insert(frame.to_string(), op[2].clone());
+                }
+                "set" => {
+                    for (name, fields) in op[1].as_object().unwrap() {
+                        let held = frames.entry(name.clone()).or_insert_with(|| serde_json::json!({}));
+                        for (field, value) in fields.as_object().unwrap() {
+                            held[field] = value.clone();
+                        }
+                    }
+                }
+                other => panic!("unknown frame op {other}"),
+            }
+        }
+        serde_json::Value::Object(frames)
+    }
+
+    /// The snapshot the host answers a client that asks for its session's frames from nothing.
+    fn view_of(runtime: &Host, orbital: &str, trait_name: &str, tab: &str) -> serde_json::Value {
+        let options = serde_json::json!({ "orbital": orbital, "targetTrait": trait_name, "event": "VIEW", "clientId": tab, "framesSince": 0 });
+        let args: Vec<Value> = [serde_json::json!(format!("{orbital}.{trait_name}.VIEW")), serde_json::json!({}), options]
+            .iter()
+            .map(|a| serde_json::from_value(a.clone()).unwrap())
+            .collect();
+        let answer = orbital_core::effects::executor::SubstrateHandler::run(runtime.substrate.as_ref(), "program/dispatch", &args).expect("the host answers a frames request");
+        frames_in(&orbital_core::json_value::value_to_json(&answer))
     }
 
     #[test]
@@ -2658,7 +2772,7 @@ mod tests {
     }
 
     #[test]
-    fn control_a_deferred_completion_that_rewrites_the_list_pushes_it() {
+    fn control_a_deferred_completion_that_rewrites_the_list_pushes_it_to_a_client_never_sent_it() {
         let row = completion_row(true);
         assert_eq!(row["items"].as_array().map(Vec::len), Some(50), "{row}");
     }
@@ -2798,16 +2912,18 @@ mod tests {
         let runtime = topic_host();
         topic_dispatch(&runtime, "SET_TOPIC", Some("app"), "tab-a");
         topic_dispatch(&runtime, "SET_TOPIC", Some("cli"), "tab-b");
-        let read = topic_dispatch(&runtime, "READ_BACK", None, "tab-a");
-        assert_eq!(read["entityByTrait"]["Viewer"]["seen"], "app", "tab-b's write reached tab-a's frame: {read}");
+        topic_dispatch(&runtime, "READ_BACK", None, "tab-a");
+        let read = view_of(&runtime, "Topics", "Viewer", "tab-a");
+        assert_eq!(read["Viewer"]["seen"], "app", "tab-b's write reached tab-a's frame: {read}");
     }
 
     #[test]
     fn control_one_tab_reads_back_its_own_last_write() {
         let runtime = topic_host();
         topic_dispatch(&runtime, "SET_TOPIC", Some("app"), "tab-a");
-        let read = topic_dispatch(&runtime, "READ_BACK", None, "tab-a");
-        assert_eq!(read["entityByTrait"]["Viewer"]["seen"], "app", "{read}");
+        topic_dispatch(&runtime, "READ_BACK", None, "tab-a");
+        let read = view_of(&runtime, "Topics", "Viewer", "tab-a");
+        assert_eq!(read["Viewer"]["seen"], "app", "{read}");
     }
     fn handoff_program() -> orbital_core::OrbitalSchema {
         let machine = |events: serde_json::Value, arms: serde_json::Value| serde_json::json!({ "states": [{ "name": "idle", "isInitial": true }], "events": events, "transitions": arms });
@@ -2970,7 +3086,9 @@ mod tests {
 
     fn seen_by(runtime: &Host, trait_name: &str, event: &str, tab: &str) -> serde_json::Value {
         let answer = session_dispatch(runtime, trait_name, event, None, as_tab(tab)).expect("the dispatch runs");
-        answer["entityByTrait"][trait_name]["seen"].clone()
+        let _ = answer;
+        let view = view_of(runtime, "Sessions", "Viewer", tab);
+        view.get(trait_name).or_else(|| view.get("$shared::Topic")).map_or(serde_json::Value::Null, |frame| frame["seen"].clone())
     }
 
     fn open_client_stream(runtime: &Host, tab: &str) -> orbital_core::runtime::native_host::SubstrateSource {
@@ -2999,7 +3117,7 @@ mod tests {
         let wire = serde_json::json!({ "wire": true });
         session_dispatch(&runtime, "Viewer", "SET_TOPIC", Some("app"), wire.clone()).unwrap();
         let read = session_dispatch(&runtime, "Viewer", "READ_BACK", None, wire).unwrap();
-        assert_ne!(read["entityByTrait"]["Viewer"]["seen"], "app", "a clientId-less request left a frame behind");
+        assert_ne!(frames_in(&read)["Viewer"]["seen"], "app", "a clientId-less request left a frame behind");
         assert!(runtime.kernel.frame_sessions().is_empty(), "a scratch session outlived its dispatch: {:?}", runtime.kernel.frame_sessions());
     }
 
@@ -3008,7 +3126,7 @@ mod tests {
         let runtime = session_host(false);
         session_dispatch(&runtime, "Viewer", "SET_TOPIC", Some("app"), serde_json::json!({})).unwrap();
         let read = session_dispatch(&runtime, "Viewer", "READ_BACK", None, serde_json::json!({})).unwrap();
-        assert_eq!(read["entityByTrait"]["Viewer"]["seen"], "app");
+        assert_eq!(frames_in(&read)["Viewer"]["seen"], "app");
     }
 
     #[test]
@@ -3033,7 +3151,7 @@ mod tests {
         let runtime = session_host(false);
         session_dispatch(&runtime, "Viewer", "SET_TOPIC", Some("app"), as_tab("tab-a")).unwrap();
         let mounted = session_dispatch(&runtime, "Viewer", "INIT", None, serde_json::json!({ "clientId": "tab-b", "mount": [{ "trait": "Viewer", "event": "INIT" }] })).unwrap();
-        assert_eq!(mounted["entityByTrait"]["Viewer"]["topic"], "", "tab-b's mount was seeded from tab-a's frame: {mounted}");
+        assert_eq!(frames_in(&mounted)["Viewer"]["topic"], "", "tab-b's mount was seeded from tab-a's frame: {mounted}");
     }
 
     fn stepper_host() -> Arc<Host> {
@@ -3204,7 +3322,7 @@ mod tests {
         session_dispatch(&runtime, "Viewer", "SET_TOPIC", Some("app"), as_tab("tab-a")).unwrap();
         drop(open_client_stream(&runtime, "tab-a"));
         let mounted = reconnect_mount(&runtime, "tab-a", Some(serde_json::json!({ "topic": "app" }))).unwrap();
-        assert_eq!(mounted["entityByTrait"]["Viewer"]["topic"], "app", "the carried frame was not rebuilt: {mounted}");
+        assert_eq!(frames_in(&mounted)["Viewer"]["topic"], "app", "the carried frame was not rebuilt: {mounted}");
         assert_eq!(seen_by(&runtime, "Viewer", "READ_BACK", "tab-a"), "app", "the rebuilt session was reset by INIT");
     }
 

@@ -48,7 +48,7 @@ fn seed_singletons(kernel: &KernelBridge, schema: &OrbitalSchema) -> Result<(), 
                     .as_ref()
                     .map(|d| Value::from(d.clone()))
                     .unwrap_or(Value::Null);
-                row.insert(name.clone(), v);
+                row.insert(name.clone().into(), v);
             }
             let defaulted = row.len();
             kernel.seed(&def.name, vec![Value::Object(row.into())])?;

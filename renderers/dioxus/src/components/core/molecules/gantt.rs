@@ -228,7 +228,7 @@ impl DioxusPatternRenderer for GanttRenderer {
                                                     onclick: move |_| {
                                                         if let (Some(s), Some(e)) = (sink, ev.clone()) {
                                                             let mut payload = orbital_core::ValueMap::new();
-                                                            payload.insert("id".to_string(), Value::String(bar_id.clone().into()));
+                                                            payload.insert("id".to_string().into(), Value::String(bar_id.clone().into()));
                                                             s.call((e, Value::Object(payload.into())));
                                                         }
                                                     },

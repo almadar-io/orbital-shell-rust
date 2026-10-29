@@ -67,6 +67,27 @@ mod catalog_tests {
     }
 }
 
+/// A resolved program's lazy orbitals read from the files `orb resolve` wrote beside it (EXEC-LOAD-1), with their catalogs.
+pub struct FileLazySource {
+    dir: std::path::PathBuf,
+}
+
+impl FileLazySource {
+    pub fn beside(program: &Path) -> Self {
+        Self { dir: program.parent().unwrap_or(Path::new("")).to_path_buf() }
+    }
+}
+
+impl orbital_core::runtime::LazySource for FileLazySource {
+    fn read(&self, file: &str) -> Result<orbital_core::runtime::LazyProgram, String> {
+        let path = self.dir.join(file);
+        let schema = parse_schema_file(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+        let locales = schema.locales.clone().unwrap_or_default();
+        let catalogs = read_catalogs(&path, &locales).map_err(|e| e.to_string())?;
+        Ok(orbital_core::runtime::LazyProgram { schema, catalogs })
+    }
+}
+
 /// Tracing is an operator's choice, and the trace holds program data (every emit's payload, never a credential):
 /// `ORBITAL_TRACE_FILE=<path>` traces and appends each dispatch to that file, `ORBITAL_TRACE=memory` keeps the last
 /// dispatches in memory, `ORBITAL_TRACE=off` traces nothing; with neither set, `trace_by_default` decides.
@@ -118,6 +139,7 @@ pub fn boot_file_with(
 /// `orb-run: server` hand-off): the store is the kernel's in-memory store. `catalogs` must hold every locale the app declares.
 pub fn boot_app(
     schema: orbital_core::OrbitalSchema,
+    schema_path: &Path,
     port: SubstratePort,
     catalogs: Catalogs,
     env: &orbital_core::runtime::auth::AuthEnv,
@@ -126,10 +148,9 @@ pub fn boot_app(
     if let Some(missing) = schema.locales.iter().flatten().find(|locale| !catalogs.contains_key(*locale)) {
         anyhow::bail!("the composed app declares locale \"{missing}\" but no catalog was given for it");
     }
-    let path = format!("{}.orb", schema.name);
     let runtime = boot(
         schema,
-        Path::new(&path),
+        schema_path,
         Arc::new(DriverAdapter::memory()),
         env,
         trace_by_default,
@@ -150,6 +171,9 @@ pub fn boot_embedded(
 ) -> anyhow::Result<Arc<Host>> {
     let schema: orbital_core::OrbitalSchema =
         serde_json::from_str(program_json).map_err(|e| anyhow::anyhow!("parse the program: {e}"))?;
+    if schema.lazy_pages.as_ref().is_some_and(|pages| !pages.is_empty()) {
+        anyhow::bail!("the embedded program `{}` lists lazy pages, and an embedded program has no folder their files sit beside", schema.name);
+    }
     let runtime = boot(
         schema,
         Path::new("program.orb"),
@@ -192,6 +216,7 @@ pub fn boot(
     );
 
     let runtime = Host::with_persistence(persistence, config).shared();
+    runtime.set_lazy_source(Arc::new(FileLazySource::beside(schema_path)));
 
     configure_trace(&runtime, env, trace_by_default)?;
     // Register schema (materializes any authored `instances`).
@@ -615,7 +640,7 @@ mod composed_tests {
         let app = program("app", "Notes", serde_json::json!({ "locales": ["en", "ar"] }));
         let mut catalogs = Catalogs::new();
         catalogs.insert("en".to_string(), std::collections::HashMap::new());
-        let error = boot_app(schema_of(app), port(), catalogs, &Default::default(), false)
+        let error = boot_app(schema_of(app), Path::new("app.orb"), port(), catalogs, &Default::default(), false)
             .err()
             .expect("a missing catalog refuses the boot");
         assert!(error.to_string().contains("\"ar\""), "{error}");
@@ -644,7 +669,7 @@ mod composed_tests {
     #[test]
     fn the_composed_boot_drives_its_background_ticks() {
         let ticks = serde_json::json!([{ "name": "beat", "interval": 10, "runsInBackground": true, "effects": [["persist", "create", "Memo", { "n": 1 }]] }]);
-        let host = boot_app(schema_of(persistent_program(ticks)), port(), Catalogs::new(), &Default::default(), true).unwrap();
+        let host = boot_app(schema_of(persistent_program(ticks)), Path::new("app.orb"), port(), Catalogs::new(), &Default::default(), true).unwrap();
         let first: orbital_core::Value = serde_json::from_value(serde_json::json!({ "id": "m0", "n": 0 })).unwrap();
         host.persistence().create("Memo", &first).unwrap();
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
@@ -656,5 +681,76 @@ mod composed_tests {
             );
             std::thread::sleep(std::time::Duration::from_millis(20));
         }
+    }
+
+    fn lazy_files(tag: &str, with_lazy_file: bool) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("orbital-host-lazy-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("lazy")).unwrap();
+        let orbital = |name: &str, entity: &str, trait_def: serde_json::Value| serde_json::json!({
+            "name": name,
+            "entity": { "name": entity, "persistence": "runtime", "fields": [{ "name": "id", "type": "string" }] },
+            "traits": [trait_def]
+        });
+        let emitter = serde_json::json!({ "name": "Emitter", "linkedEntity": "Note",
+            "stateMachine": { "states": [{ "name": "idle", "isInitial": true }],
+                "transitions": [{ "from": "idle", "to": "idle", "event": "GO", "effects": [["emit", "PING", {}]] }] },
+            "emits": [{ "event": "PING" }] });
+        let hear = serde_json::json!({ "name": "Hear", "linkedEntity": "Memo",
+            "stateMachine": { "states": [{ "name": "idle", "isInitial": true }, { "name": "heard" }],
+                "transitions": [{ "from": "idle", "to": "heard", "event": "HEARD" }] },
+            "listens": [{ "event": "PING", "triggers": "HEARD" }] });
+        let main = serde_json::json!({
+            "name": "app", "typeContractVersion": 1,
+            "orbitals": [orbital("Main", "Note", emitter)],
+            "lazyPages": [{ "path": "/late", "orbital": "Late", "orbRef": "lazy/Late.orb",
+                "traits": [{ "name": "Hear", "dispatchMode": "persistedAwaited", "listens": [{ "event": "PING", "triggers": "HEARD" }] }] }]
+        });
+        std::fs::write(dir.join("app.orb"), main.to_string()).unwrap();
+        if with_lazy_file {
+            let late = serde_json::json!({
+                "name": "Late", "typeContractVersion": 1,
+                "orbitals": [orbital("Late", "Memo", hear)]
+            });
+            std::fs::write(dir.join("lazy/Late.orb"), late.to_string()).unwrap();
+        }
+        dir
+    }
+
+    #[test]
+    fn a_booted_program_loads_its_lazy_orbital_from_the_file_beside_it_on_the_first_event() {
+        let dir = lazy_files("file", true);
+        let host = super::boot_file_with(&dir.join("app.orb"), &Default::default(), false, HostConfig::default()).unwrap();
+        assert_eq!(host.kernel().lazy_pending(), ["Late"], "boot registers a stub, not the orbital");
+        host.kernel().dispatch("Emitter", None, "GO", orbital_core::Value::Null).unwrap();
+        assert_eq!(host.kernel().get_state("Hear", None).unwrap().current_state, "heard");
+        assert!(host.kernel().lazy_pending().is_empty());
+    }
+
+    #[test]
+    fn the_composed_boot_loads_its_lazy_orbital_beside_the_app_file() {
+        let dir = lazy_files("app", true);
+        let app = dir.join("app.orb");
+        let schema = orbital_core::schema::parse_schema_file(&app).unwrap();
+        let host = boot_app(schema, &app, port(), Catalogs::new(), &Default::default(), false).unwrap();
+        host.kernel().dispatch("Hear", None, "HEARD", orbital_core::Value::Null).unwrap();
+        assert_eq!(host.kernel().get_state("Hear", None).unwrap().current_state, "heard");
+    }
+
+    #[test]
+    fn edge_a_missing_lazy_file_fails_the_event_that_reaches_it_and_names_the_file() {
+        let dir = lazy_files("missing", false);
+        let host = super::boot_file_with(&dir.join("app.orb"), &Default::default(), false, HostConfig::default()).unwrap();
+        let error = host.kernel().dispatch("Emitter", None, "GO", orbital_core::Value::Null).unwrap_err();
+        let message = error.to_string();
+        assert!(message.contains("Late") && message.contains("Late.orb"), "{message}");
+    }
+
+    #[test]
+    fn edge_an_embedded_program_that_lists_lazy_pages_is_refused() {
+        let dir = lazy_files("embedded", true);
+        let json = std::fs::read_to_string(dir.join("app.orb")).unwrap();
+        let error = boot_embedded(&json, &Default::default(), Catalogs::new()).err().expect("refused");
+        assert!(error.to_string().contains("lazy pages"), "{error}");
     }
 }

@@ -126,7 +126,6 @@
       ],
       "traits": [
         {
-          "category": "integration",
           "effectRow": [
             {
               "kind": "emit",
@@ -206,7 +205,6 @@
           "linkedEntity": "LateRun",
           "linkedEntityId": "ent_2SGQV7XXZCYZP0YVXX6E259A6D",
           "name": "Late",
-          "scope": "instance",
           "stateMachine": {
             "events": [
               {

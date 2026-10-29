@@ -123,7 +123,7 @@ impl DioxusPatternRenderer for AvlStateMachineRenderer {
                                         onclick: move |_| {
                                             if let (Some(s), Some(e)) = (sink, ev.clone()) {
                                                 let mut payload = orbital_core::ValueMap::new();
-                                                payload.insert("stateId".to_string(), Value::String(name_for_click.clone().into()));
+                                                payload.insert("stateId".to_string().into(), Value::String(name_for_click.clone().into()));
                                                 s.call((e, Value::Object(payload.into())));
                                             }
                                         },
@@ -156,10 +156,10 @@ impl DioxusPatternRenderer for AvlStateMachineRenderer {
                                         onclick: move |_| {
                                             if let (Some(s), Some(e)) = (sink, click_event.clone()) {
                                                 let mut payload = orbital_core::ValueMap::new();
-                                                payload.insert("index".to_string(), Value::Number(payload_index));
-                                                payload.insert("event".to_string(), Value::String(payload_event.clone().into()));
-                                                payload.insert("from".to_string(), Value::String(payload_from.clone().into()));
-                                                payload.insert("to".to_string(), Value::String(payload_to.clone().into()));
+                                                payload.insert("index".to_string().into(), Value::Number(payload_index));
+                                                payload.insert("event".to_string().into(), Value::String(payload_event.clone().into()));
+                                                payload.insert("from".to_string().into(), Value::String(payload_from.clone().into()));
+                                                payload.insert("to".to_string().into(), Value::String(payload_to.clone().into()));
                                                 s.call((e, Value::Object(payload.into())));
                                             }
                                         },

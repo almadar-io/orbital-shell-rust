@@ -247,7 +247,7 @@ mod tests {
     fn row(pairs: &[(&str, &str)]) -> Value {
         let mut m = orbital_core::ValueMap::new();
         for (k, v) in pairs {
-            m.insert((*k).to_string(), Value::String(((*v).to_string()).into()));
+            m.insert((*k).to_string().into(), Value::String(((*v).to_string()).into()));
         }
         Value::Object(m.into())
     }
