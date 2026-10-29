@@ -242,14 +242,7 @@ pub fn boot(
         }
         tracing::warn!(target: orbital_core::logging::ns::SERVER_DATA, %error, "credential store unavailable; the environment answers");
     }
-    let secrets = runtime.credentials();
-    let problems = boot_env_problems(
-        env,
-        production,
-        &orbital_core::credential_admin::schema_invoked_services(&schema),
-        &|| runtime.credential_catalog(),
-        &|name| matches!(orbital_core::runtime::http_service::SecretSource::secret(secrets.as_ref(), name), Ok(Some(_))),
-    );
+    let problems = boot_env_problems(env, production);
     if production && !problems.is_empty() {
         anyhow::bail!("refusing to start in production:\n- {}", problems.join("\n- "));
     }
@@ -287,32 +280,12 @@ pub fn start_tick_driver(runtime: &Arc<Host>) {
         .unwrap_or_else(|error| tracing::error!(target: orbital_core::logging::ns::SERVER_DATA, %error, "the tick driver did not start"));
 }
 
-/// What a deployment lacks: under `production` a
-/// Firestore emulator host (it serves no real data), and, unless integrations are mocked
-/// (`ALMADAR_INTEGRATIONS_MODE=mock` / `USE_MOCK_DATA=true`), every required credential of a service the program calls
-/// that `present` (the credential store, then the environment) does not hold.
-pub fn boot_env_problems(
-    env: &BootEnv,
-    production: bool,
-    called: &std::collections::BTreeSet<String>,
-    catalog: &dyn Fn() -> Result<orbital_core::credential_admin::Catalog, String>,
-    present: &dyn Fn(&str) -> bool,
-) -> Vec<String> {
+/// What a deployment lacks: under `production` a Firestore emulator host (it serves no real data). The credentials a
+/// program needs are `std-credential-admin`'s boot check.
+pub fn boot_env_problems(env: &BootEnv, production: bool) -> Vec<String> {
     let mut problems = Vec::new();
     if production && env.get("FIRESTORE_EMULATOR_HOST").is_some_and(|v| !v.is_empty()) {
         problems.push("FIRESTORE_EMULATOR_HOST is set: the Firestore emulator is for local dev only".to_string());
-    }
-    let mocked = orbital_core::credential_admin::env_mock(&|k| env.get(k).cloned());
-    if called.is_empty() || mocked {
-        return problems;
-    }
-    match catalog() {
-        Ok(catalog) => problems.extend(
-            orbital_core::credential_admin::missing_required_credentials(&catalog, called, present)
-                .into_iter()
-                .map(|missing| format!("missing required integration credential {missing}")),
-        ),
-        Err(error) => problems.push(format!("the declared integration credentials could not be read: {error}")),
     }
     problems
 }
@@ -320,53 +293,20 @@ pub fn boot_env_problems(
 #[cfg(test)]
 mod boot_env_tests {
     use super::boot_env_problems;
-    use orbital_core::credential_admin::Catalog;
-    use std::collections::{BTreeSet, HashMap};
+    use std::collections::HashMap;
 
     fn env(pairs: &[(&str, &str)]) -> HashMap<String, String> {
         pairs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()
     }
 
-    fn catalog() -> Result<Catalog, String> {
-        Catalog::from_registry(
-            r#"{ "services": { "stripe": { "backend": "production", "credentials": [
-                { "envVar": "STRIPE_SECRET_KEY", "required": true, "description": "API key" }] } } }"#,
-        )
-    }
-
-    fn stripe() -> BTreeSet<String> {
-        BTreeSet::from(["stripe".to_string()])
-    }
-
     #[test]
-    fn production_names_the_emulator_and_each_missing_required_credential() {
-        let problems = boot_env_problems(&env(&[("FIRESTORE_EMULATOR_HOST", "127.0.0.1:8080")]), true, &stripe(), &catalog, &|_| false);
+    fn production_names_the_emulator_and_local_dev_does_not() {
         assert_eq!(
-            problems,
-            [
-                "FIRESTORE_EMULATOR_HOST is set: the Firestore emulator is for local dev only",
-                "missing required integration credential stripe: STRIPE_SECRET_KEY (API key)",
-            ]
+            boot_env_problems(&env(&[("FIRESTORE_EMULATOR_HOST", "127.0.0.1:8080")]), true),
+            ["FIRESTORE_EMULATOR_HOST is set: the Firestore emulator is for local dev only"]
         );
-    }
-
-    #[test]
-    fn control_held_credentials_and_local_dev_emulators_are_no_problem() {
-        assert!(boot_env_problems(&env(&[]), true, &stripe(), &catalog, &|_| true).is_empty());
-        assert!(boot_env_problems(&env(&[("FIRESTORE_EMULATOR_HOST", "h:1")]), false, &BTreeSet::new(), &catalog, &|_| false).is_empty());
-    }
-
-    #[test]
-    fn mocked_integrations_owe_no_credentials_and_an_unreadable_catalog_is_named() {
-        for pairs in [vec![("ALMADAR_INTEGRATIONS_MODE", "mock")], vec![("USE_MOCK_DATA", "true")]] {
-            assert!(boot_env_problems(&env(&pairs), true, &stripe(), &catalog, &|_| false).is_empty(), "{pairs:?}");
-        }
-        let unreadable = boot_env_problems(&env(&[]), true, &stripe(), &|| Err("no registry".into()), &|_| false);
-        assert_eq!(unreadable, ["the declared integration credentials could not be read: no registry"]);
-        assert!(
-            boot_env_problems(&env(&[]), true, &BTreeSet::new(), &|| Err("no registry".into()), &|_| false).is_empty(),
-            "control: a program calling no service never reads the catalog"
-        );
+        assert!(boot_env_problems(&env(&[("FIRESTORE_EMULATOR_HOST", "h:1")]), false).is_empty());
+        assert!(boot_env_problems(&env(&[]), true).is_empty());
     }
 }
 

@@ -8,6 +8,7 @@
 use std::sync::Arc;
 
 use orbital_core::client::bridge::{KernelBridge, ServerBridge};
+use orbital_core::client::ClientKernel;
 use orbital_core::{EntityRef, OrbitalSchema, Value};
 
 use crate::app::{AppState, APP};
@@ -20,7 +21,10 @@ pub const NS: &str = "almadar::ui_wasm_dioxus";
 /// Seed one `singleton` row per inline entity with no authored `instances`,
 /// from each field's literal `default` — identical to the egui web shell so
 /// `@entity.X` bindings resolve for instance-scoped atoms (e.g. the counter).
-fn seed_singletons(kernel: &KernelBridge, schema: &OrbitalSchema) -> Result<(), String> {
+fn seed_singletons(
+    seed: &dyn Fn(&str, Vec<Value>) -> Result<(), String>,
+    schema: &OrbitalSchema,
+) -> Result<(), String> {
     let mut seen = std::collections::HashSet::new();
     for orbital in &schema.orbitals {
         let mut refs: Vec<&EntityRef> = vec![&orbital.entity];
@@ -51,7 +55,7 @@ fn seed_singletons(kernel: &KernelBridge, schema: &OrbitalSchema) -> Result<(), 
                 row.insert(name.clone().into(), v);
             }
             let defaulted = row.len();
-            kernel.seed(&def.name, vec![Value::Object(row.into())])?;
+            seed(&def.name, vec![Value::Object(row.into())])?;
             tracing::debug!(target: NS, entity = %def.name, defaulted, "seeded singleton entity");
         }
     }
@@ -64,14 +68,18 @@ fn seed_singletons(kernel: &KernelBridge, schema: &OrbitalSchema) -> Result<(), 
 /// no DOM, no window.
 pub fn mount_core(schema_json: &str) -> Result<(usize, usize), String> {
     let schema = orbital_core::schema::parse_schema(schema_json).map_err(|e| e.to_string())?;
-    let kernel = KernelBridge::new(schema.clone()).map_err(|e| e.to_string())?;
-    seed_singletons(&kernel, &schema)?;
-    Ok(mount(schema, Arc::new(kernel)))
+    let server = KernelBridge::new(schema.clone()).map_err(|e| e.to_string())?;
+    seed_singletons(&|entity, rows| server.seed(entity, rows).map_err(|e| e.to_string()), &schema)?;
+    let kernel = ClientKernel::new(schema.clone(), Some(Arc::new(server) as Arc<dyn ServerBridge>)).map_err(|e| e.to_string())?;
+    seed_singletons(&|entity, rows| kernel.seed(entity, rows), &schema)?;
+    Ok(mount_circuit(ClientCore::with_client_kernel(schema, Arc::new(kernel))))
 }
 
-/// [`mount_core`] over a caller's bridge (a live server, or a seeded kernel).
-pub fn mount(schema: OrbitalSchema, bridge: Arc<dyn ServerBridge>) -> (usize, usize) {
-    mount_circuit(ClientCore::new(schema, Some(bridge)))
+/// [`mount_core`] over a caller's bridge (a live server, or a seeded kernel): the circuit is a client-role kernel
+/// whose server legs go to `bridge`, so its ticks run through the kernel's frame loop.
+pub fn mount(schema: OrbitalSchema, bridge: Arc<dyn ServerBridge>) -> Result<(usize, usize), String> {
+    let kernel = ClientKernel::new(schema.clone(), Some(bridge)).map_err(|e| e.to_string())?;
+    Ok(mount_circuit(ClientCore::with_client_kernel(schema, Arc::new(kernel))))
 }
 
 /// Mount a circuit the caller already wired. A core built with a client-role kernel

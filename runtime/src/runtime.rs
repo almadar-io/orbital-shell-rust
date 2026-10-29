@@ -830,20 +830,6 @@ impl Host {
             .register_schema(schema)
             .map_err(|e| HostError::Internal(e.to_string()))?;
         *self.ticks.lock() = orbital_core::TickClock::from_programs(&self.kernel.registered_programs());
-        if self.secrets.store_source() {
-            let seeded = self
-                .kernel
-                .credential_catalog()
-                .and_then(|catalog| self.secrets.seed_store_from_env(&catalog));
-            match seeded {
-                Ok(count) => {
-                    tracing::info!(target: orbital_core::logging::ns::SERVER_DATA, count, "credential store seeded from the environment")
-                }
-                Err(error) => {
-                    tracing::error!(target: orbital_core::logging::ns::SERVER_DATA, %error, "credential store seeding failed")
-                }
-            }
-        }
         self.trace.version.fetch_add(1, Ordering::SeqCst);
         *self.host.write() = Arc::new(host_of(
             &self.kernel,
@@ -876,8 +862,8 @@ impl Host {
         u64::try_from(self.started.elapsed().as_millis()).unwrap_or(u64::MAX)
     }
 
-    /// One tick pass at `now_ms` (a monotonic clock): every due `[background]` tick runs over its rows, as the JS host's
-    /// scheduler runs it. A tick that is not `[background]` runs only where a client mounts its trait (the client's frame
+    /// One tick pass at `now_ms` (a monotonic clock): every due `[background]` tick runs over its rows, selected as
+    /// `EmbeddedServer::tick_pass` selects it. A tick that is not `[background]` runs only where a client mounts its trait (the client's frame
     /// clock asks for it), so this server, which tracks no mounts, never fires one. Answers the `(trait, tick)` pairs that ran.
     pub fn tick_pass(&self, now_ms: u64, calendar: orbital_core::Calendar) -> Vec<(String, String)> {
         let due = self.ticks.lock().due(now_ms, || calendar);
@@ -1093,11 +1079,6 @@ impl Host {
             .map_err(|e| format!("program/resolve-rows: not a row-set reference: {e}"))?;
         let page = self.kernel.resolve_rows(&reference, viewer)?;
         serde_json::to_value(page).and_then(serde_json::from_value).map_err(|e| e.to_string())
-    }
-
-    /// The declared credentials of the installed services registry and every registered program.
-    pub fn credential_catalog(&self) -> Result<orbital_core::credential_admin::Catalog, String> {
-        self.kernel.credential_catalog()
     }
 
     /// The process credentials: the TTL cache the token verifiers keep their key sets in.
@@ -2130,6 +2111,32 @@ mod tests {
             runtime.persistence.list("Beat").unwrap().iter().filter_map(|r| serde_json::to_value(r).unwrap()["n"].as_f64()).collect();
         assert_eq!(ns.iter().filter(|n| **n == 1.0).count(), 1, "{ns:?}");
         assert!(!ns.contains(&2.0), "{ns:?}");
+    }
+
+    #[test]
+    fn the_embedded_servers_tick_pass_selects_what_the_native_hosts_does() {
+        let host = Host::new(Arc::new(DriverAdapter::memory())).shared();
+        host.register_schema(ticking_program()).unwrap();
+        let server = orbital_core::embed::EmbeddedServer::new(ticking_program()).unwrap();
+        for now in [0, 400] {
+            assert!(host.tick_pass(now, noon()).is_empty() && server.tick_pass(now).is_empty(), "now {now}");
+        }
+        assert_eq!(
+            server.tick_pass(1000),
+            host.tick_pass(1000, noon()),
+            "the same background tick fires on both, and `screen` (a client's tick) on neither"
+        );
+        server.set_tick_mount(vec!["Pulse".to_string()]);
+        assert_eq!(
+            server.tick_pass(2000),
+            [("Pulse".to_string(), "beat".to_string()), ("Pulse".to_string(), "screen".to_string())],
+            "control: a mounted trait's client tick is the server's too"
+        );
+        assert_eq!(host.tick_pass(2000, noon()), [("Pulse".to_string(), "beat".to_string())], "control: the native host tracks no mounts");
+        server.tick_pause();
+        assert!(server.tick_paused() && server.tick_pass(9000).is_empty());
+        server.tick_resume();
+        assert!(!server.tick_paused());
     }
 
     fn ask(runtime: &Host, op: &str, args: &[serde_json::Value]) -> Result<serde_json::Value, String> {

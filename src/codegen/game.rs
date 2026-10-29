@@ -21,7 +21,8 @@ fn main() -> anyhow::Result<()> {
     let server_url = std::env::var("SERVER_URL").unwrap_or_else(|_| "http://127.0.0.1:3030".to_string());
     let schema = orbital_core::schema::parse_schema_file(std::path::Path::new("resolved.orb"))?;
     let title = schema.name.clone();
-    orbital_client_dioxus::shell::mount(schema, Arc::new(SyncServerBridge::new(server_url)) as Arc<dyn ServerBridge>);
+    orbital_client_dioxus::shell::mount(schema, Arc::new(SyncServerBridge::new(server_url)) as Arc<dyn ServerBridge>)
+        .map_err(anyhow::Error::msg)?;
     orbital_client_dioxus::native::open_window(orbital_client_dioxus::styles::stylesheets(), &title);
     Ok(())
 }

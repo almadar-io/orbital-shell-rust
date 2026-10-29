@@ -128,7 +128,7 @@ fn painted_items() -> Option<Vec<String>> {
 // One test: the mounted app is a thread-local cell, so the cases run in sequence on one thread.
 #[test]
 fn server_hosted_rows_paint_resolved_hide_unreadable_rows_and_follow_the_server_after_a_write() {
-    mount(schema(), Arc::new(server()));
+    mount(schema(), Arc::new(server())).unwrap();
     list_all();
     assert_eq!(
         painted_items(),
@@ -143,7 +143,7 @@ fn server_hosted_rows_paint_resolved_hide_unreadable_rows_and_follow_the_server_
         "a paint after the server's write resolves the unchanged reference afresh"
     );
 
-    mount(schema(), Arc::new(EventsOnly(server())));
+    mount(schema(), Arc::new(EventsOnly(server()))).unwrap();
     list_all();
     assert_eq!(
         painted_items(),

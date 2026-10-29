@@ -58,7 +58,7 @@ impl Surface {
     fn mount(renderer: Renderer, schema: &OrbitalSchema, bridge: Arc<dyn ServerBridge>) -> Result<Self, String> {
         Ok(match renderer {
             Renderer::Dioxus => {
-                dioxus::mount(schema.clone(), bridge);
+                dioxus::mount(schema.clone(), bridge)?;
                 orbital_client_dioxus::app::CSS_TEXT.with(|c| *c.borrow_mut() = orbital_client_dioxus::styles::stylesheets());
                 Surface::Dioxus
             }
@@ -146,7 +146,7 @@ impl DesktopProgram for Desktop {
                     Some(url) => {
                         let schema = orbital_core::schema::parse_schema(&json).map_err(|e| e.to_string())?;
                         let title = schema.name.clone();
-                        dioxus::mount(schema, Arc::new(SyncServerBridge::new(url)));
+                        dioxus::mount(schema, Arc::new(SyncServerBridge::new(url)))?;
                         title
                     }
                     None => {
