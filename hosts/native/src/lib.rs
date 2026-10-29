@@ -16,5 +16,5 @@ pub mod store;
 pub use error::HostError;
 pub use runtime::{
     EntitySummary, Host, HostConfig, OrbitalDetail, OrbitalInfo, OriginGuard, ProcessEventResult, RuntimeStats,
-    SubstratePort, TraceAsk, TraceEffect, TraceEmit, TraceEntry, TraceOutbound, TraceTransition,
+    SubstratePort, TraceAsk, TraceEffect, TraceEmit, TraceEntry, TraceTransition,
 };

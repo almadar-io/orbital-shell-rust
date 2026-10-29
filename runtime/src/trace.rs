@@ -1,4 +1,4 @@
-use super::{outbound_of, TraceAsk, TraceEntry, TRACE_CAPACITY};
+use super::{TraceAsk, TraceEntry, TRACE_CAPACITY};
 use orbital_core::runtime::dispatch_trace::DispatchTraceRecord;
 use orbital_core::runtime::native_host::SubstrateSource;
 use orbital_core::runtime::os_host::completion::StreamPoll;
@@ -83,7 +83,6 @@ impl TraceJournal {
                 .push(TraceAsk {
                     request: format!("{request:?}"),
                     answer: format!("{answer:?}"),
-                    outbound: outbound_of(request, answer),
                 });
         }
     }

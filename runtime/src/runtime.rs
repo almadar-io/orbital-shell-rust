@@ -9,7 +9,6 @@ pub use orbital_core::runtime::dispatch_trace::{TraceEffect, TraceEmit, TraceTra
 use orbital_core::effects::{DeliveryRecord, DispatchLog};
 use orbital_core::runtime::credentials::{credentials_with_rows, Credentials};
 use orbital_core::runtime::native_host::NativeHost;
-use orbital_core::runtime::native_transport::UreqTransport;
 use orbital_core::runtime::os_host::completion::{
     CompletionAnswerer, CompletionDone, KernelCompletionSink,
 };
@@ -306,42 +305,7 @@ pub struct TraceEntry {
 pub struct TraceAsk {
     pub request: String,
     pub answer: String,
-    /// An outbound `http` ask in structured form: where it went and how it ended, never a header, query or body.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub outbound: Option<TraceOutbound>,
 }
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct TraceOutbound {
-    pub method: String,
-    pub origin: String,
-    pub path: String,
-    /// The response status; `None` when the call failed before one arrived.
-    pub status: Option<u16>,
-}
-
-fn outbound_of(request: &IoRequest, answer: &IoAnswer) -> Option<TraceOutbound> {
-    let IoRequest::Http { request, .. } = request else {
-        return None;
-    };
-    let location = request.url.split(['?', '#']).next().unwrap_or(&request.url);
-    let authority_end = location.find("://").map_or(0, |at| at + 3);
-    let path_at = location[authority_end..]
-        .find('/')
-        .map_or(location.len(), |at| authority_end + at);
-    let status = match answer {
-        IoAnswer::Http(Ok(response)) => Some(response.status),
-        _ => None,
-    };
-    Some(TraceOutbound {
-        method: request.method.clone(),
-        origin: location[..path_at].to_string(),
-        path: location[path_at..].to_string(),
-        status,
-    })
-}
-
 
 /// Fan the `persist` effect's success emits of `response` out to every other connected `/api/events` client.
 fn broadcast_persisted(
@@ -363,7 +327,6 @@ fn host_of(
     origins: &Arc<RwLock<std::collections::HashMap<std::thread::ThreadId, String>>>,
     substrate: &Arc<SelfSubstrate>,
 ) -> NativeHost {
-    let egress = kernel.egress();
     let live = live.clone();
     let origins = Arc::clone(origins);
     let on_event = move |site: Option<&CallSite>, payload: Value| {
@@ -381,9 +344,7 @@ fn host_of(
     };
     NativeHost::new(
         source.clone(),
-        Arc::new(UreqTransport::with_egress(egress.clone())),
         secrets.clone(),
-        egress,
         kernel.os_grants(),
         handles.clone(),
         Arc::new(on_event),
