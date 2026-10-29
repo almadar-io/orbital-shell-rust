@@ -2697,6 +2697,96 @@ mod tests {
         orbital_core::json_value::value_to_json(&answer)
     }
 
+    fn store_bound_program() -> orbital_core::OrbitalSchema {
+        serde_json::from_value(serde_json::json!({ "name": "store-seam", "typeContractVersion": 1, "orbitals": [
+            { "name": "Tickets", "pages": [],
+              "entity": { "name": "Ticket", "persistence": "persistent", "store": "Rows", "fields": [{ "name": "id", "type": "string" }, { "name": "used", "type": "boolean" }] },
+              "traits": [{ "name": "Desk", "linkedEntity": "Ticket",
+                "stateMachine": { "states": [{ "name": "idle", "isInitial": true }],
+                    "events": [{ "key": "LOOK", "name": "LOOK" }, { "key": "ADD", "name": "ADD" }],
+                    "transitions": [{ "from": "idle", "to": "idle", "event": "LOOK", "effects": [["fetch", "Ticket", { "id": "@payload.id" }]] },
+                        { "from": "idle", "to": "idle", "event": "ADD", "effects": [["persist", "create", "Ticket", { "id": "@payload.id", "used": false }]] }] } }] },
+            { "name": "Rows", "pages": [],
+              "entity": { "name": "Mirror", "persistence": "persistent", "fields": [{ "name": "id", "type": "string" }] },
+              "traits": [{ "name": "RowsDriver", "linkedEntity": "Mirror",
+                "stateMachine": { "states": [{ "name": "ready", "isInitial": true }],
+                    "events": [{ "key": "ROW_READ", "name": "ROW_READ" }, { "key": "ROWS_WRITE", "name": "ROWS_WRITE" }],
+                    "transitions": [{ "from": "ready", "to": "ready", "event": "ROWS_WRITE",
+                        "effects": [["persist", "create", "Mirror", { "id": "@payload.key" }], ["emit", "ROWS_WRITTEN", { "key": "@payload.key", "outcomes": [{ "kind": "created", "row": { "id": "t2", "used": false } }] }]] },
+                        { "from": "ready", "to": "ready", "event": "ROW_READ",
+                        "effects": [["persist", "create", "Mirror", { "id": "@payload.key" }], ["emit", "ROW_FOUND", { "key": "@payload.key", "row": { "id": "t1", "used": false } }]] }] } }] }
+        ] })).expect("the program parses")
+    }
+
+    fn store_event(runtime: &Host, event: &str, id: &str) -> serde_json::Value {
+        let options = serde_json::json!({ "orbital": "Tickets", "targetTrait": "Desk", "event": event, "clientId": "tab-1" });
+        let args: Vec<Value> = [serde_json::json!(format!("Tickets.Desk.{event}")), serde_json::json!({ "id": id }), options]
+            .iter()
+            .map(|a| serde_json::from_value(a.clone()).unwrap())
+            .collect();
+        let answer = orbital_core::effects::executor::SubstrateHandler::run(runtime.substrate.as_ref(), "program/dispatch", &args).expect("the dispatch runs");
+        orbital_core::json_value::value_to_json(&answer)
+    }
+
+    #[test]
+    fn a_served_dispatch_reads_a_store_bound_row_through_its_driver() {
+        let runtime = Host::new(Arc::new(DriverAdapter::memory())).shared();
+        runtime.register_schema(store_bound_program()).unwrap();
+        let read = store_event(&runtime, "LOOK", "t1");
+        let results = read["effectResults"].as_array().cloned().unwrap_or_default();
+        let fetch = results.iter().find(|r| r["effect"] == "fetch").unwrap_or_else(|| panic!("no fetch result: {read}"));
+        assert_eq!(fetch["success"], true, "{read}");
+        assert_eq!(fetch["data"][0]["id"], "t1", "{read}");
+    }
+
+    #[test]
+    fn a_served_dispatch_creates_a_store_bound_row_through_its_driver() {
+        let runtime = Host::new(Arc::new(DriverAdapter::memory())).shared();
+        runtime.register_schema(store_bound_program()).unwrap();
+        let wrote = store_event(&runtime, "ADD", "t2");
+        let persist = wrote["effectResults"].as_array().and_then(|r| r.iter().find(|e| e["effect"] == "persist")).unwrap_or_else(|| panic!("no persist result: {wrote}"));
+        assert_eq!(persist["success"], true, "{wrote}");
+    }
+
+    fn keyed_store_look() -> (String, serde_json::Value) {
+        let mut program = serde_json::to_value(store_bound_program()).unwrap();
+        program["orbitals"].as_array_mut().unwrap().push(serde_json::json!({
+            "name": "Caller", "pages": [],
+            "entity": { "name": "Run", "persistence": "runtime", "fields": [{ "name": "id", "type": "string" }, { "name": "got", "type": "string" }] },
+            "traits": [{ "name": "Route", "linkedEntity": "Run",
+                "stateMachine": { "states": [{ "name": "idle", "isInitial": true }, { "name": "done" }, { "name": "failed" }],
+                    "events": [{ "key": "GO", "name": "GO" }, { "key": "DONE", "name": "DONE" }, { "key": "FAILED", "name": "FAILED" }],
+                    "transitions": [
+                        { "from": "idle", "to": "idle", "event": "GO", "effects": [["program/dispatch", "Tickets.Desk.LOOK", { "id": "t1" },
+                            { "orbital": "Tickets", "targetTrait": "Desk", "event": "LOOK", "clientId": "tab-1", "wire": true },
+                            { "key": "look-1", "emit": { "success": "DONE", "failure": "FAILED" } }]] },
+                        { "from": "idle", "to": "done", "event": "DONE", "effects": [["set", "@entity.got", ["json/stringify", "@payload.result"]]] },
+                        { "from": "idle", "to": "failed", "event": "FAILED", "effects": [["set", "@entity.got", "@payload.error"]] }] } }]
+        }));
+        let runtime = Host::new(Arc::new(DriverAdapter::memory())).shared();
+        runtime.register_schema(serde_json::from_value(program).unwrap()).unwrap();
+        runtime.dispatch_continuing("Route", "default", "GO", Value::Null, None, None).unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        loop {
+            let snapshot = runtime.kernel.snapshot_trait("Route", Some("default"));
+            if snapshot.state != "idle" {
+                let got = serde_json::to_value(&snapshot.entity).unwrap()["got"].as_str().unwrap_or_default().to_string();
+                return (snapshot.state, serde_json::from_str(&got).unwrap_or(serde_json::Value::String(got)));
+            }
+            assert!(std::time::Instant::now() < deadline, "the keyed dispatch never completed");
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+    }
+
+    #[test]
+    fn a_keyed_served_dispatch_reads_a_store_bound_row_through_its_driver() {
+        let (state, answer) = keyed_store_look();
+        assert_eq!(state, "done", "{answer}");
+        let fetch = answer["effectResults"].as_array().and_then(|r| r.iter().find(|e| e["effect"] == "fetch")).unwrap_or_else(|| panic!("no fetch result: {answer}"));
+        assert_eq!(fetch["success"], true, "{answer}");
+        assert_eq!(fetch["data"][0]["id"], "t1", "{answer}");
+    }
+
     fn topic_host() -> Arc<Host> {
         let runtime = Host::new(Arc::new(DriverAdapter::memory())).shared();
         runtime.register_schema(topic_program()).unwrap();
