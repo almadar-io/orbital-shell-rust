@@ -22,6 +22,8 @@ pub const CODE_PATTERN_UNSUPPORTED: &str = "ORB_PATTERN_UNSUPPORTED_BY_RENDERER"
 pub const STUBBED_PATTERNS: &[&str] = &[
     "action-palette",
     "action-tile",
+    "activity-rail",
+    "avl-transition-detail",
     "choice-button",
     "control-button",
     "control-grid",
@@ -47,6 +49,7 @@ pub const STUBBED_PATTERNS: &[&str] = &[
     "stat-badge",
     "timer-display",
     "trait-slot",
+    "video-embed",
 ];
 
 /// Logs the first occurrence per pattern: the client renders every frame, so
