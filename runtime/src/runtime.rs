@@ -581,6 +581,7 @@ impl Host {
             entity_source.clone(),
             kernel_config,
         ));
+        kernel.set_stateful(true);
         let (live_tx, _) = broadcast::channel(LIVE_BROADCAST_CAPACITY);
         let rows = persistence.durable().then(|| {
             Arc::new(orbital_core::runtime::credential_store::StoreCredentialRows(persistence.clone()))
@@ -906,8 +907,8 @@ impl Host {
 
     /// A `program/dispatch` event request (owner, 2026-10-21): each option goes onto the seam the events and inputs
     /// routes used. `viewer` is the dispatch's `@user`, `clientId` its origin, `locale` its locale; `input: true` admits
-    /// only a declared external input; `mount` runs the lifecycle seeds, `traits` the declared traits, no `targetTrait`
-    /// discovers the handlers; `delivery`/`dispatchLog` continue a client-begun dispatch. The host answers the raw
+    /// only a declared external input; `mount` runs the lifecycle seeds, no `targetTrait`
+    /// discovers the handlers; the host holds the circuit state, so the kernel refuses carried `traits` outside a delegated leg (EXEC-DIST-11); `delivery`/`dispatchLog` continue a client-begun dispatch. The host answers the raw
     /// `EventResponse` (plus `items` for `stream`); the kernel shapes what a model is told. An empty text, record or mount list is absent.
     fn request_answer(&self, payload: &Value, options: &ValueMap) -> Result<Value, (String, &'static str, u16)> {
         use orbital_core::EventResponse;
@@ -919,6 +920,15 @@ impl Host {
         let Some(orbital) = text("orbital") else {
             return Err(("program/dispatch: an event request names its orbital".to_string(), "INVALID_REQUEST", 400));
         };
+        if let Some(refused) = self.kernel.refusal(&request) {
+            let locale = refused.rejections.as_ref().and_then(|r| r.first()).is_some_and(|r| r.code == orbital_core::effects::response::TransitionRejectionCode::LocaleNotDeclared);
+            if locale {
+                return Err((refused.error.unwrap_or_default(), "LOCALE_NOT_DECLARED", 400));
+            }
+            return serde_json::to_value(&refused)
+                .and_then(serde_json::from_value)
+                .map_err(|e| (e.to_string(), "EVENT_PROCESSING_ERROR", 500));
+        }
         let entity_id = request.entity_id.clone().unwrap_or_else(|| "default".to_string());
         let payload = request.payload.clone().unwrap_or(Value::Null);
         let failed = |e: HostError| (e.to_string(), "EVENT_PROCESSING_ERROR", e.status_code());
@@ -984,7 +994,7 @@ impl Host {
         if let Some(trait_name) = self.inbound_only_trait(&orbital, request.target_trait.as_deref(), &request.event) {
             return respond(&[], EventResponse::inbound_only(&trait_name, &request.event));
         }
-        let _locale = self.enter_locale(request.locale.as_deref()).map_err(|e| (e.to_string(), "LOCALE_NOT_DECLARED", 400))?;
+        let _locale = self.enter_locale(request.locale.as_deref()).map_err(failed)?;
         let client_id = request.client_id.as_deref();
         let (outcomes, response): Ran = if let Some(seeds) = request.mount.as_deref().filter(|seeds| !seeds.is_empty()) {
             let carried: std::collections::HashSet<String> = if revived {
@@ -1005,19 +1015,6 @@ impl Host {
             (outcomes, response)
         } else if let Some(trait_name) = request.target_trait.as_deref() {
             targeted(trait_name, request.delivery.as_ref(), request.dispatch_log.as_ref())?
-        } else if let Some(declared) = request.traits.as_deref() {
-            let names: Vec<String> = declared.iter().map(|t| t.r#trait.clone()).collect();
-            let outcomes = if names.is_empty() { Vec::new() } else { self.dispatch_each(&names, &entity_id, &request.event, payload.clone()).map_err(failed)? };
-            let response = match names.first() {
-                Some(first) => {
-                    let mut response = EventResponse::from_process_results(&outcomes, first, &request.event);
-                    self.kernel.seal_outcomes(&mut response, &outcomes, Some(&entity_id), false);
-                    self.echo_held_states(&mut response, first, &entity_id);
-                    response
-                }
-                None => EventResponse::from_discovery(&[], &[], &request.event, Default::default()),
-            };
-            (outcomes, response)
         } else {
             let handlers = self.discover_handlers(&detail.traits, &entity_id, &request.event);
             let held = self.held_states(&detail.traits, &entity_id);
@@ -2079,23 +2076,24 @@ mod tests {
         let host = Host::new(Arc::new(DriverAdapter::memory())).shared();
         host.register_schema(ticking_program()).unwrap();
         let server = orbital_core::embed::EmbeddedServer::new(ticking_program()).unwrap();
+        let due = |now: u64| -> Vec<(String, String)> { server.tick_pass(now).into_iter().map(|f| (f.trait_name, f.tick)).collect() };
         for now in [0, 400] {
-            assert!(host.tick_pass(now, noon()).is_empty() && server.tick_pass(now).is_empty(), "now {now}");
+            assert!(host.tick_pass(now, noon()).is_empty() && due(now).is_empty(), "now {now}");
         }
         assert_eq!(
-            server.tick_pass(1000),
+            due(1000),
             host.tick_pass(1000, noon()),
             "the same background tick fires on both, and `screen` (a client's tick) on neither"
         );
-        server.set_tick_mount(vec!["Pulse".to_string()]);
+        server.mount_client("tab-1", "Clock", vec!["Pulse".to_string()]);
         assert_eq!(
-            server.tick_pass(2000),
+            due(2000),
             [("Pulse".to_string(), "beat".to_string()), ("Pulse".to_string(), "screen".to_string())],
             "control: a mounted trait's client tick is the server's too"
         );
         assert_eq!(host.tick_pass(2000, noon()), [("Pulse".to_string(), "beat".to_string())], "control: the native host tracks no mounts");
         server.tick_pause();
-        assert!(server.tick_paused() && server.tick_pass(9000).is_empty());
+        assert!(server.tick_paused() && due(9000).is_empty());
         server.tick_resume();
         assert!(!server.tick_paused());
     }
@@ -2409,6 +2407,20 @@ mod tests {
         assert!(dispatch_request(&runtime, serde_json::json!({ "wire": true, "orbital": "Desk", "targetTrait": "Notes", "event": "ADD_NOTE", "locale": "" })).is_ok(), "control: an empty locale is absent");
     }
 
+    #[test]
+    fn a_native_host_refuses_carried_circuit_state_outside_a_delegated_leg() {
+        let runtime = desk();
+        let carried = serde_json::json!([{ "trait": "Notes", "from": "idle" }]);
+        let refused = dispatch_request(&runtime, serde_json::json!({ "wire": true, "orbital": "Desk", "event": "ADD_NOTE", "traits": carried })).unwrap();
+        assert_eq!(refused["success"], false, "{refused}");
+        assert_eq!(refused["rejections"][0]["code"], "client-circuit-state-refused", "{refused}");
+        assert!(note_titles(&runtime).is_empty(), "nothing was run");
+        let leg = dispatch_request(&runtime, serde_json::json!({ "wire": true, "orbital": "Desk", "targetTrait": "Notes", "event": "ADD_NOTE", "traits": carried })).unwrap();
+        assert_eq!(leg["success"], true, "control: a targeted leg is the delegated leg: {leg}");
+        let plain = dispatch_request(&runtime, serde_json::json!({ "wire": true, "orbital": "Desk", "event": "ADD_NOTE" })).unwrap();
+        assert_ne!(plain["rejections"][0]["code"], "client-circuit-state-refused", "control: a request carrying nothing is admitted: {plain}");
+    }
+
     struct OneLazy(std::sync::atomic::AtomicUsize);
 
     impl orbital_core::runtime::LazySource for OneLazy {
@@ -2446,16 +2458,16 @@ mod tests {
     }
 
     #[test]
-    fn a_request_without_a_trait_discovers_or_runs_its_declared_traits() {
+    fn a_request_without_a_trait_discovers_its_handlers_and_never_takes_carried_traits() {
         let runtime = desk();
         let discovered = dispatch_request(&runtime, serde_json::json!({ "wire": true, "orbital": "Desk", "event": "ADD_NOTE", "viewer": { "id": "u1" } })).unwrap();
         assert_eq!(discovered["success"], true, "{discovered}");
         assert_eq!(note_titles(&runtime), ["via request"], "discovery found Notes");
-        let inert = dispatch_request(&runtime, serde_json::json!({ "wire": true, "orbital": "Desk", "event": "ADD_NOTE", "traits": [] })).unwrap();
-        assert_eq!(inert["rejections"][0]["code"], "no-dispatchable-traits", "control: an empty declared list runs nothing: {inert}");
-        let declared = dispatch_request(&runtime, serde_json::json!({ "wire": true, "orbital": "Desk", "event": "ADD_NOTE", "traits": [{ "trait": "Notes", "from": "idle" }], "viewer": { "id": "u1" } })).unwrap();
-        assert_eq!(declared["success"], true, "{declared}");
-        assert_eq!(note_titles(&runtime).len(), 2);
+        for traits in [serde_json::json!([]), serde_json::json!([{ "trait": "Notes", "from": "idle" }])] {
+            let refused = dispatch_request(&runtime, serde_json::json!({ "wire": true, "orbital": "Desk", "event": "ADD_NOTE", "traits": traits, "viewer": { "id": "u1" } })).unwrap();
+            assert_eq!(refused["rejections"][0]["code"], "client-circuit-state-refused", "{refused}");
+        }
+        assert_eq!(note_titles(&runtime).len(), 1, "nothing carried was run");
     }
 
     #[test]
