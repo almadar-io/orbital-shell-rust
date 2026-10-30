@@ -189,7 +189,14 @@ impl orbital_core::effects::executor::SubstrateHandler for SelfSubstrate {
             .ok_or_else(|| failure(format!("{op}: this host is not shared (Host::shared)")))?;
         match op {
             "program/tick" => return runtime.tick_answer(args).map_err(failure),
-            "program/resolve-rows" => return runtime.resolve_rows_answer(args).map_err(failure),
+            "program/resolve-rows" => {
+                return runtime.resolve_rows_answer(args).map_err(|(message, status)| SubstrateFailure {
+                    errors: status
+                        .map(|status| vec![serde_json::from_value(serde_json::json!({ "code": "INVALID_REQUEST", "message": message, "status": status })).unwrap_or(Value::Null)])
+                        .unwrap_or_default(),
+                    message,
+                })
+            }
             "program/inputs" => return runtime.inputs_answer(args).map_err(failure),
             _ => {}
         }
@@ -1029,14 +1036,14 @@ impl Host {
 
     /// `program/resolve-rows`: a row-set reference resolved for the viewer the call names, `@read` applied inside the
     /// kernel's one resolver; answered `{ rows, total }`.
-    fn resolve_rows_answer(&self, args: &[Value]) -> Result<Value, String> {
+    fn resolve_rows_answer(&self, args: &[Value]) -> Result<Value, (String, Option<u16>)> {
         let [reference, viewer] = args else {
-            return Err("program/resolve-rows: the host is asked for a row-set reference and the viewer it is resolved for".to_string());
+            return Err(("program/resolve-rows: the host is asked for a row-set reference and the viewer it is resolved for".to_string(), None));
         };
         let reference: RowSetRef = serde_json::from_value(orbital_core::json_value::value_to_json(reference))
-            .map_err(|e| format!("program/resolve-rows: not a row-set reference: {e}"))?;
-        let page = self.kernel.resolve_rows(&reference, viewer)?;
-        serde_json::to_value(page).and_then(serde_json::from_value).map_err(|e| e.to_string())
+            .map_err(|e| (format!("program/resolve-rows: not a row-set reference: {e}"), Some(400)))?;
+        let page = self.kernel.resolve_rows(&reference, viewer).map_err(|e| (e, None))?;
+        serde_json::to_value(page).and_then(serde_json::from_value).map_err(|e| (e.to_string(), None))
     }
 
     /// The process credentials: the TTL cache the token verifiers keep their key sets in.
@@ -2159,6 +2166,14 @@ mod tests {
         let anonymous = ask(&runtime, "program/resolve-rows", &[reference.clone(), serde_json::Value::Null]).unwrap();
         assert_eq!(ids(anonymous), Vec::<String>::new(), "control: the anonymous viewer reads no owned row");
         assert!(ask(&runtime, "program/resolve-rows", &[serde_json::json!({ "entityType": "Note" }), serde_json::Value::Null]).unwrap_err().contains("reference"), "edge: a malformed reference");
+        let malformed: Vec<Value> = [serde_json::json!({ "entityType": "Note" }), serde_json::Value::Null].iter().map(|a| serde_json::from_value(a.clone()).unwrap()).collect();
+        let refused = orbital_core::effects::executor::SubstrateHandler::run(runtime.substrate.as_ref(), "program/resolve-rows", &malformed).unwrap_err();
+        let error = orbital_core::json_value::value_to_json(&refused.errors[0]);
+        assert_eq!((error["code"].as_str(), error["status"].as_u64()), (Some("INVALID_REQUEST"), Some(400)), "a malformed reference is the caller's 400: {error}");
+        let unasked: Vec<Value> = [serde_json::json!({ "entityType": "Nothing", "ids": [], "total": 0, "query": {} }), serde_json::Value::Null].iter().map(|a| serde_json::from_value(a.clone()).unwrap()).collect();
+        if let Err(failure) = orbital_core::effects::executor::SubstrateHandler::run(runtime.substrate.as_ref(), "program/resolve-rows", &unasked) {
+            assert!(failure.errors.is_empty(), "control: a failure that is not the reference's shape names no status: {:?}", failure.errors);
+        }
         assert!(ask(&runtime, "program/resolve-rows", &[reference]).unwrap_err().contains("viewer"), "edge: the viewer is never implied");
     }
 
