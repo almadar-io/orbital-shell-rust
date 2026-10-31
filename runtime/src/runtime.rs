@@ -595,7 +595,10 @@ impl Host {
                 as Arc<dyn orbital_core::runtime::credential_store::CredentialRows>
         });
         let (secrets, credential_store_failure) = credentials_with_rows(rows);
-        let secrets = Arc::new(secrets);
+        let egress_of = Arc::clone(&kernel);
+        let secrets = Arc::new(secrets.with_grant_transport(Arc::new(
+            orbital_core::runtime::credential_transport::TlsFormTransport::new(Arc::new(move || egress_of.egress())),
+        )));
         let origin_by_thread: Arc<
             RwLock<std::collections::HashMap<std::thread::ThreadId, String>>,
         > = Arc::default();
@@ -2083,7 +2086,7 @@ mod tests {
         let host = Host::new(Arc::new(DriverAdapter::memory())).shared();
         host.register_schema(ticking_program()).unwrap();
         let server = orbital_core::embed::EmbeddedServer::new(ticking_program()).unwrap();
-        let due = |now: u64| -> Vec<(String, String)> { server.tick_pass(now).into_iter().map(|f| (f.trait_name, f.tick)).collect() };
+        let due = |now: u64| -> Vec<(String, String)> { server.tick_pass(now).into_iter().flat_map(|(_, fired)| fired).map(|f| (f.trait_name, f.tick)).collect() };
         for now in [0, 400] {
             assert!(host.tick_pass(now, noon()).is_empty() && due(now).is_empty(), "now {now}");
         }
