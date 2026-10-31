@@ -43,6 +43,7 @@ pub const STUBBED_PATTERNS: &[&str] = &[
     "game-menu",
     "game-shell",
     "health-bar",
+    "machine-panel",
     "pattern-tile",
     "score-display",
     "sequence-bar",
