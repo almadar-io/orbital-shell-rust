@@ -948,7 +948,10 @@ impl Host {
             .kernel
             .admit_request(request.client_id.as_deref(), mounting, flag("wire"))
             .map_err(|ended| (ended.to_string(), "SESSION_ENDED", 409))?;
-        let revived = matches!(admitted, orbital_core::runtime::kernel::RequestSession::Client { revived: true, .. });
+        let restored = match &admitted {
+            orbital_core::runtime::kernel::RequestSession::Client { restored, .. } => restored.clone(),
+            _ => Default::default(),
+        };
         let _session = match &admitted {
             orbital_core::runtime::kernel::RequestSession::Client { active, .. } => Some(self.kernel.enter_session(active.session())),
             _ => None,
@@ -1007,17 +1010,11 @@ impl Host {
         let _locale = self.enter_locale(request.locale.as_deref()).map_err(failed)?;
         let client_id = request.client_id.as_deref();
         let (outcomes, response): Ran = if let Some(seeds) = request.mount.as_deref().filter(|seeds| !seeds.is_empty()) {
-            let carried: std::collections::HashSet<String> = if revived {
-                self.kernel.seed_leg(request.traits.as_deref().unwrap_or_default(), request.entity_by_trait.as_ref(), Some(&entity_id));
-                RuntimeKernel::carried_traits(request.traits.as_deref(), request.entity_by_trait.as_ref())
-            } else {
-                Default::default()
-            };
-            let unseeded: Vec<orbital_core::effects::MountSeed> = seeds.iter().filter(|seed| !carried.contains(&seed.r#trait)).cloned().collect();
-            let outcomes = if unseeded.is_empty() { Vec::new() } else { self.dispatch_mount(&unseeded, &entity_id, payload.clone()).map_err(failed)? };
+            let plan = self.kernel.prepare_mount(&restored, seeds, request.traits.as_deref(), request.entity_by_trait.as_ref(), Some(&entity_id));
+            let outcomes = if plan.unseeded.is_empty() { Vec::new() } else { self.dispatch_mount(&plan.unseeded, &entity_id, payload.clone()).map_err(failed)? };
             let mut response = EventResponse::from_process_results(&outcomes, &seeds[0].r#trait, seeds[0].event.as_str());
             let mut writes = self.kernel.frame_writes(&outcomes, Some(&entity_id), true);
-            writes.extend(request.entity_by_trait.iter().flatten().filter(|(t, _)| revived && seeds.iter().any(|s| &s.r#trait == *t)).filter_map(|(trait_name, row)| {
+            writes.extend(plan.restored_rows.iter().filter_map(|(trait_name, row)| {
                 Some((self.kernel.trait_frame_key(trait_name), orbital_core::runtime::kernel::FrameWrite::Fields(row.as_object()?.clone())))
             }));
             self.kernel.seal_frames(&mut response, writes);
@@ -3281,6 +3278,16 @@ mod tests {
         session_dispatch(&runtime, "Viewer", "SET_TOPIC", Some("app"), as_tab("tab-a")).unwrap();
         drop(open_client_stream(&runtime, "tab-a"));
         reconnect_mount(&runtime, "tab-a", None).unwrap();
+        assert_eq!(seen_by(&runtime, "Viewer", "READ_BACK", "tab-a"), "from-init");
+    }
+
+    /// G-CROSS-357 twin of the embedded server's: a session whose only stream dropped before any request held no state, so
+    /// a carried frame is the client's own step and INIT runs here.
+    #[test]
+    fn a_reconnect_mount_into_a_session_that_held_no_state_runs_init_over_the_carried_frame() {
+        let runtime = revive_host();
+        drop(open_client_stream(&runtime, "tab-a"));
+        reconnect_mount(&runtime, "tab-a", Some(serde_json::json!({ "topic": "client-made" }))).unwrap();
         assert_eq!(seen_by(&runtime, "Viewer", "READ_BACK", "tab-a"), "from-init");
     }
 
