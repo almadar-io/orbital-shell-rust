@@ -87,7 +87,7 @@ impl std::fmt::Debug for SubstratePort {
 }
 
 /// The server's substrate host: it answers `program/dispatch` itself (EXEC-AGENT-1: the declared input runs through
-/// this server's input channel as the viewer of the dispatch that asked, on the asking thread) and hands every other
+/// this server's input channel in the session of the dispatch that asked, on the asking thread) and hands every other
 /// op to the host `orb` installs ([`HostConfig::substrate`]).
 struct SelfSubstrate {
     runtime: std::sync::OnceLock<std::sync::Weak<Host>>,
@@ -99,20 +99,21 @@ impl SelfSubstrate {
         self.runtime.get().and_then(std::sync::Weak::upgrade)
     }
 
-    /// The work of a deferred keyed op (EXEC-QUEUE-13), built on the asking thread: it runs as the viewer that thread
-    /// entered, so a deferred `program/dispatch` keeps the asking viewer (EXEC-AGENT-1).
+    /// The work of a deferred keyed op (EXEC-QUEUE-13), built on the asking thread: it runs in the session that thread
+    /// entered, so a deferred `program/dispatch` keeps the asking session's identity (EXEC-AGENT-1).
     fn later(self: &Arc<Self>, op: &str, args: &[Value]) -> orbital_core::runtime::native_host::SubstrateWork {
         let (this, op, args) = (Arc::clone(self), op.to_string(), args.to_vec());
-        let viewer = this.shared().and_then(|runtime| runtime.kernel.thread_viewer());
+        let session = this.shared().and_then(|runtime| runtime.kernel.thread_session());
         Box::new(move || {
-            let _viewer = this.shared().zip(viewer).map(|(runtime, user)| runtime.enter_viewer((*user).clone()));
+            let _session = this.shared().zip(session).map(|(runtime, session)| runtime.kernel.enter_session(&session));
             orbital_core::effects::executor::SubstrateHandler::run(this.as_ref(), &op, &args)
         })
     }
 
-    /// `program/live { viewer?, clientId? }`: this host's live broadcast, as `orb serve`'s `/api/events` carries it. An
-    /// item goes to the stream when it would go to that connection (`LiveBroadcastItem::delivered_to`): a peer's row
-    /// only when `viewer` may read it, every row for an absent or `null` viewer, never the stream's own `clientId`'s.
+    /// `program/live { clientId? }`: this host's live broadcast, as `orb serve`'s `/api/events` carries it. An item goes
+    /// to the stream when it would go to that connection (`LiveBroadcastItem::delivered_to`): a peer's row only when the
+    /// identity bound to the `clientId` session (the anonymous viewer when none is) may read it, never the stream's own
+    /// `clientId`'s.
     fn live_source(&self, op: &str, args: &[Value]) -> Option<orbital_core::runtime::native_host::SubstrateSource> {
         use orbital_core::runtime::os_host::completion::StreamPoll;
         if op != "program/live" {
@@ -126,7 +127,6 @@ impl SelfSubstrate {
         if options.get("kind").and_then(Value::as_str) == Some("trace") {
             return Some(runtime.trace.source(&options));
         }
-        let viewer = options.get("viewer").filter(|v| matches!(v, Value::Object(_))).cloned();
         let client_id = options.get("clientId").and_then(Value::as_str).map(str::to_string);
         let mut receiver = runtime.subscribe_live();
         let host = Arc::downgrade(&runtime);
@@ -140,7 +140,10 @@ impl SelfSubstrate {
                 Err(broadcast::error::TryRecvError::Lagged(_)) => continue,
                 Err(broadcast::error::TryRecvError::Closed) => return StreamPoll::Ended,
             };
-            let readable = |item: &LiveBroadcastItem| viewer.as_ref().is_none_or(|v| runtime.live_item_visible_to(item, v));
+            let readable = |item: &LiveBroadcastItem| {
+                let _session = client_id.as_deref().map(|session| runtime.kernel.enter_session(session));
+                runtime.kernel.session_viewer().is_ok_and(|viewer| runtime.live_item_visible_to(item, &viewer))
+            };
             if item.delivered_to(client_id.as_deref(), readable) {
                 return StreamPoll::Item(live_item_value(&item));
             }
@@ -770,18 +773,10 @@ impl Host {
         let _ = self.live_tx.send(item);
     }
 
-    /// Bind `@user` for every subsequent event this runtime processes. Mirrors
-    /// `orbital_client::bridge::KernelBridge::set_current_user` — without it the HTTP
-    /// bridge evaluates every `@read`/guard anonymously, unlike the in-process probe.
-    pub fn set_current_user(&self, user: Value) {
-        self.kernel.set_current_user(user);
-    }
-
-    /// `reference` resolved against the store as it is now, for the viewer this runtime is bound to
-    /// ([`Self::set_current_user`]): the one resolver every renderer reaches, `@read` applied inside it.
+    /// `reference` resolved against the store as it is now, for the identity bound to the session this thread is
+    /// in (the anonymous viewer when none is): the one resolver every renderer reaches, `@read` applied inside it.
     pub fn resolve_rows(&self, reference: &RowSetRef) -> Result<RowPage, String> {
-        self.kernel
-            .resolve_rows(reference, &self.kernel.get_current_user())
+        self.kernel.resolve_rows(reference)
     }
 
     /// Install the program's declared locales and merged message catalogs for `i18n/t`.
@@ -929,7 +924,7 @@ impl Host {
     }
 
     /// A `program/dispatch` event request (owner, 2026-10-21): each option goes onto the seam the events and inputs
-    /// routes used. `viewer` is the dispatch's `@user`, `clientId` its origin, `locale` its locale; `input: true` admits
+    /// routes used. `clientId` names the session (so `@user` is its bound identity) and its origin, `locale` its locale; `input: true` admits
     /// only a declared external input; `mount` runs the lifecycle seeds, no `targetTrait`
     /// discovers the handlers; the host holds the circuit state, so the kernel refuses carried `traits` outside a delegated leg (EXEC-DIST-11); `delivery`/`dispatchLog` continue a client-begun dispatch. The host answers the raw
     /// `EventResponse` (plus `items` for `stream`); the kernel shapes what a model is told. An empty text, record or mount list is absent.
@@ -969,7 +964,6 @@ impl Host {
             orbital_core::runtime::kernel::RequestSession::Client { active, .. } => Some(self.kernel.enter_session(active.session())),
             _ => None,
         };
-        let _viewer = options.get("viewer").filter(|v| matches!(v, Value::Object(_))).map(|user| self.enter_viewer(user.clone()));
         if let Some(since) = request.frames_since {
             let answer = match self.kernel.frames_since(since) {
                 Some(frames) => EventResponse { success: true, frames: Some(frames), ..Default::default() },
@@ -986,7 +980,11 @@ impl Host {
         let respond = |outcomes: &[(String, ProcessEventResult)], mut response: EventResponse| -> Result<Value, (String, &'static str, u16)> {
             self.kernel.stamp_emitted_sources(&mut response);
             let items = if flag("stream") {
-                Some(serde_json::to_value(stream_items(outcomes, &response)).map_err(|e| (e.to_string(), "EVENT_PROCESSING_ERROR", 500))?)
+                {
+                let mut items = stream_items(outcomes, &response);
+                self.kernel.redact_stream_items(&mut items);
+                Some(serde_json::to_value(items).map_err(|e| (e.to_string(), "EVENT_PROCESSING_ERROR", 500))?)
+            }
             } else {
                 None
             };
@@ -1047,15 +1045,32 @@ impl Host {
         respond(&outcomes, response)
     }
 
-    /// `program/resolve-rows`: a row-set reference resolved for the viewer the call names, `@read` applied inside the
-    /// kernel's one resolver; answered `{ rows, total }`.
+    /// `program/resolve-rows`: a row-set reference resolved for the identity bound to the asking session, `@read`
+    /// applied inside the kernel's one resolver; answered `{ rows, total }`.
     fn resolve_rows_answer(&self, args: &[Value]) -> Result<Value, (String, Option<u16>)> {
-        let [reference, viewer] = args else {
-            return Err(("program/resolve-rows: the host is asked for a row-set reference and the viewer it is resolved for".to_string(), None));
+        let (reference, options) = match args {
+            [reference] => (reference, None),
+            [reference, Value::Object(options)] => (reference, Some(options)),
+            _ => return Err(("program/resolve-rows: the host is asked for a row-set reference and optionally `{ clientId }`".to_string(), None)),
         };
+        let mut client = None;
+        for (name, value) in options.into_iter().flat_map(|options| options.iter()) {
+            match (name.as_str(), value) {
+                ("clientId", Value::String(id)) if !id.is_empty() => client = Some(id.to_string()),
+                _ => return Err(("program/resolve-rows: the only option is `clientId`, a non-empty session id".to_string(), Some(400))),
+            }
+        }
+        let _admitted = match client.as_deref() {
+            Some(id) => Some(self.kernel.admit_request(Some(id), false, false).map_err(|ended| (ended.to_string(), Some(409)))?),
+            None => None,
+        };
+        let _session = _admitted.as_ref().and_then(|admitted| match admitted {
+            orbital_core::runtime::kernel::RequestSession::Client { active, .. } => Some(self.kernel.enter_session(active.session())),
+            _ => None,
+        });
         let reference: RowSetRef = serde_json::from_value(orbital_core::json_value::value_to_json(reference))
             .map_err(|e| (format!("program/resolve-rows: not a row-set reference: {e}"), Some(400)))?;
-        let page = self.kernel.resolve_rows(&reference, viewer).map_err(|e| (e, None))?;
+        let page = self.kernel.resolve_rows(&reference).map_err(|e| (e, None))?;
         serde_json::to_value(page).and_then(serde_json::from_value).map_err(|e| (e.to_string(), None))
     }
 
@@ -1085,11 +1100,6 @@ impl Host {
             thread,
             outer,
         }
-    }
-
-    /// Dispatch as `user` from this thread until the guard drops.
-    pub fn enter_viewer(&self, user: Value) -> orbital_core::runtime::kernel::ViewerGuard {
-        self.kernel.enter_viewer(user)
     }
 
     /// Record every dispatch's transitions, guards, effects and asks with their answers (`GET /api/trace`).
@@ -1468,6 +1478,57 @@ mod tests {
     use super::super::store::DriverAdapter;
     use orbital_core::Value;
 
+    const EMULATOR_ISSUER: &str = "firebase-auth-emulator@example.com";
+
+    /// A program with a `[runtime]` `[identity]` entity and a trait whose `SIGN_IN` runs `jws/verify` over an unsigned
+    /// emulator token (EXEC-IDENTITY-5) into `identity/sign-in`.
+    fn signing_program() -> orbital_core::OrbitalSchema {
+        serde_json::from_value(serde_json::json!({
+            "name": "TestIdentity",
+            "typeContractVersion": 1,
+            "orbitals": [{
+                "name": "TestIdentityOrbital",
+                "entity": { "name": "TestPrincipal", "identity": true, "persistence": "runtime", "fields": [{ "name": "id", "type": "string" }] },
+                "traits": [{
+                    "name": "TestSigner", "linkedEntity": "TestPrincipal",
+                    "stateMachine": { "states": [{ "name": "idle", "isInitial": true }],
+                        "transitions": [{ "from": "idle", "to": "idle", "event": "SIGN_IN", "effects": [
+                            ["let", [["v", ["jws/verify", "@payload.token", [], { "issuer": EMULATOR_ISSUER, "audience": "test", "allowUnsigned": true }]]],
+                                ["identity/sign-in", "@v"]]] }] }
+                }]
+            }]
+        }))
+        .expect("the signing program parses")
+    }
+
+    /// Sign the session `client` of `runtime` in as `subject`.
+    fn sign_in(runtime: &Host, client: &str, subject: &str) {
+        if runtime.kernel.trait_dispatch_mode("TestSigner").is_none() {
+            runtime.register_schema(signing_program()).unwrap();
+        }
+        let header = orbital_core::codec::base64url_encode(br#"{"alg":"none","typ":"JWT"}"#);
+        let claims = serde_json::json!({ "iss": EMULATOR_ISSUER, "aud": "test", "sub": subject, "exp": 4_000_000_000u64 });
+        let token = format!("{header}.{}.", orbital_core::codec::base64url_encode(claims.to_string().as_bytes()));
+        let payload: Value = serde_json::from_value(serde_json::json!({ "token": token })).unwrap();
+        let _session = runtime.kernel.enter_session(client);
+        runtime.kernel.dispatch("TestSigner", None, "SIGN_IN", payload).expect("the sign-in dispatches");
+    }
+
+    /// `options` with its `viewer` replaced by what now makes one: the session `clientId` names (else `viewer-<id>`) is
+    /// signed in as the viewer.
+    fn as_signed_in(runtime: &Host, mut options: serde_json::Value) -> serde_json::Value {
+        let Some(viewer) = options.as_object_mut().and_then(|fields| fields.remove("viewer")) else {
+            return options;
+        };
+        let Some(id) = viewer["id"].as_str() else {
+            return options;
+        };
+        let client = options["clientId"].as_str().map_or_else(|| format!("viewer-{id}"), str::to_string);
+        sign_in(runtime, &client, id);
+        options["clientId"] = serde_json::json!(client);
+        options
+    }
+
     fn create_test_schema() -> orbital_core::OrbitalSchema {
         serde_json::from_str(
             r#"{
@@ -1746,9 +1807,8 @@ mod tests {
         let (tx, rx) = std::sync::mpsc::channel();
         let (inner, id) = (Arc::clone(&runtime), viewer.to_string());
         std::thread::spawn(move || {
-            let mut user = ValueMap::new();
-            user.insert("id".to_string().into(), Value::String(id.into()));
-            let _viewer = inner.enter_viewer(Value::Object(user.into()));
+            sign_in(&inner, &id, &id);
+            let _session = inner.kernel.enter_session(&id);
             let _ = tx.send(inner.dispatch_continuing("Agent", "default", "GO", Value::Null, None, None).map(|_| ()));
         });
         rx.recv_timeout(std::time::Duration::from_secs(20)).expect("the nested dispatch returns").unwrap();
@@ -1759,7 +1819,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "nested program/dispatch: keyed deferral pending in orbital-core (R-b1)"]
+    #[ignore = "G-ORB-446 (f): nested program/dispatch: keyed deferral pending in orbital-core (R-b1)"]
     fn a_second_dispatch_in_the_same_step_keeps_its_own_route_after_the_first_nested_one() {
         let (runtime, state, got, title) = go_as_with_title("u1");
         assert_eq!(state, "done", "{got}");
@@ -1772,7 +1832,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "nested program/dispatch: keyed deferral pending in orbital-core (R-b1)"]
+    #[ignore = "G-ORB-446 (f): nested program/dispatch: keyed deferral pending in orbital-core (R-b1)"]
     fn a_program_dispatch_runs_the_declared_input_through_the_server_as_the_asking_viewer() {
         let (runtime, state, got) = go_as("u1");
         assert_eq!(state, "done", "{got}");
@@ -1783,7 +1843,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "nested program/dispatch: keyed deferral pending in orbital-core (R-b1)"]
+    #[ignore = "G-ORB-446 (f): nested program/dispatch: keyed deferral pending in orbital-core (R-b1)"]
     fn control_the_nested_dispatch_keeps_the_asking_viewer_so_the_inputs_guard_refuses_another() {
         let (runtime, state, got) = go_as("u2");
         assert_eq!(state, "done", "a refused dispatch is still an answer a model can be told");
@@ -2175,29 +2235,47 @@ mod tests {
     }
 
     #[test]
-    fn a_program_resolve_rows_answers_only_the_rows_the_named_viewer_may_read() {
+    fn a_program_resolve_rows_answers_only_the_rows_the_asking_sessions_identity_may_read() {
         let runtime = Host::new(Arc::new(DriverAdapter::memory())).shared();
         owned_notes(&runtime);
-        runtime.set_current_user(serde_json::from_value(serde_json::json!({ "id": "bob" })).unwrap());
+        sign_in(&runtime, "s-alice", "alice");
+        sign_in(&runtime, "s-bob", "bob");
         let reference = serde_json::json!({ "entityType": "Note", "ids": ["a1", "b1", "a2"], "total": 3, "query": {} });
         let ids = |page: serde_json::Value| -> Vec<String> {
             page["rows"].as_array().unwrap().iter().map(|r| r["id"].as_str().unwrap().to_string()).collect()
         };
-        let alice = ask(&runtime, "program/resolve-rows", &[reference.clone(), serde_json::json!({ "id": "alice" })]).unwrap();
-        assert_eq!(ids(alice.clone()), ["a1", "a2"], "the named viewer, never the runtime's bound one: {alice}");
+        let alice = {
+            let _session = runtime.kernel.enter_session("s-alice");
+            ask(&runtime, "program/resolve-rows", &[reference.clone()]).unwrap()
+        };
+        assert_eq!(ids(alice.clone()), ["a1", "a2"], "the asking session's identity: {alice}");
         assert_eq!(alice["total"], 2);
-        let anonymous = ask(&runtime, "program/resolve-rows", &[reference.clone(), serde_json::Value::Null]).unwrap();
-        assert_eq!(ids(anonymous), Vec::<String>::new(), "control: the anonymous viewer reads no owned row");
-        assert!(ask(&runtime, "program/resolve-rows", &[serde_json::json!({ "entityType": "Note" }), serde_json::Value::Null]).unwrap_err().contains("reference"), "edge: a malformed reference");
-        let malformed: Vec<Value> = [serde_json::json!({ "entityType": "Note" }), serde_json::Value::Null].iter().map(|a| serde_json::from_value(a.clone()).unwrap()).collect();
+        let bob = {
+            let _session = runtime.kernel.enter_session("s-bob");
+            ask(&runtime, "program/resolve-rows", &[reference.clone()]).unwrap()
+        };
+        assert_eq!(ids(bob), ["b1"], "control: another session reads its own rows");
+        let anonymous = ask(&runtime, "program/resolve-rows", &[reference.clone()]).unwrap();
+        assert_eq!(ids(anonymous), Vec::<String>::new(), "control: an unbound session is the anonymous viewer and reads no owned row");
+        assert!(ask(&runtime, "program/resolve-rows", &[serde_json::json!({ "entityType": "Note" })]).unwrap_err().contains("reference"), "edge: a malformed reference");
+        let malformed: Vec<Value> = [serde_json::json!({ "entityType": "Note" })].iter().map(|a| serde_json::from_value(a.clone()).unwrap()).collect();
         let refused = orbital_core::effects::executor::SubstrateHandler::run(runtime.substrate.as_ref(), "program/resolve-rows", &malformed).unwrap_err();
         let error = orbital_core::json_value::value_to_json(&refused.errors[0]);
         assert_eq!((error["code"].as_str(), error["status"].as_u64()), (Some("INVALID_REQUEST"), Some(400)), "a malformed reference is the caller's 400: {error}");
-        let unasked: Vec<Value> = [serde_json::json!({ "entityType": "Nothing", "ids": [], "total": 0, "query": {} }), serde_json::Value::Null].iter().map(|a| serde_json::from_value(a.clone()).unwrap()).collect();
+        let unasked: Vec<Value> = [serde_json::json!({ "entityType": "Nothing", "ids": [], "total": 0, "query": {} })].iter().map(|a| serde_json::from_value(a.clone()).unwrap()).collect();
         if let Err(failure) = orbital_core::effects::executor::SubstrateHandler::run(runtime.substrate.as_ref(), "program/resolve-rows", &unasked) {
             assert!(failure.errors.is_empty(), "control: a failure that is not the reference's shape names no status: {:?}", failure.errors);
         }
-        assert!(ask(&runtime, "program/resolve-rows", &[reference]).unwrap_err().contains("viewer"), "edge: the viewer is never implied");
+        let named = |client: serde_json::Value| ask(&runtime, "program/resolve-rows", &[reference.clone(), serde_json::json!({ "clientId": client })]);
+        assert_eq!(ids(named(serde_json::json!("s-alice")).unwrap()), ["a1", "a2"], "clientId names the session whose identity resolves, from any thread");
+        assert_eq!(ids(named(serde_json::json!("s-bob")).unwrap()), ["b1"], "control: another clientId reads its own rows");
+        {
+            let _session = runtime.kernel.enter_session("s-bob");
+            assert_eq!(ids(named(serde_json::json!("s-alice")).unwrap()), ["a1", "a2"], "control: clientId wins over the asking thread's session");
+        }
+        assert!(named(serde_json::json!(7)).unwrap_err().contains("clientId"), "edge: clientId is text");
+        assert!(ask(&runtime, "program/resolve-rows", &[reference.clone(), serde_json::json!({ "viewer": { "id": "alice" } })]).unwrap_err().contains("clientId"), "edge: a viewer option is refused");
+        assert!(ask(&runtime, "program/resolve-rows", &[reference, serde_json::json!({ "id": "alice" })]).unwrap_err().contains("clientId"), "edge: a viewer argument is no longer taken");
     }
 
     fn hooked_program() -> orbital_core::OrbitalSchema {
@@ -2248,7 +2326,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "nested program/dispatch: keyed deferral pending in orbital-core (R-b1)"]
+    #[ignore = "G-ORB-446 (f): nested program/dispatch: keyed deferral pending in orbital-core (R-b1)"]
     fn an_inbound_program_dispatch_delivers_to_the_handler_and_answers_its_status_and_body() {
         let (state, answer) = go_hook("hook");
         assert_eq!(state, "done", "{answer}");
@@ -2387,6 +2465,7 @@ mod tests {
             options["targetTrait"].as_str().unwrap_or_default(),
             options["event"].as_str().unwrap_or_default()
         );
+        let options = as_signed_in(runtime, options);
         let args: Vec<Value> = [serde_json::json!(address), serde_json::json!({ "title": "via request" }), options]
             .iter()
             .map(|a| serde_json::from_value(a.clone()).unwrap())
@@ -2522,16 +2601,15 @@ mod tests {
     }
 
     #[test]
-    fn a_nested_request_with_its_own_viewer_and_origin_leaves_the_askers_intact() {
+    fn a_nested_request_in_its_own_session_and_origin_leaves_the_askers_intact() {
         let runtime = desk();
-        let viewer = |id: &str| -> Value { serde_json::from_value(serde_json::json!({ "id": id })).unwrap() };
-        let seen = |runtime: &Host| runtime.kernel.thread_viewer().map(|v| serde_json::to_value(v.as_ref()).unwrap()["id"].clone());
+        let seen = |runtime: &Host| runtime.kernel.thread_session().map(|s| s.to_string());
         let origin = |runtime: &Host| runtime.origin_by_thread.read().get(&std::thread::current().id()).cloned();
         {
-            let _asker = runtime.enter_viewer(viewer("u1"));
+            let _asker = runtime.kernel.enter_session("s-u1");
             let _tab = runtime.enter_origin(Some("tab-a"));
             dispatch_request(&runtime, serde_json::json!({ "wire": true, "orbital": "Desk", "targetTrait": "Notes", "event": "ADD_NOTE", "viewer": { "id": "u2" }, "clientId": "tab-b" })).unwrap();
-            assert_eq!(seen(&runtime), Some(serde_json::json!("u1")), "the asker's viewer is restored");
+            assert_eq!(seen(&runtime).as_deref(), Some("s-u1"), "the asker's session is restored");
             assert_eq!(origin(&runtime).as_deref(), Some("tab-a"), "the asker's origin is restored");
             dispatch_request(&runtime, serde_json::json!({ "wire": true, "orbital": "Desk", "targetTrait": "Notes", "event": "ADD_NOTE" })).unwrap();
             assert_eq!(origin(&runtime).as_deref(), Some("tab-a"), "a request naming no clientId keeps the asker's origin");
@@ -2771,7 +2849,7 @@ mod tests {
     }
 
     fn topic_dispatch(runtime: &Host, event: &str, topic: Option<&str>, tab: &str) -> serde_json::Value {
-        let options = serde_json::json!({ "orbital": "Topics", "targetTrait": "Viewer", "event": event, "clientId": tab, "viewer": { "id": tab } });
+        let options = as_signed_in(runtime, serde_json::json!({ "orbital": "Topics", "targetTrait": "Viewer", "event": event, "clientId": tab, "viewer": { "id": tab } }));
         let args: Vec<Value> = [serde_json::json!(format!("Topics.Viewer.{event}")), serde_json::json!(topic.map_or(serde_json::json!({}), |t| serde_json::json!({ "topic": t }))), options]
             .iter()
             .map(|a| serde_json::from_value(a.clone()).unwrap())

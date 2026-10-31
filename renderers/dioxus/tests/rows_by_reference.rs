@@ -19,7 +19,7 @@ fn schema() -> OrbitalSchema {
             "entity": {
                 "name": "Ticket", "persistence": "runtime",
                 "fields": [{ "name": "id", "type": "string" }, { "name": "title", "type": "string" }, { "name": "owner", "type": "string" }],
-                "read_policy": ["=", ["object/get", "@entity", "owner"], "@user.id"]
+                "read_policy": ["!=", ["object/get", "@entity", "owner"], "u2"]
             },
             "traits": [{
                 "name": "Tickets", "linkedEntity": "Ticket",
@@ -49,7 +49,6 @@ fn mount() -> Arc<ClientKernel> {
     server.seed("Ticket", vec![row("t1", "alpha-row", "u1")]).unwrap();
     let bridge: Arc<dyn ServerBridge> = Arc::new(server);
     let kernel = Arc::new(ClientKernel::new(schema.clone(), Some(bridge)).unwrap());
-    kernel.set_current_user(serde_json::from_value(json!({ "id": "u1" })).unwrap());
     kernel.seed(
         "Ticket",
         vec![

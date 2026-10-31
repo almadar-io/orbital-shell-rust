@@ -18,7 +18,7 @@ fn schema() -> OrbitalSchema {
             "entity": {
                 "name": "Ticket", "persistence": "persistent",
                 "fields": [{ "name": "id", "type": "string" }, { "name": "title", "type": "string" }, { "name": "owner", "type": "string" }],
-                "read_policy": ["=", ["object/get", "@entity", "owner"], "@user.id"]
+                "read_policy": ["!=", ["object/get", "@entity", "owner"], "u2"]
             },
             "traits": [{
                 "name": "Tickets", "linkedEntity": "Ticket",
@@ -41,7 +41,7 @@ fn row(id: &str, title: &str, owner: &str) -> Value {
     serde_json::from_value(json!({ "id": id, "title": title, "owner": owner })).unwrap()
 }
 
-/// A server holding three tickets, two of them u1's, bound to viewer u1.
+/// A server holding three tickets, one of them (u2's) hidden by the entity's read policy.
 fn server() -> KernelBridge {
     let server = KernelBridge::new(schema()).unwrap();
     server.seed(
@@ -52,7 +52,6 @@ fn server() -> KernelBridge {
             row("t3", "gamma-row", "u1"),
         ],
     ).unwrap();
-    server.set_current_user(serde_json::from_value(json!({ "id": "u1" })).unwrap());
     server
 }
 

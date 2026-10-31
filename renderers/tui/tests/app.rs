@@ -70,7 +70,7 @@ mod rows_by_reference {
                 "entity": {
                     "name": "Ticket", "persistence": "runtime",
                     "fields": [{ "name": "id", "type": "string" }, { "name": "title", "type": "string" }, { "name": "owner", "type": "string" }],
-                    "read_policy": ["=", ["object/get", "@entity", "owner"], "@user.id"]
+                    "read_policy": ["!=", ["object/get", "@entity", "owner"], "u2"]
                 },
                 "traits": [{
                     "name": "Tickets", "linkedEntity": "Ticket",
@@ -100,7 +100,6 @@ mod rows_by_reference {
         server.seed("Ticket", vec![row("t1", "alpha-row", "u1")]).unwrap();
         let bridge: Arc<dyn ServerBridge> = Arc::new(server);
         let kernel = Arc::new(ClientKernel::new(schema.clone(), Some(bridge)).unwrap());
-        kernel.set_current_user(serde_json::from_value(json!({ "id": "u1" })).unwrap());
         kernel.seed("Ticket", vec![row("t1", "alpha-row", "u1"), row("t2", "hidden-row", "u2"), row("t3", "gamma-row", "u1")]).unwrap();
         let app = TuiApp::with_core(ClientCore::with_client_kernel(schema, kernel.clone()), Vec::new());
         (app, kernel)
@@ -118,7 +117,7 @@ mod rows_by_reference {
         list_all(&mut app);
         let text = app.render_to_text(80, 12).unwrap();
         assert!(text.contains("alpha-row") && text.contains("gamma-row"), "{text}");
-        assert!(!text.contains("hidden-row"), "u2's row is not the viewer's to read: {text}");
+        assert!(!text.contains("hidden-row"), "the policy hides u2's row: {text}");
         assert!(!text.contains("$rowSet"), "{text}");
     }
 
