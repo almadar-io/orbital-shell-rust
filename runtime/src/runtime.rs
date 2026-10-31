@@ -498,6 +498,8 @@ pub struct Host {
     ticks: Mutex<orbital_core::TickClock>,
     /// The clock tick passes read: milliseconds since this runtime was made.
     started: std::time::Instant,
+    /// The completions delivered since [`Self::tap_completions`], for a host that reports them (`program/step` live).
+    completion_tap: Arc<Mutex<Option<Vec<orbital_core::step_replay::StepCompletion>>>>,
 }
 
 type InboundWaiters = Arc<
@@ -642,17 +644,27 @@ impl Host {
             })
         };
         let inbound_waiters: InboundWaiters = Arc::default();
+        let completion_tap: Arc<Mutex<Option<Vec<orbital_core::step_replay::StepCompletion>>>> = Arc::default();
         let done: Arc<CompletionDone> = {
             let tx = live_tx.clone();
             let stamping = Arc::downgrade(&kernel);
             let waiters = inbound_waiters.clone();
             let substrate = substrate.clone();
+            let tap = completion_tap.clone();
             Arc::new(
                 move |site: &CallSite,
                       event: &str,
                       payload: &Value,
                       client_id: Option<&str>,
                       result: Result<DispatchOutcomes, DispatchError>| {
+                    if let Some(taken) = tap.lock().as_mut() {
+                        taken.push(orbital_core::step_replay::StepCompletion {
+                            event: event.to_string(),
+                            payload: payload.clone(),
+                            failed: site.emit.failure.as_deref() == Some(event),
+                            outcomes: result.as_ref().map(Clone::clone).map_err(|e| e.to_string()),
+                        });
+                    }
                     match result
                 {
                     Ok(outcomes) => {
@@ -733,6 +745,7 @@ impl Host {
             credential_store_failure,
             ticks: Mutex::new(orbital_core::TickClock::from_orbitals(&[])),
             started: std::time::Instant::now(),
+            completion_tap,
         }
     }
 
@@ -1370,6 +1383,16 @@ impl Host {
     /// The keyed calls whose completion is still wanted: open streams (a listener, a watch) and deferred answers.
     pub fn open_calls(&self) -> Vec<String> {
         self.handles.completions.live_keys()
+    }
+
+    /// Start recording the completions this host delivers; [`Self::take_completions`] returns and stops the record.
+    pub fn tap_completions(&self) {
+        *self.completion_tap.lock() = Some(Vec::new());
+    }
+
+    /// The completions delivered since [`Self::tap_completions`], in delivery order.
+    pub fn take_completions(&self) -> Vec<orbital_core::step_replay::StepCompletion> {
+        self.completion_tap.lock().take().unwrap_or_default()
     }
 
     /// Cancel every open call as `cancel-call` of its key does; a cancelled stream stops delivering.

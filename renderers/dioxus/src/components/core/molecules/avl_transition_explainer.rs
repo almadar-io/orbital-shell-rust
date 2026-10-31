@@ -37,7 +37,7 @@ impl DioxusPatternRenderer for AvlTransitionExplainerRenderer {
                 Value::String(s) => s.clone().into_inner(),
                 Value::Array(items) => format!("({})", items.iter().map(sexpr).collect::<Vec<_>>().join(" ")),
                 Value::Object(_) => to_json(v).to_string(),
-                Value::Lambda { .. } => String::new(),
+                Value::Lambda(_) => String::new(),
             }
         }
         let tr = props.as_object().and_then(|o| o.get("transition")).cloned().unwrap_or(Value::Null);

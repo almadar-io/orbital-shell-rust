@@ -37,7 +37,7 @@ impl DioxusPatternRenderer for ImportPreviewTreeRenderer {
                 Value::String(s) => s.clone().into_inner(),
                 Value::Array(items) => items.iter().map(fmt_field).collect::<Vec<_>>().join(", "),
                 Value::Object(_) => to_json(v).to_string(),
-                Value::Lambda { .. } => String::new(),
+                Value::Lambda(_) => String::new(),
             }
         }
         let units = get_array(props, "units");
