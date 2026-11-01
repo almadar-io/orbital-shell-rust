@@ -355,7 +355,7 @@ fn host_of(
     NativeHost::new(
         source.clone(),
         secrets.clone(),
-        kernel.os_grants(),
+        kernel.os_grant_table(),
         handles.clone(),
         Arc::new(on_event),
     )
