@@ -45,7 +45,7 @@ fn text_on_the_main_slot_paints_dark_pixels_and_a_blank_page_does_not() {
 }
 
 #[test]
-#[ignore = "writes a PNG for a person to look at: ORB_CAPTURE_OUT=<file>"]
+#[ignore = "tool: writes a PNG for a person to look at: ORB_CAPTURE_OUT=<file>"]
 fn look() {
     let out = std::env::var("ORB_CAPTURE_OUT").expect("ORB_CAPTURE_OUT");
     mount_core(&program(serde_json::json!({ "type": "stack", "children": [
