@@ -7,7 +7,9 @@ Every open gap this repo owns lives here. This file is the source of truth; the 
 - **Codes:** new gaps use this repo's prefix `G-ORBITAL-SHELL-RUST-`. Take the "Next code" below, then bump it in the same edit. Codes are never reused or renamed.
 - **Close by deleting.** Remove the entry in the same commit as the fix.
 
-Next code: `G-ORBITAL-SHELL-RUST-004`
+Next code: `G-ORBITAL-SHELL-RUST-005`
+
+- **G-ORBITAL-SHELL-RUST-004** [mechanical] — The Dioxus and TUI `dashboard-layout` renderers (`renderers/dioxus/src/components/core/templates/dashboard_layout.rs`, `renderers/tui/src/components/core/templates/dashboard_layout.rs`) never draw the pattern's two node slots, `headerActions` (top bar, before the theme toggle) and `sidebarContent` (between the nav links and the footer); web, iOS and Android draw both. Symptom: an app composing std-app-layout with `headerTrait` (the Rust tutorials' theme picker, 2026-11-02) or `sidebarTrait` loses that control on these hosts. Reproduction: grep either file for headerActions/sidebarContent (no match). Prevention rung: (3) the verifiers, std verify through the Rust host on an app that sets both knobs. Root cause: H4.
 
 - **G-ORBITAL-SHELL-RUST-002** [mechanical] — The Rust shell keeps host decisions and retired code (R2 shell survey 2026-10-29): runtime/src/runtime.rs tick_pass (:829-850) gates ticks on `background` in the host (node asks engine.tickPass); PersistenceEntitySource.write (:386-405) picks update vs create by fallback; hosts/native/src/store.rs DriverAdapter (:82-308) is only built via memory(), its driver constructor unused (drivers retired) and row_matches (:118-126) filters rows in the host; Cargo.toml still enables orbital-core/client-http for `desktop`. Root cause: K3.
 
