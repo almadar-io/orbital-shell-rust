@@ -206,6 +206,9 @@ impl orbital_core::effects::executor::SubstrateHandler for SelfSubstrate {
         if let [Value::Object(ask)] = args {
             return runtime.inbound_answer(ask).map_err(failure);
         }
+        if matches!(args, [_, _, Value::Object(options)] if options.contains_key("guest")) {
+            return Err(failure("program/dispatch: a guest dispatch starts a guest kernel on its own thread (IoRequest::Guest); it is never answered in process".to_string()));
+        }
         if let [_, payload, Value::Object(options)] = args {
             return runtime.request_answer(payload, options).map_err(|(message, code, status)| SubstrateFailure {
                 errors: vec![serde_json::from_value(serde_json::json!({ "code": code, "message": message, "status": status })).unwrap_or(Value::Null)],
@@ -918,7 +921,7 @@ impl Host {
             headers.iter().filter_map(|(k, v)| v.as_str().map(|v| (k.as_str(), v))).collect();
         let answer = self.deliver_inbound(name, headers, body);
         let mut out = ValueMap::new();
-        out.insert("status".to_string().into(), Value::Number(f64::from(answer.status)));
+        out.insert("status".to_string().into(), Value::Int(answer.status.into()));
         out.insert("body".to_string().into(), Value::string(answer.body));
         Ok(Value::object(out))
     }
