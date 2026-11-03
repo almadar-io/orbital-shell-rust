@@ -1,5 +1,7 @@
 use crate::{local_name, BaseDocument, Node as BlitzDomNode};
-use accesskit::{Action, Node as AccessKitNode, NodeId, Rect, Role, TreeId, TreeInfo, TreeUpdate};
+use accesskit::{
+    Action, Node as AccessKitNode, NodeId, Rect, Role, Toggled, TreeId, TreeInfo, TreeUpdate,
+};
 
 impl BaseDocument {
     pub fn build_accessibility_tree(&self) -> TreeUpdate {
@@ -102,7 +104,16 @@ impl BaseDocument {
                 }
             }
             if role == Role::CheckBox {
-                builder.set_toggled(element_data.attr(local_name!("checked")).is_some().into());
+                let toggled = match element_data.attr(local_name!("aria-checked")) {
+                    Some("true") => Toggled::True,
+                    Some("mixed") => Toggled::Mixed,
+                    Some(_) => Toggled::False,
+                    None => element_data
+                        .checkbox_input_checked()
+                        .unwrap_or_else(|| element_data.attr(local_name!("checked")).is_some())
+                        .into(),
+                };
+                builder.set_toggled(toggled);
             }
             if matches!(role, Role::Button | Role::CheckBox) {
                 builder.add_action(Action::Click);
@@ -156,5 +167,35 @@ mod tests {
             .unwrap();
         assert!(parent.1.is_hidden());
         assert!(parent.1.children().contains(&NodeId(child as u64)));
+    }
+
+    #[test]
+    fn aria_checked_sets_checkbox_accessibility_state() {
+        let mut doc = BaseDocument::new(DocumentConfig::default());
+        let mut mutator = doc.mutate();
+        let checkbox = mutator.create_element(
+            QualName::new(None, ns!(html), local_name!("button")),
+            vec![
+                Attribute {
+                    name: QualName::new(None, ns!(), local_name!("role")),
+                    value: "checkbox".into(),
+                },
+                Attribute {
+                    name: QualName::new(None, ns!(), local_name!("aria-checked")),
+                    value: "true".into(),
+                },
+            ],
+        );
+        mutator.append_children(0, &[checkbox]);
+        drop(mutator);
+
+        let tree = doc.build_accessibility_tree();
+        let node = &tree
+            .nodes
+            .iter()
+            .find(|(id, _)| *id == NodeId(checkbox as u64))
+            .unwrap()
+            .1;
+        assert_eq!(node.toggled(), Some(Toggled::True));
     }
 }

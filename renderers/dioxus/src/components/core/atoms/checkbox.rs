@@ -27,6 +27,14 @@ impl DioxusPatternRenderer for CheckboxRenderer {
         let checked = get_bool_or(props, "checked", false);
         let action = get_string(props, "onChange");
         let sink = view.sink;
+        let emit_change = move |next_checked: bool| {
+            if let (Some(sink), Some(action)) = (sink, &action) {
+                let mut payload = orbital_core::ValueMap::new();
+                payload.insert("checked".into(), Value::Bool(next_checked));
+                sink.call((action.clone(), Value::Object(payload.into())));
+            }
+        };
+        let emit_label_change = emit_change.clone();
         let state = if checked {
             dioxus_primitives::checkbox::CheckboxState::Checked
         } else {
@@ -41,20 +49,19 @@ impl DioxusPatternRenderer for CheckboxRenderer {
                     checked: Some(state),
                     aria_label: "{label}",
                     on_checked_change: move |state: dioxus_primitives::checkbox::CheckboxState| {
-                        if let (Some(sink), Some(action)) = (sink, &action) {
-                            let mut payload = orbital_core::ValueMap::new();
-                            payload.insert("checked".into(), Value::Bool(bool::from(state)));
-                            sink.call((action.clone(), Value::Object(payload.into())));
-                        }
+                        emit_change(bool::from(state));
                     },
                     dioxus_primitives::checkbox::CheckboxIndicator {
                         class: "hidden data-[state=checked]:block data-[state=indeterminate]:block text-xs leading-none",
-                        "✓"
+                        span {
+                            style: "display:block;width:5px;height:9px;border-right:2px solid currentColor;border-bottom:2px solid currentColor;transform:rotate(45deg);margin-top:-2px"
+                        }
                     }
                 }
                 if !label.is_empty() {
                     span {
                         class: "ml-2 text-sm text-foreground font-medium cursor-pointer select-none",
+                        onclick: move |_| emit_label_change(!checked),
                         "{label}"
                     }
                 }

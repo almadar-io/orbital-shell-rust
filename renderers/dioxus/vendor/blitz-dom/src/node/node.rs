@@ -714,6 +714,11 @@ impl Node {
     /// TODO: z-index
     /// (If multiple children are positioned at the position then a random one will be recursed into)
     pub fn hit(&self, x: f32, y: f32) -> Option<HitResult> {
+        use style::computed_values::pointer_events::T as PointerEvents;
+
+        let pointer_events_none = self
+            .primary_styles()
+            .is_some_and(|style| style.clone_pointer_events() == PointerEvents::None);
         let mut x = x - self.final_layout.location.x + self.scroll_offset.x as f32;
         let mut y = y - self.final_layout.location.y + self.scroll_offset.y as f32;
 
@@ -758,7 +763,11 @@ impl Node {
                     Cluster::from_point(layout, x * scale, y * scale).and_then(|(cluster, _)| {
                         let style_index = cluster.glyphs().next()?.style_index();
                         let node_id = layout.styles()[style_index].brush.id;
-                        Some(HitResult { node_id, x, y })
+                        let text_pointer_events_none =
+                            self.with(node_id).primary_styles().is_some_and(|style| {
+                                style.clone_pointer_events() == PointerEvents::None
+                            });
+                        (!text_pointer_events_none).then_some(HitResult { node_id, x, y })
                     })
                 } else {
                     None
@@ -769,7 +778,7 @@ impl Node {
                 x,
                 y,
             })
-            .filter(|_| matches_self))
+            .filter(|_| matches_self && !pointer_events_none))
     }
 
     /// Computes the Document-relative coordinates of the Node

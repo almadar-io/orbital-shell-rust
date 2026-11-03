@@ -509,6 +509,30 @@ fn atomic_controls_emit_the_declared_event_payloads() {
         ),
         vec![("SET_DONE".to_string(), r#"{"checked":false}"#.to_string())]
     );
+    *CONTROL_PATTERN.lock().unwrap() =
+        r#"{"type":"checkbox","label":"Complete","checked":false,"onChange":"SET_DONE"}"#;
+    CONTROL_EVENTS.lock().unwrap().clear();
+    let mut label_dom = VirtualDom::new(control_app);
+    let mut label_mutations = Mutations::default();
+    label_dom.rebuild(&mut label_mutations);
+    let click_listeners: Vec<_> = label_mutations
+        .edits
+        .iter()
+        .filter_map(|edit| match edit {
+            Mutation::NewEventListener { name, id } if name == "click" => Some(*id),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(click_listeners.len(), 2);
+    label_dom.runtime().handle_event(
+        "click",
+        Event::new(mouse(), true),
+        *click_listeners.last().unwrap(),
+    );
+    assert_eq!(
+        *CONTROL_EVENTS.lock().unwrap(),
+        vec![("SET_DONE".to_string(), r#"{"checked":true}"#.to_string())]
+    );
     let disabled_form = Rc::new(PlatformEventData::new(Box::new(
         dioxus_html::SerializedFormData::new("Ignored".to_string(), vec![]),
     ))) as Rc<dyn Any>;

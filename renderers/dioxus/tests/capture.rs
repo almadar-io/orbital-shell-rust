@@ -33,6 +33,40 @@ fn dark_pixels(path: &std::path::Path) -> usize {
 }
 
 #[test]
+fn pointer_events_none_overlay_passes_touch_to_checkbox_button() {
+    use blitz_dom::DocumentConfig;
+    use blitz_traits::shell::{ColorScheme, Viewport};
+    use dioxus::prelude::*;
+    use dioxus_native::DioxusDocument;
+
+    fn app() -> Element {
+        rsx! {
+            div { style: "position:relative;width:80px;height:80px",
+                button { id: "checkbox", role: "checkbox", style: "position:absolute;left:0;top:0;width:40px;height:40px" }
+                input { id: "bubble", r#type: "checkbox", style: "position:absolute;left:0;top:0;width:40px;height:40px;pointer-events:none;opacity:0" }
+            }
+        }
+    }
+
+    let mut doc = DioxusDocument::new(
+        dioxus_core::VirtualDom::new(app),
+        DocumentConfig {
+            viewport: Some(Viewport::new(80, 80, 1.0, ColorScheme::Light)),
+            ..Default::default()
+        },
+    );
+    doc.initial_build();
+    doc.resolve(0.0);
+    let button = doc.query_selector("#checkbox").unwrap().unwrap();
+    let bubble = doc.query_selector("#bubble").unwrap().unwrap();
+    let hit = doc.hit(20.0, 20.0).unwrap().node_id;
+    assert_eq!(
+        hit, button,
+        "hidden input {bubble} stole checkbox tap: hit {hit}"
+    );
+}
+
+#[test]
 fn activity_rail_folder_icon_uses_a_bundled_glyph_and_paints_pixels() {
     use anyrender::ImageRenderer;
     use blitz_dom::{Document as _, DocumentConfig};

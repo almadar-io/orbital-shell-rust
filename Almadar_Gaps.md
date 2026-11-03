@@ -9,8 +9,6 @@ Every open gap this repo owns lives here. This file is the source of truth; the 
 
 Next code: `G-ORBITAL-SHELL-RUST-012`
 
-- **G-ORBITAL-SHELL-RUST-011** [mechanical] — Android native Dioxus TODO checkbox taps do not visibly set the selected task to done. Owner: `orbital-shell-rust` Dioxus/Blitz input and checkbox event bridge. Reproduce: on either the pre-move or platform-owned-host API 34 TODO APK, add a task, tap Select until `task-1` appears, then tap the bounded `Selected task complete` checkbox; the square remains unchecked and UIAutomator reports `checked=false`. The VDOM callback and scripted kernel `SET_DONE` checks pass separately, so neither proves Android gesture delivery. Prevention rung (3): an Android tap → Dioxus callback → kernel transition → GPU/state runtime probe. Root cause: H4.
-
 - **G-ORBITAL-SHELL-RUST-008** [architectural] — The pinned Android AccessKit/Blitz provider exposes live input value, focus, nonzero Add/Select/Delete bounds, and one bounded CheckBox labeled `Selected task complete`; Focus does not click, and provider Click completes TODO actions. Spoken TalkBack navigation and editing remain unproven by injected ADB gestures, and UIAutomator still reports `clickable=false` even where provider Click succeeds. Owner: orbital-shell-rust Android TalkBack acceptance and pinned AccessKit Android adapter. Reproduce: run the generated `native-a11y` TODO APK with TalkBack, navigate/edit/activate every TODO control using the service, and compare spoken focus with provider action results. Prevention rung (3): real TalkBack traversal, editing, and action verifier in addition to the provider probe. Root cause: H4.
 
 
