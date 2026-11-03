@@ -42,14 +42,6 @@ pub mod wasm;
 #[path = "../../../hosts/desktop/dioxus/src/native.rs"]
 pub mod native;
 
-#[cfg(all(feature = "native", target_os = "android"))]
-#[path = "../../../hosts/android/dioxus/src/native.rs"]
-mod android_host;
-
-#[cfg(all(feature = "native", target_os = "ios"))]
-#[path = "../../../hosts/ios/dioxus/src/native.rs"]
-mod ios_host;
-
 /// Game pattern renderers (`canvas` / `canvas-2d` via a shared-device wgpu paint
 /// source, `game-hud`) — native targets only; the GPU substrate has no wasm32 build.
 #[cfg(all(feature = "native", not(target_arch = "wasm32")))]

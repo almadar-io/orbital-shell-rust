@@ -16,6 +16,16 @@ use crate::shell;
 #[cfg(feature = "native-http")]
 use std::sync::Arc;
 
+#[cfg(target_os = "android")]
+pub fn set_android_app(app: android_activity::AndroidApp) {
+    blitz_shell::set_android_app(app);
+}
+
+#[cfg(target_os = "android")]
+pub fn android_is_editable_at(x: f32, y: f32) -> bool {
+    blitz_shell::android_is_editable_at(x, y)
+}
+
 /// Mount a schema and open the native window. Blocks on the winit event loop
 /// until the window closes. `css_texts` are stylesheet contents (already read
 /// from disk by the caller — no path knowledge here); `title` labels the

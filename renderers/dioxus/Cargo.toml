@@ -8,8 +8,8 @@ description = "Dioxus renderer for Orbital, over the shared client circuit in or
 
 [lib]
 # `cdylib` so the wasm32 build can be loaded by `wasm-bindgen` in the browser;
-# `rlib` keeps native dependents linking as before.
-crate-type = ["cdylib", "rlib", "staticlib"]
+# `rlib` lets platform-owned hosts link the renderer.
+crate-type = ["cdylib", "rlib"]
 
 [features]
 default = []
