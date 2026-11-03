@@ -64,6 +64,7 @@ pub mod gradient_divider;
 pub mod graph_canvas;
 pub mod graph_view;
 pub mod grid;
+pub mod guest_view;
 pub mod header;
 pub mod icon_button;
 pub mod import_preview_tree;

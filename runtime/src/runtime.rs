@@ -918,7 +918,7 @@ impl Host {
             headers.iter().filter_map(|(k, v)| v.as_str().map(|v| (k.as_str(), v))).collect();
         let answer = self.deliver_inbound(name, headers, body);
         let mut out = ValueMap::new();
-        out.insert("status".to_string().into(), Value::Number(f64::from(answer.status)));
+        out.insert("status".to_string().into(), Value::Int(answer.status.into()));
         out.insert("body".to_string().into(), Value::string(answer.body));
         Ok(Value::object(out))
     }

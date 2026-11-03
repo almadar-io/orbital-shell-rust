@@ -49,7 +49,7 @@ impl DioxusPatternRenderer for GanttRenderer {
         }
         fn parse_day(v: Option<&Value>) -> Option<i64> {
             match v {
-                Some(Value::Number(n)) => Some((n / 86_400_000.0).floor() as i64),
+                Some(n @ (Value::Number(_) | Value::Int(_))) => n.as_number().map(|n| (n / 86_400_000.0).floor() as i64),
                 Some(Value::String(s)) => {
                     let t = s.trim();
                     let b = t.as_bytes();
@@ -104,7 +104,7 @@ impl DioxusPatternRenderer for GanttRenderer {
                 }
                 None => {
                     let days = duration_field.as_ref().and_then(|f| nested(row, f)).and_then(|v| match v {
-                        Value::Number(n) => Some(*n),
+                        Value::Number(_) | Value::Int(_) => v.as_number(),
                         Value::String(s) => s.trim().parse::<f64>().ok(),
                         _ => None,
                     });

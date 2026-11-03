@@ -128,6 +128,7 @@ use crate::components::core::molecules::gradient_divider::GradientDividerRendere
 use crate::components::core::molecules::graph_canvas::GraphCanvasRenderer as GraphCanvasRenderer;
 use crate::components::core::molecules::graph_view::GraphViewRenderer as GraphViewRenderer;
 use crate::components::core::molecules::grid::GridRenderer as GridRenderer;
+use crate::components::core::molecules::guest_view::GuestViewRenderer as GuestViewRenderer;
 use crate::components::core::molecules::header::HeaderRenderer as HeaderRenderer;
 use crate::components::core::molecules::icon_button::IconButtonRenderer as IconButtonRenderer;
 use crate::components::core::molecules::import_preview_tree::ImportPreviewTreeRenderer as ImportPreviewTreeRenderer;
@@ -347,6 +348,7 @@ pub fn register_dioxus(registry: &mut crate::registry::DioxusPatternRegistry) {
     registry.register(Box::new(GraphCanvasRenderer));
     registry.register(Box::new(GraphViewRenderer));
     registry.register(Box::new(GridRenderer));
+    registry.register(Box::new(GuestViewRenderer));
     registry.register(Box::new(HeaderRenderer));
     registry.register(Box::new(IconButtonRenderer));
     registry.register(Box::new(ImportPreviewTreeRenderer));
