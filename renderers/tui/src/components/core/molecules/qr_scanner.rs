@@ -35,18 +35,20 @@ impl PatternRenderer for QrScannerRenderer {
         let paused = get_bool_or(props, "paused", false);
         let facing = get_string_or(props, "facingMode", "environment");
         let status = if paused { "PAUSED" } else { "SCANNING" };
-        let lines = vec![
-            Line::from("┌──────────────┐"),
-            Line::from("│              │"),
-            Line::from("│   QR FRAME   │"),
-            Line::from("│  ──────────  │"),
-            Line::from("│              │"),
-            Line::from("└──────────────┘"),
-            Line::from(format!("{} [{}]", status, facing))
-                .style(Style::default().fg(if paused { Color::Yellow } else { Color::Green })),
-        ];
+        let lines =
+            vec![
+                Line::from("┌──────────────┐"),
+                Line::from("│              │"),
+                Line::from("│   QR FRAME   │"),
+                Line::from("│  ──────────  │"),
+                Line::from("│              │"),
+                Line::from("└──────────────┘"),
+                Line::from(format!("{} [{}]", status, facing))
+                    .style(Style::default().fg(if paused { Color::Yellow } else { Color::Green })),
+            ];
         frame.render_widget(
-            Paragraph::new(Text::from(lines)).block(Block::default().borders(Borders::ALL).title("qr-scanner")),
+            Paragraph::new(Text::from(lines))
+                .block(Block::default().borders(Borders::ALL).title("qr-scanner")),
             area,
         );
     }

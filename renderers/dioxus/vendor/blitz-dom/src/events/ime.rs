@@ -16,6 +16,31 @@ pub(crate) fn handle_ime_event<F: FnMut(DomEvent)>(
         if let Some(input_data) = text_input_data {
             let editor = &mut input_data.editor;
             let mut font_ctx = doc.font_ctx.lock().unwrap();
+            if let BlitzImeEvent::TextState {
+                text,
+                selection,
+                compose_region,
+            } = event
+            {
+                let previous_value = editor.text().to_string();
+                if editor.raw_text() != text {
+                    editor.set_text(&text);
+                }
+                let mut driver = editor.driver(&mut font_ctx, &mut doc.layout_ctx);
+                driver.select_byte_range(selection.0, selection.1);
+                if let Some((start, end)) = compose_region {
+                    driver.set_compose_byte_range(start, end);
+                } else {
+                    driver.finish_compose();
+                }
+                if compose_region.is_none() && previous_value != editor.text().to_string() {
+                    dispatch_event(DomEvent::new(
+                        node_id,
+                        DomEventData::Input(BlitzInputEvent { value: text }),
+                    ));
+                }
+                return;
+            }
             let mut driver = editor.driver(&mut font_ctx, &mut doc.layout_ctx);
 
             match event {
@@ -38,6 +63,7 @@ pub(crate) fn handle_ime_event<F: FnMut(DomEvent)>(
                         driver.set_compose(&text, cursor);
                     }
                 }
+                BlitzImeEvent::TextState { .. } => unreachable!(),
             }
             println!("Sent ime event to {node_id}");
         }

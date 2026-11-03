@@ -1,6 +1,6 @@
 use crate::{
-    BaseDocument,
     node::{TextBrush, TextInputData},
+    BaseDocument,
 };
 use blitz_traits::{
     events::{BlitzInputEvent, BlitzKeyEvent, DomEvent, DomEventData},

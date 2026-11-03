@@ -31,7 +31,14 @@ impl PatternRenderer for ButtonGroupRenderer {
     ) {
         use ratatui::text::Line;
         use ratatui::widgets::{Block, Borders, Paragraph};
-        let labels: Vec<String> = get_actions(props, "actions").into_iter().map(|a| format!("[{}]", a.label)).collect();
-        frame.render_widget(Paragraph::new(Line::from(labels.join(" "))).block(Block::default().borders(Borders::ALL)), area);
+        let labels: Vec<String> = get_actions(props, "actions")
+            .into_iter()
+            .map(|a| format!("[{}]", a.label))
+            .collect();
+        frame.render_widget(
+            Paragraph::new(Line::from(labels.join(" ")))
+                .block(Block::default().borders(Borders::ALL)),
+            area,
+        );
     }
 }

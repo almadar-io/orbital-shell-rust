@@ -31,8 +31,28 @@ impl PatternRenderer for TimelineRenderer {
     ) {
         use ratatui::text::Line;
         use ratatui::widgets::{Block, Borders, Paragraph};
-        let items = { let mut i = get_array(props, "items"); if i.is_empty() { i = get_array(props, "events"); } i };
-        let lines: Vec<Line> = items.iter().map(|it| Line::from(format!("● {}", it.as_object().and_then(|o| o.get("title").or_else(|| o.get("label"))).and_then(|v| v.as_str()).unwrap_or("")))).collect();
-        frame.render_widget(Paragraph::new(lines).block(Block::default().borders(Borders::ALL)), area);
+        let items = {
+            let mut i = get_array(props, "items");
+            if i.is_empty() {
+                i = get_array(props, "events");
+            }
+            i
+        };
+        let lines: Vec<Line> = items
+            .iter()
+            .map(|it| {
+                Line::from(format!(
+                    "● {}",
+                    it.as_object()
+                        .and_then(|o| o.get("title").or_else(|| o.get("label")))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                ))
+            })
+            .collect();
+        frame.render_widget(
+            Paragraph::new(lines).block(Block::default().borders(Borders::ALL)),
+            area,
+        );
     }
 }

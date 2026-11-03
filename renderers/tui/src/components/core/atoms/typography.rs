@@ -31,6 +31,13 @@ impl PatternRenderer for TypographyRenderer {
     ) {
         use ratatui::text::Line;
         use ratatui::widgets::Paragraph;
-        frame.render_widget(Paragraph::new(Line::from(get_string(props, "content").filter(|s| !s.is_empty()).unwrap_or_else(|| get_string_or(props, "children", "")))), area);
+        frame.render_widget(
+            Paragraph::new(Line::from(
+                get_string(props, "content")
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or_else(|| get_string_or(props, "children", "")),
+            )),
+            area,
+        );
     }
 }

@@ -31,9 +31,25 @@ impl PatternRenderer for OrbInspectorRenderer {
     ) {
         use ratatui::text::Line;
         use ratatui::widgets::{Block, Borders, Paragraph};
-        let node = props.as_object().and_then(|o| o.get("node")).cloned().unwrap_or(Value::Null);
-        let mut lines: Vec<Line> = vec![Line::from(get_string_or(&node, "orbitalName", "Nothing selected"))];
-        for key in ["traitName", "stateName", "transitionEvent"] { let v = get_string_or(&node, key, ""); if !v.is_empty() { lines.push(Line::from(format!("{}: {}", key, v))); } }
-        frame.render_widget(Paragraph::new(lines).block(Block::default().borders(Borders::ALL).title("inspector")), area);
+        let node = props
+            .as_object()
+            .and_then(|o| o.get("node"))
+            .cloned()
+            .unwrap_or(Value::Null);
+        let mut lines: Vec<Line> = vec![Line::from(get_string_or(
+            &node,
+            "orbitalName",
+            "Nothing selected",
+        ))];
+        for key in ["traitName", "stateName", "transitionEvent"] {
+            let v = get_string_or(&node, key, "");
+            if !v.is_empty() {
+                lines.push(Line::from(format!("{}: {}", key, v)));
+            }
+        }
+        frame.render_widget(
+            Paragraph::new(lines).block(Block::default().borders(Borders::ALL).title("inspector")),
+            area,
+        );
     }
 }

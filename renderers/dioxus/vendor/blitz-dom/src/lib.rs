@@ -28,6 +28,7 @@
 
 pub const DEFAULT_CSS: &str = include_str!("../assets/default.css");
 pub(crate) const BULLET_FONT: &[u8] = include_bytes!("../assets/moz-bullet-font.otf");
+pub(crate) const SYMBOL_FONT: &[u8] = include_bytes!("../assets/NotoSansSymbols2-Regular.ttf");
 
 const INCREMENTAL: bool = cfg!(feature = "incremental");
 const NON_INCREMENTAL: bool = !INCREMENTAL;
@@ -66,14 +67,14 @@ mod accessibility;
 pub use config::DocumentConfig;
 pub use document::{BaseDocument, Document};
 pub use markup5ever::{
-    LocalName, Namespace, NamespaceStaticSet, Prefix, PrefixStaticSet, QualName, local_name,
-    namespace_prefix, namespace_url, ns,
+    local_name, namespace_prefix, namespace_url, ns, LocalName, Namespace, NamespaceStaticSet,
+    Prefix, PrefixStaticSet, QualName,
 };
 pub use mutator::DocumentMutator;
 pub use node::{Attribute, ElementData, Node, NodeData, TextNodeData};
 pub use parley::FontContext;
-pub use style::Atom;
 pub use style::invalidation::element::restyle_hints::RestyleHint;
+pub use style::Atom;
 pub type SelectorList = selectors::SelectorList<style::selector_parser::SelectorImpl>;
 pub use events::{EventDriver, EventHandler, NoopEventHandler};
 pub use html::{DummyHtmlParserProvider, HtmlParserProvider};

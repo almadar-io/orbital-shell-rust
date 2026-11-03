@@ -30,6 +30,13 @@ impl PatternRenderer for StatCardRenderer {
         _ctx: &mut RenderContext<'_>,
     ) {
         use ratatui::widgets::{Block, Borders, Paragraph};
-        frame.render_widget(Paragraph::new(get_string_or(props, "value", "0")).block(Block::default().borders(Borders::ALL).title(get_string_or(props, "label", ""))), area);
+        frame.render_widget(
+            Paragraph::new(get_string_or(props, "value", "0")).block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(get_string_or(props, "label", "")),
+            ),
+            area,
+        );
     }
 }

@@ -29,12 +29,16 @@ impl PatternRenderer for ToastRenderer {
         _entity: Option<&Value>,
         _ctx: &mut RenderContext<'_>,
     ) {
-        use ratatui::style::{Style};
+        use ratatui::style::Style;
         use ratatui::text::Line;
         use ratatui::widgets::{Block, Borders, Paragraph};
         let title = get_string_or(props, "title", "");
         let message = get_string_or(props, "message", "");
         let _ = Style::default();
-        frame.render_widget(Paragraph::new(vec![Line::from(title), Line::from(message)]).block(Block::default().borders(Borders::ALL)), area);
+        frame.render_widget(
+            Paragraph::new(vec![Line::from(title), Line::from(message)])
+                .block(Block::default().borders(Borders::ALL)),
+            area,
+        );
     }
 }

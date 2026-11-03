@@ -1,8 +1,8 @@
 use crate::events::handle_dom_event;
 use crate::font_metrics::BlitzFontMetricsProvider;
 use crate::layout::construct::{
-    ConstructionTask, ConstructionTaskData, ConstructionTaskResult, ConstructionTaskResultData,
-    build_inline_layout_into, collect_layout_children,
+    build_inline_layout_into, collect_layout_children, ConstructionTask, ConstructionTaskData,
+    ConstructionTaskResult, ConstructionTaskResultData,
 };
 use crate::layout::damage::{ALL_DAMAGE, CONSTRUCT_BOX, CONSTRUCT_DESCENDENT, CONSTRUCT_FC};
 use crate::mutator::ViewportMut;
@@ -13,12 +13,12 @@ use crate::traversal::TreeTraverser;
 use crate::url::DocumentUrl;
 use crate::util::ImageType;
 use crate::{
-    DEFAULT_CSS, DocumentConfig, DocumentMutator, DummyHtmlParserProvider, ElementData,
-    EventDriver, HtmlParserProvider, NON_INCREMENTAL, Node, NodeData, NoopEventHandler,
-    TextNodeData,
+    DocumentConfig, DocumentMutator, DummyHtmlParserProvider, ElementData, EventDriver,
+    HtmlParserProvider, Node, NodeData, NoopEventHandler, TextNodeData, DEFAULT_CSS,
+    NON_INCREMENTAL,
 };
 use blitz_traits::devtools::DevtoolSettings;
-use blitz_traits::events::{DomEvent, HitResult, UiEvent};
+use blitz_traits::events::{BlitzDragTransfer, DomEvent, HitResult, UiEvent};
 use blitz_traits::navigation::{DummyNavigationProvider, NavigationProvider};
 use blitz_traits::net::{DummyNetProvider, NetProvider, Request, SharedProvider};
 use blitz_traits::shell::{ColorScheme, DummyShellProvider, ShellProvider, Viewport};
@@ -27,7 +27,7 @@ use debug_timer::debug_timer;
 use linebender_resource_handle::Blob;
 use markup5ever::local_name;
 use parley::{FontContext, LayoutContext};
-use selectors::{Element, matching::QuirksMode};
+use selectors::{matching::QuirksMode, Element};
 use slab::Slab;
 use std::any::Any;
 use std::cell::RefCell;
@@ -37,18 +37,18 @@ use std::str::FromStr;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::task::Context as TaskContext;
-use style::Atom;
 use style::animation::DocumentAnimationSet;
 use style::attr::{AttrIdentifier, AttrValue};
 use style::data::{ElementData as StyloElementData, ElementStyles};
 use style::media_queries::MediaType;
-use style::properties::ComputedValues;
 use style::properties::style_structs::Font;
+use style::properties::ComputedValues;
 use style::queries::values::PrefersColorScheme;
 use style::selector_parser::ServoElementSnapshot;
 use style::servo_arc::Arc as ServoArc;
-use style::values::GenericAtomIdent;
 use style::values::computed::Overflow;
+use style::values::GenericAtomIdent;
+use style::Atom;
 use style::{
     dom::{TDocument, TNode},
     media_queries::{Device, MediaList},
@@ -138,6 +138,8 @@ pub struct BaseDocument {
     pub(crate) active_node_id: Option<usize>,
     /// The node which recieved a mousedown event (if any)
     pub(crate) mousedown_node_id: Option<usize>,
+    pub(crate) drag_candidate: Option<(usize, f32, f32)>,
+    pub(crate) drag_active: Option<(usize, Option<usize>, BlitzDragTransfer, bool)>,
 
     /// Whether there are active CSS animations/transitions (so we should re-render every frame)
     pub(crate) has_active_animations: bool,
@@ -197,27 +199,13 @@ impl BaseDocument {
 
         let id = ID_GENERATOR.fetch_add(1, Ordering::SeqCst);
 
-        let font_ctx = config
-            .font_ctx
-            // .map(|mut font_ctx| {
-            //     font_ctx.collection.make_shared();
-            //     font_ctx.source_cache.make_shared();
-            //     font_ctx
-            // })
-            .unwrap_or_else(|| {
-                // let mut font_ctx = FontContext {
-                //     source_cache: SourceCache::new_shared(),
-                //     collection: Collection::new(CollectionOptions {
-                //         shared: true,
-                //         system_fonts: true,
-                //     }),
-                // };
-                let mut font_ctx = FontContext::default();
-                font_ctx
-                    .collection
-                    .register_fonts(Blob::new(Arc::new(crate::BULLET_FONT) as _), None);
-                font_ctx
-            });
+        let mut font_ctx = config.font_ctx.unwrap_or_default();
+        font_ctx
+            .collection
+            .register_fonts(Blob::new(Arc::new(crate::BULLET_FONT) as _), None);
+        font_ctx
+            .collection
+            .register_fonts(Blob::new(Arc::new(crate::SYMBOL_FONT) as _), None);
         let font_ctx = Arc::new(Mutex::new(font_ctx));
 
         let viewport = config.viewport.unwrap_or_default();
@@ -274,6 +262,8 @@ impl BaseDocument {
             focus_node_id: None,
             active_node_id: None,
             mousedown_node_id: None,
+            drag_candidate: None,
+            drag_active: None,
             has_active_animations: false,
             has_canvas: false,
             changed_nodes: HashSet::new(),
@@ -492,7 +482,7 @@ impl BaseDocument {
 
     /// Whether the document has been mutated
     pub fn has_changes(&self) -> bool {
-        self.changed_nodes.is_empty()
+        !self.changed_nodes.is_empty()
     }
 
     pub fn create_text_node(&mut self, text: &str) -> usize {
@@ -902,6 +892,10 @@ impl BaseDocument {
     pub fn set_mousedown_node_id(&mut self, node_id: Option<usize>) {
         self.mousedown_node_id = node_id;
     }
+
+    pub fn is_dragging(&self) -> bool {
+        self.drag_active.is_some()
+    }
     pub fn set_focus_to(&mut self, focus_node_id: usize) -> bool {
         if Some(focus_node_id) == self.focus_node_id {
             return false;
@@ -963,7 +957,14 @@ impl BaseDocument {
     pub fn set_hover_to(&mut self, x: f32, y: f32) -> bool {
         let hit = self.hit(x, y);
         let hover_node_id = hit.map(|hit| hit.node_id);
+        self.set_hover_node(hover_node_id)
+    }
 
+    pub fn clear_hover(&mut self) -> bool {
+        self.set_hover_node(None)
+    }
+
+    fn set_hover_node(&mut self, hover_node_id: Option<usize>) -> bool {
         // Return early if the new node is the same as the already-hovered node
         if hover_node_id == self.hover_node_id {
             return false;
@@ -1390,5 +1391,30 @@ impl AsRef<BaseDocument> for BaseDocument {
 impl AsMut<BaseDocument> for BaseDocument {
     fn as_mut(&mut self) -> &mut BaseDocument {
         self
+    }
+}
+
+#[cfg(test)]
+mod accessibility_change_tests {
+    use super::{BaseDocument, DocumentConfig};
+
+    #[test]
+    fn creating_text_marks_document_changed() {
+        let mut doc = BaseDocument::new(DocumentConfig::default());
+        doc.changed_nodes.clear();
+        assert!(!doc.has_changes());
+
+        doc.create_text_node("task");
+        assert!(doc.has_changes());
+    }
+
+    #[test]
+    fn native_document_bundles_symbol_font_for_action_icons() {
+        let doc = BaseDocument::new(DocumentConfig::default());
+        let mut font_ctx = doc.font_ctx.lock().unwrap();
+        assert!(font_ctx
+            .collection
+            .family_by_name("Noto Sans Symbols 2")
+            .is_some());
     }
 }

@@ -22,6 +22,20 @@ use std::collections::HashMap;
 /// capture it inside `onclick: move |_| …` without cloning.
 pub type EventSink = Callback<(String, Value)>;
 
+pub type NavigationSink = Callback<String>;
+
+#[derive(Clone, Copy, PartialEq)]
+pub enum DockCommand {
+    ShowPanel,
+    CloseMenu,
+}
+
+#[derive(Clone, PartialEq)]
+pub struct DockContext {
+    pub compact: bool,
+    pub command: Callback<DockCommand>,
+}
+
 /// Read-only view handed to a Dioxus renderer. Carries the immutable subset of
 /// the shared `RenderContext` renderers actually need (entity cache, `@trait`
 /// content, current state) plus the [`EventSink`] for dispatch. `source_trait`
@@ -44,6 +58,9 @@ pub struct DioxusView<'a> {
     pub source_trait: Option<String>,
     /// Event sink wired by the root `App` into `ClientCore::send_event`.
     pub sink: Option<EventSink>,
+    pub navigate: Option<NavigationSink>,
+    pub dock: Option<DockContext>,
+    pub viewport_width: Option<f64>,
     /// The kernel's `canvasTheme`, handed to every Rust-drawn scene (`None` without a kernel).
     pub canvas_theme: Option<serde_json::Value>,
 }
@@ -60,6 +77,58 @@ impl<'a> DioxusView<'a> {
             trait_content: self.trait_content,
             source_trait: source,
             sink: Some(sink),
+            navigate: self.navigate,
+            dock: self.dock.clone(),
+            viewport_width: self.viewport_width,
+            canvas_theme: self.canvas_theme.clone(),
+        }
+    }
+
+    pub fn to_owned(&self) -> OwnedDioxusView {
+        OwnedDioxusView {
+            trait_name: self.trait_name.to_string(),
+            orbital_name: self.orbital_name.to_string(),
+            current_state: self.current_state.to_string(),
+            entities: self.entities.clone(),
+            trait_content: self.trait_content.clone(),
+            source_trait: self.source_trait.clone(),
+            sink: self.sink,
+            navigate: self.navigate,
+            dock: self.dock.clone(),
+            viewport_width: self.viewport_width,
+            canvas_theme: self.canvas_theme.clone(),
+        }
+    }
+}
+
+#[derive(Clone, PartialEq)]
+pub struct OwnedDioxusView {
+    pub trait_name: String,
+    pub orbital_name: String,
+    pub current_state: String,
+    pub entities: HashMap<String, Vec<Value>>,
+    pub trait_content: orbital_core::ValueMap,
+    pub source_trait: Option<String>,
+    pub sink: Option<EventSink>,
+    pub navigate: Option<NavigationSink>,
+    pub dock: Option<DockContext>,
+    pub viewport_width: Option<f64>,
+    pub canvas_theme: Option<serde_json::Value>,
+}
+
+impl OwnedDioxusView {
+    pub fn as_view(&self) -> DioxusView<'_> {
+        DioxusView {
+            trait_name: &self.trait_name,
+            orbital_name: &self.orbital_name,
+            current_state: &self.current_state,
+            entities: &self.entities,
+            trait_content: &self.trait_content,
+            source_trait: self.source_trait.clone(),
+            sink: self.sink,
+            navigate: self.navigate,
+            dock: self.dock.clone(),
+            viewport_width: self.viewport_width,
             canvas_theme: self.canvas_theme.clone(),
         }
     }

@@ -32,6 +32,10 @@ impl PatternRenderer for LightboxRenderer {
         use ratatui::text::Line;
         use ratatui::widgets::{Block, Borders, Paragraph};
         let images = get_array(props, "images");
-        frame.render_widget(Paragraph::new(Line::from(format!("[lightbox] {} image(s)", images.len()))).block(Block::default().borders(Borders::ALL)), area);
+        frame.render_widget(
+            Paragraph::new(Line::from(format!("[lightbox] {} image(s)", images.len())))
+                .block(Block::default().borders(Borders::ALL)),
+            area,
+        );
     }
 }

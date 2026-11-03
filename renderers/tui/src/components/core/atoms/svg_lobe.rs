@@ -32,7 +32,12 @@ impl PatternRenderer for SvgLobeRenderer {
         use ratatui::text::Line;
         use ratatui::widgets::Paragraph;
         let shells = get_number_or(props, "shells", 2.0) as usize;
-        let sym: String = (0..shells.min(4)).map(|i| if i % 2 == 0 { "(" } else { "}" }).collect();
-        frame.render_widget(Paragraph::new(Line::from(format!("[lobe {}]  {}", shells, sym))), area);
+        let sym: String = (0..shells.min(4))
+            .map(|i| if i % 2 == 0 { "(" } else { "}" })
+            .collect();
+        frame.render_widget(
+            Paragraph::new(Line::from(format!("[lobe {}]  {}", shells, sym))),
+            area,
+        );
     }
 }

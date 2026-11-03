@@ -34,6 +34,9 @@ impl PatternRenderer for SwitchRenderer {
         let label = get_string_or(props, "label", "");
         let checked = get_bool_or(props, "checked", false);
         let state = if checked { "[ON]" } else { "[OFF]" };
-        frame.render_widget(Paragraph::new(Line::from(format!("{} {}", state, label))), area);
+        frame.render_widget(
+            Paragraph::new(Line::from(format!("{} {}", state, label))),
+            area,
+        );
     }
 }

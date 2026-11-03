@@ -40,7 +40,9 @@ impl PatternRenderer for JazariStateMachineRenderer {
         }
         if !error.is_empty() {
             frame.render_widget(
-                Paragraph::new(Line::from(format!("⚠ {}", error)).style(Style::default().fg(Color::Red))),
+                Paragraph::new(
+                    Line::from(format!("⚠ {}", error)).style(Style::default().fg(Color::Red)),
+                ),
                 area,
             );
             return;
@@ -59,7 +61,11 @@ impl PatternRenderer for JazariStateMachineRenderer {
             }
         }
         frame.render_widget(
-            Paragraph::new(Text::from(lines)).block(Block::default().borders(Borders::ALL).title("jazari-state-machine")),
+            Paragraph::new(Text::from(lines)).block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title("jazari-state-machine"),
+            ),
             area,
         );
     }

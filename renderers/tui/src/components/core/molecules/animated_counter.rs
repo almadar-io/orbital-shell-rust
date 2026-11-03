@@ -31,6 +31,10 @@ impl PatternRenderer for AnimatedCounterRenderer {
     ) {
         use ratatui::widgets::{Block, Borders, Paragraph};
         let value = get_number_or(props, "value", 0.0);
-        frame.render_widget(Paragraph::new(format!("{}", value as i64)).block(Block::default().borders(Borders::ALL)), area);
+        frame.render_widget(
+            Paragraph::new(format!("{}", value as i64))
+                .block(Block::default().borders(Borders::ALL)),
+            area,
+        );
     }
 }

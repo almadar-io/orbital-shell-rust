@@ -34,7 +34,11 @@ impl PatternRenderer for SelectRenderer {
         let options = get_string_array(props, "options");
         let selected = get_string_or(props, "value", "");
         frame.render_widget(
-            Paragraph::new(Line::from(format!("[select: {} / {} options]", selected, options.len()))),
+            Paragraph::new(Line::from(format!(
+                "[select: {} / {} options]",
+                selected,
+                options.len()
+            ))),
             area,
         );
     }

@@ -32,13 +32,44 @@ impl PatternRenderer for AlertRenderer {
         use ratatui::style::{Color, Modifier, Style};
         use ratatui::text::{Line, Span, Text};
         use ratatui::widgets::{Block, Borders, Paragraph};
-        let variant = { let __v = get_string_or(props, "variant", ""); if __v.is_empty() { get_string_or(props, "severity", "info") } else { __v } };
+        let variant = {
+            let __v = get_string_or(props, "variant", "");
+            if __v.is_empty() {
+                get_string_or(props, "severity", "info")
+            } else {
+                __v
+            }
+        };
         let title = get_string_or(props, "title", "");
-        let message = { let __v = get_string_or(props, "message", ""); if __v.is_empty() { get_string_or(props, "text", "") } else { __v } };
-        let color = match variant.as_str() { "success" => Color::Green, "warning" => Color::Yellow, "error" => Color::Red, _ => Color::Cyan };
+        let message = {
+            let __v = get_string_or(props, "message", "");
+            if __v.is_empty() {
+                get_string_or(props, "text", "")
+            } else {
+                __v
+            }
+        };
+        let color = match variant.as_str() {
+            "success" => Color::Green,
+            "warning" => Color::Yellow,
+            "error" => Color::Red,
+            _ => Color::Cyan,
+        };
         let mut lines: Vec<Line> = Vec::new();
-        if !title.is_empty() { lines.push(Line::from(Span::styled(title, Style::default().fg(color).add_modifier(Modifier::BOLD)))); }
+        if !title.is_empty() {
+            lines.push(Line::from(Span::styled(
+                title,
+                Style::default().fg(color).add_modifier(Modifier::BOLD),
+            )));
+        }
         lines.push(Line::from(message));
-        frame.render_widget(Paragraph::new(Text::from(lines)).block(Block::default().borders(Borders::ALL).border_style(Style::default().fg(color))), area);
+        frame.render_widget(
+            Paragraph::new(Text::from(lines)).block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(color)),
+            ),
+            area,
+        );
     }
 }

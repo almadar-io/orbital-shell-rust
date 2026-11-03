@@ -74,8 +74,16 @@ pub fn embedded_font_context() -> parley::FontContext {
 /// it to `path` as a PNG.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn capture_png(path: &std::path::Path, width: u32, height: u32) -> Result<(), String> {
-    use anyrender::ImageRenderer;
-    use anyrender_vello_cpu::VelloCpuImageRenderer;
+    capture_with::<anyrender_vello_cpu::VelloCpuImageRenderer>(path, width, height)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn capture_gpu_png(path: &std::path::Path, width: u32, height: u32) -> Result<(), String> {
+    capture_with::<anyrender_vello::VelloImageRenderer>(path, width, height)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn capture_with<R: anyrender::ImageRenderer>(path: &std::path::Path, width: u32, height: u32) -> Result<(), String> {
     use blitz_dom::{Document as _, DocumentConfig};
     use blitz_paint::paint_scene;
     use blitz_traits::shell::{ColorScheme, Viewport};
@@ -111,7 +119,7 @@ pub fn capture_png(path: &std::path::Path, width: u32, height: u32) -> Result<()
     }
     doc.resolve(0.0);
 
-    let mut renderer = VelloCpuImageRenderer::new(width, height);
+    let mut renderer = R::new(width, height);
     let mut buffer = vec![255u8; width as usize * height as usize * 4];
     renderer.render(|painter| paint_scene(painter, &doc, 1.0, width, height), &mut buffer);
     // The rasterizer leaves unpainted pixels transparent (premultiplied); composite onto white.

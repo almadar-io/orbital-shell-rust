@@ -31,13 +31,18 @@ impl DioxusPatternRenderer for ButtonRenderer {
     ) -> Element {
         let __cn_merged = merge_class_name("almadar-button", props); let label = get_string_or(props, "label", "Button");
         let action = get_string_or(props, "action", "CLICK");
+        let disabled = get_bool_or(props, "disabled", false);
+        let action_payload = props.as_object().and_then(|value| value.get("actionPayload")).cloned().unwrap_or(Value::Null);
         let sink = view.sink;
         rsx! {
             button {
                 class: "{__cn_merged}",
+                disabled: disabled,
                 onclick: move |_| {
-                    if let Some(s) = sink {
-                        s.call((action.clone(), Value::Null));
+                    if !disabled {
+                        if let Some(s) = sink {
+                            s.call((action.clone(), action_payload.clone()));
+                        }
                     }
                 },
                 "{label}"

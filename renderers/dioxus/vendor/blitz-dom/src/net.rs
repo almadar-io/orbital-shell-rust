@@ -1,5 +1,5 @@
 use selectors::context::QuirksMode;
-use std::{io::Cursor, sync::Arc, sync::atomic::AtomicBool};
+use std::{io::Cursor, sync::atomic::AtomicBool, sync::Arc};
 use style::{
     font_face::{FontFaceSourceFormat, FontFaceSourceFormatKeyword, Source},
     media_queries::MediaList,
@@ -8,10 +8,10 @@ use style::{
     shared_lock::SharedRwLock,
     shared_lock::{Locked, SharedRwLockReadGuard},
     stylesheets::{
+        import_rule::{ImportLayer, ImportSheet, ImportSupportsCondition},
         AllowImportRules, CssRule, CssRules, DocumentStyleSheet, ImportRule, Origin, Stylesheet,
         StylesheetContents, StylesheetInDocument, StylesheetLoader as ServoStylesheetLoader,
         UrlExtraData,
-        import_rule::{ImportLayer, ImportSheet, ImportSupportsCondition},
     },
     values::{CssUrl, SourceLocation},
 };

@@ -33,13 +33,39 @@ impl PatternRenderer for DockLayoutRenderer {
         use ratatui::widgets::{Block, Borders, Paragraph};
         let has = |k: &str| props.as_object().and_then(|o| o.get(k)).is_some();
         let mut regions: Vec<String> = Vec::new();
-        if has("rail") { regions.push(format!("rail {}px", get_number_or(props, "railWidth", 56.0) as i64)); }
-        if has("sidebar") && !get_bool_or(props, "sidebarCollapsed", false) { regions.push(format!("sidebar {}%", get_number_or(props, "sidebarWidth", 20.0) as i64)); }
+        if has("rail") {
+            regions.push(format!(
+                "rail {}px",
+                get_number_or(props, "railWidth", 56.0) as i64
+            ));
+        }
+        if has("sidebar") && !get_bool_or(props, "sidebarCollapsed", false) {
+            regions.push(format!(
+                "sidebar {}%",
+                get_number_or(props, "sidebarWidth", 20.0) as i64
+            ));
+        }
         regions.push("main".to_string());
-        if has("secondarySidebar") && !get_bool_or(props, "secondarySidebarCollapsed", false) { regions.push(format!("secondary {}px", get_number_or(props, "secondarySidebarWidth", 280.0) as i64)); }
+        if has("secondarySidebar") && !get_bool_or(props, "secondarySidebarCollapsed", false) {
+            regions.push(format!(
+                "secondary {}px",
+                get_number_or(props, "secondarySidebarWidth", 280.0) as i64
+            ));
+        }
         let mut lines = vec![Line::from(regions.join(" | "))];
-        if has("bottomPanel") && !get_bool_or(props, "bottomPanelCollapsed", false) { lines.push(Line::from(format!("bottom panel {}%", get_number_or(props, "bottomPanelHeight", 30.0) as i64))); }
-        if has("statusBar") { lines.push(Line::from("status bar".to_string())); }
-        frame.render_widget(Paragraph::new(Text::from(lines)).block(Block::default().borders(Borders::ALL).title("dock layout")), area);
+        if has("bottomPanel") && !get_bool_or(props, "bottomPanelCollapsed", false) {
+            lines.push(Line::from(format!(
+                "bottom panel {}%",
+                get_number_or(props, "bottomPanelHeight", 30.0) as i64
+            )));
+        }
+        if has("statusBar") {
+            lines.push(Line::from("status bar".to_string()));
+        }
+        frame.render_widget(
+            Paragraph::new(Text::from(lines))
+                .block(Block::default().borders(Borders::ALL).title("dock layout")),
+            area,
+        );
     }
 }

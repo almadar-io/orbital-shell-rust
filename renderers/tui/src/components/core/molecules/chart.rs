@@ -34,17 +34,32 @@ impl PatternRenderer for ChartRenderer {
         let title = get_string_or(props, "title", "chart");
         let rows = {
             let d = get_array(props, "data");
-            if !d.is_empty() { d } else {
-                get_array(props, "series").into_iter().next().map(|s| get_array(&s, "data")).unwrap_or_default()
+            if !d.is_empty() {
+                d
+            } else {
+                get_array(props, "series")
+                    .into_iter()
+                    .next()
+                    .map(|s| get_array(&s, "data"))
+                    .unwrap_or_default()
             }
         };
-        let max = rows.iter().map(|r| get_number_or(r, "value", 0.0)).fold(1e-9_f64, f64::max);
+        let max = rows
+            .iter()
+            .map(|r| get_number_or(r, "value", 0.0))
+            .fold(1e-9_f64, f64::max);
         let mut lines = vec![Line::from(format!("📊 {}", title))];
         for r in rows.iter().take(8) {
             let label = get_string_or(r, "label", "");
             let value = get_number_or(r, "value", 0.0);
             let filled = ((value / max) * 16.0).round().clamp(0.0, 16.0) as usize;
-            lines.push(Line::from(format!("{:>10} {}{} {}", label, "█".repeat(filled), "░".repeat(16 - filled), value)));
+            lines.push(Line::from(format!(
+                "{:>10} {}{} {}",
+                label,
+                "█".repeat(filled),
+                "░".repeat(16 - filled),
+                value
+            )));
         }
         frame.render_widget(Paragraph::new(Text::from(lines)), area);
     }

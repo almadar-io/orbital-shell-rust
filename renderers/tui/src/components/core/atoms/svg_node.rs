@@ -33,7 +33,14 @@ impl PatternRenderer for SvgNodeRenderer {
         use ratatui::widgets::Paragraph;
         let r = get_number_or(props, "r", 16.0) as usize;
         let variant = get_string_or(props, "variant", "circle");
-        let sym = match variant.as_str() { "square" | "rect" => "▪", "diamond" => "◆", _ => "●" };
-        frame.render_widget(Paragraph::new(Line::from(format!("[node r={}] {}", r, sym))), area);
+        let sym = match variant.as_str() {
+            "square" | "rect" => "▪",
+            "diamond" => "◆",
+            _ => "●",
+        };
+        frame.render_widget(
+            Paragraph::new(Line::from(format!("[node r={}] {}", r, sym))),
+            area,
+        );
     }
 }

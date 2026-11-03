@@ -39,12 +39,30 @@ impl PatternRenderer for VideoEmbedRenderer {
                 .fg(Color::DarkGray)
                 .add_modifier(Modifier::BOLD),
         ))];
-    lines.push(Line::from(format!("videoId: {}", get_string_or(props, "videoId", "-"))));
-    lines.push(Line::from(format!("src: {}", get_string_or(props, "src", "-"))));
-    lines.push(Line::from(format!("title: {}", get_string_or(props, "title", "-"))));
-    lines.push(Line::from(format!("autoplay: {}", get_string_or(props, "autoplay", "-"))));
-    lines.push(Line::from(format!("controls: {}", get_string_or(props, "controls", "-"))));
-    lines.push(Line::from(format!("start: {}", get_string_or(props, "start", "-"))));
+        lines.push(Line::from(format!(
+            "videoId: {}",
+            get_string_or(props, "videoId", "-")
+        )));
+        lines.push(Line::from(format!(
+            "src: {}",
+            get_string_or(props, "src", "-")
+        )));
+        lines.push(Line::from(format!(
+            "title: {}",
+            get_string_or(props, "title", "-")
+        )));
+        lines.push(Line::from(format!(
+            "autoplay: {}",
+            get_string_or(props, "autoplay", "-")
+        )));
+        lines.push(Line::from(format!(
+            "controls: {}",
+            get_string_or(props, "controls", "-")
+        )));
+        lines.push(Line::from(format!(
+            "start: {}",
+            get_string_or(props, "start", "-")
+        )));
 
         frame.render_widget(
             Paragraph::new(Text::from(lines)).block(

@@ -33,7 +33,18 @@ impl PatternRenderer for RuntimeDebuggerRenderer {
         use ratatui::text::Line;
         use ratatui::widgets::{Block, Borders, Paragraph};
         let mut lines: Vec<Line> = vec![Line::from("Debug")];
-        for key in ["state", "event", "data"] { if let Some(v) = props.as_object().and_then(|o| o.get(key)) { lines.push(Line::from(format!("{}: {}", key, format_value(v)))); } }
-        frame.render_widget(Paragraph::new(lines).block(Block::default().borders(Borders::ALL).border_style(Style::default().fg(Color::Yellow))), area);
+        for key in ["state", "event", "data"] {
+            if let Some(v) = props.as_object().and_then(|o| o.get(key)) {
+                lines.push(Line::from(format!("{}: {}", key, format_value(v))));
+            }
+        }
+        frame.render_widget(
+            Paragraph::new(lines).block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(Color::Yellow)),
+            ),
+            area,
+        );
     }
 }

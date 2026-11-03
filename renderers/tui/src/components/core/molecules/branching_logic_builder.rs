@@ -31,7 +31,25 @@ impl PatternRenderer for BranchingLogicBuilderRenderer {
     ) {
         use ratatui::text::Line;
         use ratatui::widgets::{Block, Borders, Paragraph};
-        let lines: Vec<Line> = get_array(props, "rules").iter().map(|r| Line::from(format!("IF {} -> {}", r.as_object().and_then(|o| o.get("condition")).map(format_value).unwrap_or_default(), r.as_object().and_then(|o| o.get("then")).map(format_value).unwrap_or_default()))).collect();
-        frame.render_widget(Paragraph::new(lines).block(Block::default().borders(Borders::ALL).title("Logic")), area);
+        let lines: Vec<Line> = get_array(props, "rules")
+            .iter()
+            .map(|r| {
+                Line::from(format!(
+                    "IF {} -> {}",
+                    r.as_object()
+                        .and_then(|o| o.get("condition"))
+                        .map(format_value)
+                        .unwrap_or_default(),
+                    r.as_object()
+                        .and_then(|o| o.get("then"))
+                        .map(format_value)
+                        .unwrap_or_default()
+                ))
+            })
+            .collect();
+        frame.render_widget(
+            Paragraph::new(lines).block(Block::default().borders(Borders::ALL).title("Logic")),
+            area,
+        );
     }
 }

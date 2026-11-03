@@ -33,16 +33,43 @@ impl PatternRenderer for ImportProgressRenderer {
         use ratatui::widgets::{Block, Borders, Paragraph};
         let step = get_string_or(props, "step", "fetching");
         let pipeline = ["fetching", "mapping", "reviewing", "committing"];
-        let current = if step == "done" || step == "failed" { pipeline.len() } else { pipeline.iter().position(|k| *k == step).unwrap_or(0) };
-        let row = pipeline.iter().enumerate().map(|(i, k)| {
-            if i < current { format!("[x] {}", k) } else if i == current { format!("[>] {}", k) } else { format!("[ ] {}", k) }
-        }).collect::<Vec<_>>().join(" ");
+        let current = if step == "done" || step == "failed" {
+            pipeline.len()
+        } else {
+            pipeline.iter().position(|k| *k == step).unwrap_or(0)
+        };
+        let row = pipeline
+            .iter()
+            .enumerate()
+            .map(|(i, k)| {
+                if i < current {
+                    format!("[x] {}", k)
+                } else if i == current {
+                    format!("[>] {}", k)
+                } else {
+                    format!("[ ] {}", k)
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(" ");
         let mut lines = vec![Line::from(row)];
-        if step == "done" { lines.push(Line::from("done \u{2713}")); }
-        if step == "failed" { lines.push(Line::from("FAILED \u{2715}")); }
-        if let Some(counts) = props.as_object().and_then(|o| o.get("counts")) {
-            lines.push(Line::from(format!("staged {} \u{00B7} committed {} \u{00B7} failed {}", get_number_or(counts, "staged", 0.0) as i64, get_number_or(counts, "committed", 0.0) as i64, get_number_or(counts, "failed", 0.0) as i64)));
+        if step == "done" {
+            lines.push(Line::from("done \u{2713}"));
         }
-        frame.render_widget(Paragraph::new(lines).block(Block::default().borders(Borders::ALL).title("Import")), area);
+        if step == "failed" {
+            lines.push(Line::from("FAILED \u{2715}"));
+        }
+        if let Some(counts) = props.as_object().and_then(|o| o.get("counts")) {
+            lines.push(Line::from(format!(
+                "staged {} \u{00B7} committed {} \u{00B7} failed {}",
+                get_number_or(counts, "staged", 0.0) as i64,
+                get_number_or(counts, "committed", 0.0) as i64,
+                get_number_or(counts, "failed", 0.0) as i64
+            )));
+        }
+        frame.render_widget(
+            Paragraph::new(lines).block(Block::default().borders(Borders::ALL).title("Import")),
+            area,
+        );
     }
 }

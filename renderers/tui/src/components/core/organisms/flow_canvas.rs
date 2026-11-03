@@ -31,8 +31,29 @@ impl PatternRenderer for FlowCanvasRenderer {
     ) {
         use ratatui::text::Line;
         use ratatui::widgets::{Block, Borders, Paragraph};
-        let orbitals = props.as_object().and_then(|o| o.get("schema")).and_then(|s| s.as_object()).and_then(|o| o.get("orbitals")).and_then(|v| v.as_array()).map(|a| a.to_vec()).unwrap_or_default();
-        let lines: Vec<Line> = orbitals.iter().map(|orb| Line::from(format!("{}  ({} traits, {} pages)", get_string_or(orb, "name", "orbital"), get_array(orb, "traits").len(), get_array(orb, "pages").len()))).collect();
-        frame.render_widget(Paragraph::new(lines).block(Block::default().borders(Borders::ALL).title("flow-canvas")), area);
+        let orbitals = props
+            .as_object()
+            .and_then(|o| o.get("schema"))
+            .and_then(|s| s.as_object())
+            .and_then(|o| o.get("orbitals"))
+            .and_then(|v| v.as_array())
+            .map(|a| a.to_vec())
+            .unwrap_or_default();
+        let lines: Vec<Line> = orbitals
+            .iter()
+            .map(|orb| {
+                Line::from(format!(
+                    "{}  ({} traits, {} pages)",
+                    get_string_or(orb, "name", "orbital"),
+                    get_array(orb, "traits").len(),
+                    get_array(orb, "pages").len()
+                ))
+            })
+            .collect();
+        frame.render_widget(
+            Paragraph::new(lines)
+                .block(Block::default().borders(Borders::ALL).title("flow-canvas")),
+            area,
+        );
     }
 }

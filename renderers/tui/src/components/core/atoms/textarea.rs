@@ -32,6 +32,9 @@ impl PatternRenderer for TextareaRenderer {
         use ratatui::text::Line;
         use ratatui::widgets::Paragraph;
         let placeholder = get_string_or(props, "placeholder", "");
-        frame.render_widget(Paragraph::new(Line::from(format!("[textarea: {}]", placeholder))), area);
+        frame.render_widget(
+            Paragraph::new(Line::from(format!("[textarea: {}]", placeholder))),
+            area,
+        );
     }
 }

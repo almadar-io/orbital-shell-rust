@@ -31,13 +31,32 @@ impl PatternRenderer for LayersPanelRenderer {
     ) {
         use ratatui::text::Line;
         use ratatui::widgets::{Block, Borders, Paragraph};
-        let orbitals = props.as_object().and_then(|o| o.get("schema")).and_then(|s| s.as_object()).and_then(|o| o.get("orbitals")).and_then(|v| v.as_array()).map(|a| a.to_vec()).unwrap_or_default();
+        let orbitals = props
+            .as_object()
+            .and_then(|o| o.get("schema"))
+            .and_then(|s| s.as_object())
+            .and_then(|o| o.get("orbitals"))
+            .and_then(|v| v.as_array())
+            .map(|a| a.to_vec())
+            .unwrap_or_default();
         let mut lines: Vec<Line> = Vec::new();
         for orb in &orbitals {
             lines.push(Line::from(get_string_or(orb, "name", "orbital")));
-            for t in get_array(orb, "traits") { lines.push(Line::from(format!("  {}", get_string(&t, "name").or_else(|| get_string(&t, "ref")).unwrap_or_default()))); }
-            for pg in get_array(orb, "pages") { lines.push(Line::from(format!("  {}", get_string_or(&pg, "path", "")))); }
+            for t in get_array(orb, "traits") {
+                lines.push(Line::from(format!(
+                    "  {}",
+                    get_string(&t, "name")
+                        .or_else(|| get_string(&t, "ref"))
+                        .unwrap_or_default()
+                )));
+            }
+            for pg in get_array(orb, "pages") {
+                lines.push(Line::from(format!("  {}", get_string_or(&pg, "path", ""))));
+            }
         }
-        frame.render_widget(Paragraph::new(lines).block(Block::default().borders(Borders::ALL).title("layers")), area);
+        frame.render_widget(
+            Paragraph::new(lines).block(Block::default().borders(Borders::ALL).title("layers")),
+            area,
+        );
     }
 }

@@ -8,6 +8,39 @@ use crate::renderer::{DioxusPatternRenderer, DioxusView};
 use dioxus::prelude::*;
 use orbital_core::Value;
 use std::collections::HashMap;
+use std::sync::Arc;
+
+fn entry_props(spec: &Value) -> Option<Value> {
+    let fields = spec.as_object()?;
+    if !fields.contains_key("enter") && !fields.contains_key("enterDelay") {
+        return None;
+    }
+    let mut props = fields.clone();
+    props.shift_remove("enter");
+    props.shift_remove("enterDelay");
+    if let Some(animation @ ("fade" | "rise" | "scale" | "slide")) =
+        fields.get("enter").and_then(Value::as_str)
+    {
+        let mut class = fields
+            .get("className")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        if !class.is_empty() {
+            class.push(' ');
+        }
+        class.push_str("almadar-enter-");
+        class.push_str(animation);
+        if let Some(Value::Number(delay)) = fields.get("enterDelay") {
+            if delay.fract() == 0.0 && (1.0..=8.0).contains(delay) {
+                class.push_str(&format!(" almadar-enter-delay-{}", *delay as u8));
+            }
+        }
+        props.insert("className".into(), Value::String(class.into()));
+    }
+    Some(Value::Object(props.into()))
+}
 
 /// This renderer's id in the declared unsupported-pattern error.
 pub const RENDERER_ID: &str = "rust-dioxus";
@@ -111,9 +144,17 @@ impl DioxusPatternRenderer for UnsupportedDioxusRenderer {
 }
 
 /// Registry mapping pattern names to their Dioxus renderers.
+#[derive(Clone)]
 pub struct DioxusPatternRegistry {
-    renderers: HashMap<String, Box<dyn DioxusPatternRenderer>>,
-    fallback: Box<dyn DioxusPatternRenderer>,
+    renderers: Arc<HashMap<String, Arc<dyn DioxusPatternRenderer>>>,
+    fallback: Arc<dyn DioxusPatternRenderer>,
+}
+
+impl PartialEq for DioxusPatternRegistry {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.renderers, &other.renderers)
+            && Arc::ptr_eq(&self.fallback, &other.fallback)
+    }
 }
 
 impl DioxusPatternRegistry {
@@ -122,15 +163,15 @@ impl DioxusPatternRegistry {
     /// hand-authored overrides (last, so they win by name).
     pub fn new() -> Self {
         Self {
-            renderers: HashMap::new(),
-            fallback: Box::new(UnsupportedDioxusRenderer),
+            renderers: Arc::new(HashMap::new()),
+            fallback: Arc::new(UnsupportedDioxusRenderer),
         }
     }
 
     /// Register a renderer, replacing any existing renderer for the same pattern.
     pub fn register(&mut self, renderer: Box<dyn DioxusPatternRenderer>) {
         let name = renderer.pattern_name().to_string();
-        self.renderers.insert(name, renderer);
+        Arc::make_mut(&mut self.renderers).insert(name, Arc::from(renderer));
     }
 
     /// The patterns this client implements, sorted — its declared coverage list.
@@ -188,7 +229,10 @@ impl DioxusPatternRegistry {
             .get(name)
             .map(|r| r.as_ref())
             .unwrap_or_else(|| self.fallback.as_ref());
-        renderer.render(spec, entity, view, self)
+        match entry_props(spec) {
+            Some(props) => renderer.render(&props, entity, view, self),
+            None => renderer.render(spec, entity, view, self),
+        }
     }
 }
 
@@ -201,7 +245,67 @@ pub fn default_registry() -> DioxusPatternRegistry {
     crate::components::game::register::register_dioxus(&mut registry);
     #[cfg(all(feature = "native", not(target_arch = "wasm32")))]
     crate::game::register_overrides(&mut registry);
+    #[cfg(all(feature = "research-video", not(target_arch = "wasm32")))]
+    registry.register(Box::new(
+        crate::components::core::atoms::video_embed::VideoEmbedRenderer,
+    ));
+    #[cfg(all(
+        feature = "research-drag",
+        feature = "native",
+        not(target_arch = "wasm32")
+    ))]
+    {
+        use crate::components::game::molecules::{
+            action_palette, action_tile, sequence_bar, trait_slot,
+        };
+        registry.register(Box::new(action_palette::ActionPaletteRenderer));
+        registry.register(Box::new(action_tile::ActionTileRenderer));
+        registry.register(Box::new(sequence_bar::SequenceBarRenderer));
+        registry.register(Box::new(trait_slot::TraitSlotRenderer));
+    }
+    #[cfg(all(
+        feature = "research-dock",
+        feature = "native",
+        not(target_arch = "wasm32")
+    ))]
+    registry.register(Box::new(
+        crate::components::core::molecules::activity_rail::ActivityRailRenderer,
+    ));
     registry
+}
+
+#[cfg(test)]
+mod tests {
+    use super::entry_props;
+    use orbital_core::Value;
+
+    #[test]
+    fn entry_props_apply_the_shared_class_and_stagger_vocabulary() {
+        let spec: Value = serde_json::from_str(
+            r#"{"type":"score-display","className":"accent","enter":"rise","enterDelay":3}"#,
+        )
+        .unwrap();
+        let rendered = entry_props(&spec).unwrap();
+        assert_eq!(
+            rendered.get("className").and_then(Value::as_str),
+            Some("accent almadar-enter-rise almadar-enter-delay-3")
+        );
+        assert!(rendered.get("enter").is_none());
+        assert!(rendered.get("enterDelay").is_none());
+    }
+
+    #[test]
+    fn entry_none_and_unpaired_delay_add_no_class() {
+        for spec in [
+            r#"{"type":"score-display","enter":"none","enterDelay":3}"#,
+            r#"{"type":"score-display","enterDelay":3}"#,
+        ] {
+            let rendered = entry_props(&serde_json::from_str(spec).unwrap()).unwrap();
+            assert!(rendered.get("className").is_none());
+            assert!(rendered.get("enter").is_none());
+            assert!(rendered.get("enterDelay").is_none());
+        }
+    }
 }
 
 impl Default for DioxusPatternRegistry {

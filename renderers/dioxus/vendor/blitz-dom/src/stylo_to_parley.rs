@@ -9,8 +9,6 @@ use crate::node::TextBrush;
 pub(crate) mod stylo {
     pub(crate) use style::computed_values::white_space_collapse::T as WhiteSpaceCollapse;
     pub(crate) use style::properties::ComputedValues;
-    pub(crate) use style::values::computed::OverflowWrap;
-    pub(crate) use style::values::computed::WordBreak;
     pub(crate) use style::values::computed::font::FontStretch;
     pub(crate) use style::values::computed::font::FontStyle;
     pub(crate) use style::values::computed::font::FontVariationSettings;
@@ -18,12 +16,14 @@ pub(crate) mod stylo {
     pub(crate) use style::values::computed::font::GenericFontFamily;
     pub(crate) use style::values::computed::font::LineHeight;
     pub(crate) use style::values::computed::font::SingleFontFamily;
+    pub(crate) use style::values::computed::OverflowWrap;
+    pub(crate) use style::values::computed::WordBreak;
 }
 
 pub(crate) mod parley {
-    pub(crate) use parley::FontVariation;
     pub(crate) use parley::fontique::QueryFamily;
     pub(crate) use parley::style::*;
+    pub(crate) use parley::FontVariation;
 }
 
 pub(crate) fn generic_font_family(input: stylo::GenericFontFamily) -> parley::GenericFamily {

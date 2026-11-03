@@ -1,4 +1,4 @@
-use crate::{HtmlParserProvider, net::Resource};
+use crate::{net::Resource, HtmlParserProvider};
 use blitz_traits::{
     navigation::NavigationProvider,
     net::NetProvider,

@@ -35,6 +35,17 @@ impl PatternRenderer for ErrorStateRenderer {
         use ratatui::widgets::{Block, Borders, Paragraph};
         let title = get_string_or(props, "title", "Something went wrong");
         let message = get_string_or(props, "message", "");
-        frame.render_widget(Paragraph::new(Text::from(vec![Line::from(Span::styled(title, Style::default().fg(Color::Red).add_modifier(Modifier::BOLD))), Line::from(message)])).alignment(Alignment::Center).block(Block::default().borders(Borders::ALL)), area);
+        frame.render_widget(
+            Paragraph::new(Text::from(vec![
+                Line::from(Span::styled(
+                    title,
+                    Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+                )),
+                Line::from(message),
+            ]))
+            .alignment(Alignment::Center)
+            .block(Block::default().borders(Borders::ALL)),
+            area,
+        );
     }
 }

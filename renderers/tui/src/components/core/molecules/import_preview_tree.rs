@@ -33,14 +33,37 @@ impl PatternRenderer for ImportPreviewTreeRenderer {
         use ratatui::widgets::{Block, Borders, Paragraph};
         let units = get_array(props, "units");
         let skipped = get_array(props, "skipped");
-        let mut lines = vec![Line::from(format!("{} unit(s) staged, {} skipped", units.len(), skipped.len()))];
+        let mut lines = vec![Line::from(format!(
+            "{} unit(s) staged, {} skipped",
+            units.len(),
+            skipped.len()
+        ))];
         for unit in units.iter().take(12) {
-            let title = unit.as_object().and_then(|o| o.get("fields")).and_then(|f| f.as_object())
-                .and_then(|f| f.get("title").or_else(|| f.get("name")).or_else(|| f.get("label")))
-                .and_then(|v| v.as_str()).map(|s| s.to_string())
+            let title = unit
+                .as_object()
+                .and_then(|o| o.get("fields"))
+                .and_then(|f| f.as_object())
+                .and_then(|f| {
+                    f.get("title")
+                        .or_else(|| f.get("name"))
+                        .or_else(|| f.get("label"))
+                })
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
                 .unwrap_or_else(|| get_string_or(unit, "ref", "?"));
-            lines.push(Line::from(format!("  \u{2022} {} \u{2192} {}", title, get_string_or(unit, "targetEntity", "?"))));
+            lines.push(Line::from(format!(
+                "  \u{2022} {} \u{2192} {}",
+                title,
+                get_string_or(unit, "targetEntity", "?")
+            )));
         }
-        frame.render_widget(Paragraph::new(lines).block(Block::default().borders(Borders::ALL).title("Import preview")), area);
+        frame.render_widget(
+            Paragraph::new(lines).block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title("Import preview"),
+            ),
+            area,
+        );
     }
 }

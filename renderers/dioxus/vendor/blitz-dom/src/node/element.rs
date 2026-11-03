@@ -1,15 +1,15 @@
 use cssparser::ParserInput;
-use markup5ever::{LocalName, QualName, local_name};
+use markup5ever::{local_name, LocalName, QualName};
 use parley::{ContentWidths, FontContext, LayoutContext};
 use selectors::matching::QuirksMode;
 use std::str::FromStr;
 use std::sync::Arc;
-use style::Atom;
 use style::parser::ParserContext;
 use style::properties::{Importance, PropertyDeclaration, PropertyId, SourcePropertyDeclaration};
 use style::stylesheets::{DocumentStyleSheet, Origin, UrlExtraData};
+use style::Atom;
 use style::{
-    properties::{PropertyDeclarationBlock, parse_style_attribute},
+    properties::{parse_style_attribute, PropertyDeclarationBlock},
     servo_arc::Arc as ServoArc,
     shared_lock::{Locked, SharedRwLock},
     stylesheets::CssRuleType,
@@ -103,6 +103,10 @@ impl SpecialElementData {
 }
 
 impl ElementData {
+    pub fn has_text_input_type(&self) -> bool {
+        self.attr(local_name!("type")) != Some("checkbox")
+    }
+
     pub fn new(name: QualName, attrs: Vec<Attribute>) -> Self {
         let id_attr_atom = attrs
             .iter()

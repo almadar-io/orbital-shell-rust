@@ -35,14 +35,27 @@ impl PatternRenderer for ActivationBlockRenderer {
         let question = get_string_or(props, "question", "What do you already know?");
         let saved = get_string_or(props, "savedResponse", "");
         let mut lines = vec![
-            Line::from(Span::styled("💡 Before You Begin...", Style::default().fg(Color::LightBlue).add_modifier(Modifier::BOLD))),
+            Line::from(Span::styled(
+                "💡 Before You Begin...",
+                Style::default()
+                    .fg(Color::LightBlue)
+                    .add_modifier(Modifier::BOLD),
+            )),
             Line::from(question),
         ];
         if !saved.is_empty() {
-            lines.push(Line::from(Span::styled(format!("✓ {}", saved), Style::default().fg(Color::DarkGray))));
+            lines.push(Line::from(Span::styled(
+                format!("✓ {}", saved),
+                Style::default().fg(Color::DarkGray),
+            )));
         }
         frame.render_widget(
-            Paragraph::new(Text::from(lines)).block(Block::default().borders(Borders::ALL).border_style(Style::default().fg(Color::Blue)).title("Activate")),
+            Paragraph::new(Text::from(lines)).block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(Color::Blue))
+                    .title("Activate"),
+            ),
             area,
         );
     }

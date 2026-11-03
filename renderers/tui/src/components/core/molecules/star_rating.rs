@@ -33,7 +33,12 @@ impl PatternRenderer for StarRatingRenderer {
         use ratatui::widgets::{Block, Borders, Paragraph};
         let value = get_number_or(props, "value", 0.0) as usize;
         let max = get_number_or(props, "max", 5.0) as usize;
-        let stars: String = (0..max).map(|i| if i < value { '★' } else { '☆' }).collect();
-        frame.render_widget(Paragraph::new(Line::from(stars)).block(Block::default().borders(Borders::ALL)), area);
+        let stars: String = (0..max)
+            .map(|i| if i < value { '★' } else { '☆' })
+            .collect();
+        frame.render_widget(
+            Paragraph::new(Line::from(stars)).block(Block::default().borders(Borders::ALL)),
+            area,
+        );
     }
 }

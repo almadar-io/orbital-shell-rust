@@ -54,7 +54,7 @@ name = "blitz_dom"
 path = "src/lib.rs"
 
 [dependencies.accesskit]
-version = "0.17"
+version = "0.25.1"
 optional = true
 
 [dependencies.app_units]

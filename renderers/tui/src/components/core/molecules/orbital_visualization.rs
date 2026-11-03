@@ -34,15 +34,24 @@ impl PatternRenderer for OrbitalVisualizationRenderer {
         use ratatui::widgets::{Block, Borders, Paragraph};
         let schema = get_string_or(props, "schema", "orbital");
         let complexity = get_string_or(props, "complexity", "simple");
-        let rings = match complexity.as_str() { "complex" => 4usize, "medium" => 3, _ => 2 };
+        let rings = match complexity.as_str() {
+            "complex" => 4usize,
+            "medium" => 3,
+            _ => 2,
+        };
         let ring_sym: String = (0..rings).map(|_| "○").collect::<Vec<_>>().join(" ");
         let lines = vec![
             Line::from(format!("  ● {}", ring_sym)).style(Style::default().fg(Color::Blue)),
             Line::from(format!("schema: {}", schema)),
-            Line::from(format!("complexity: {}", complexity)).style(Style::default().fg(Color::DarkGray)),
+            Line::from(format!("complexity: {}", complexity))
+                .style(Style::default().fg(Color::DarkGray)),
         ];
         frame.render_widget(
-            Paragraph::new(Text::from(lines)).block(Block::default().borders(Borders::ALL).title("orbital-visualization")),
+            Paragraph::new(Text::from(lines)).block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title("orbital-visualization"),
+            ),
             area,
         );
     }

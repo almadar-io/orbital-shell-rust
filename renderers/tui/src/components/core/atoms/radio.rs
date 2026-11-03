@@ -35,7 +35,13 @@ impl PatternRenderer for RadioRenderer {
         let selected = get_string_or(props, "value", "");
         let lines: Vec<Line> = options
             .iter()
-            .map(|o| Line::from(format!("{} {}", if *o == selected { "(o)" } else { "( )" }, o)))
+            .map(|o| {
+                Line::from(format!(
+                    "{} {}",
+                    if *o == selected { "(o)" } else { "( )" },
+                    o
+                ))
+            })
             .collect();
         frame.render_widget(Paragraph::new(Text::from(lines)), area);
     }

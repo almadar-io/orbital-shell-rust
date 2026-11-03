@@ -31,8 +31,24 @@ impl PatternRenderer for FilterGroupRenderer {
     ) {
         use ratatui::text::Line;
         use ratatui::widgets::Paragraph;
-        let filters = { let mut f = get_array(props, "filters"); if f.is_empty() { f = get_array(props, "options"); } f };
-        let labels: Vec<String> = filters.iter().map(|f| f.as_object().and_then(|o| o.get("label")).and_then(|v| v.as_str()).or_else(|| f.as_str()).unwrap_or("").to_string()).collect();
+        let filters = {
+            let mut f = get_array(props, "filters");
+            if f.is_empty() {
+                f = get_array(props, "options");
+            }
+            f
+        };
+        let labels: Vec<String> = filters
+            .iter()
+            .map(|f| {
+                f.as_object()
+                    .and_then(|o| o.get("label"))
+                    .and_then(|v| v.as_str())
+                    .or_else(|| f.as_str())
+                    .unwrap_or("")
+                    .to_string()
+            })
+            .collect();
         frame.render_widget(Paragraph::new(Line::from(labels.join(" | "))), area);
     }
 }

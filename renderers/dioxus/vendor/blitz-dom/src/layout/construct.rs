@@ -1,7 +1,7 @@
 use core::str;
 use std::sync::Arc;
 
-use markup5ever::{QualName, local_name, ns};
+use markup5ever::{local_name, ns, QualName};
 use parley::{
     FontContext, InlineBox, LayoutContext, StyleProperty, TreeBuilder, WhiteSpaceCollapse,
 };
@@ -17,13 +17,12 @@ use style::{
 };
 
 use crate::{
-    BaseDocument, ElementData, Node, NodeData,
     layout::damage::{CONSTRUCT_BOX, CONSTRUCT_DESCENDENT, CONSTRUCT_FC},
     node::{
         ListItemLayout, ListItemLayoutPosition, Marker, NodeFlags, NodeKind, SpecialElementData,
         TextBrush, TextInputData, TextLayout,
     },
-    qual_name, stylo_to_parley,
+    qual_name, stylo_to_parley, BaseDocument, ElementData, Node, NodeData,
 };
 
 use super::{damage::ALL_DAMAGE, list::collect_list_item_children, table::build_table_context};

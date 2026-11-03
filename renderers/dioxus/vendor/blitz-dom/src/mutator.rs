@@ -8,13 +8,13 @@ use crate::net::{CssHandler, ImageHandler};
 use crate::node::{CanvasData, NodeFlags, SpecialElementData};
 use crate::util::ImageType;
 use crate::{
-    Attribute, BaseDocument, ElementData, Node, NodeData, QualName, local_name, qual_name,
+    local_name, qual_name, Attribute, BaseDocument, ElementData, Node, NodeData, QualName,
 };
 use blitz_traits::net::Request;
 use blitz_traits::shell::Viewport;
-use style::Atom;
 use style::invalidation::element::restyle_hints::RestyleHint;
 use style::stylesheets::OriginSet;
+use style::Atom;
 
 macro_rules! tag_and_attr {
     ($tag:tt, $attr:tt) => {
@@ -164,6 +164,9 @@ impl DocumentMutator<'_> {
             text.content.push_str(value);
             node.insert_damage(ALL_DAMAGE);
             let parent = node.parent;
+            if let Some(parent_id) = parent {
+                self.doc.nodes[parent_id].insert_damage(ALL_DAMAGE);
+            }
             self.maybe_record_node(parent);
         }
     }

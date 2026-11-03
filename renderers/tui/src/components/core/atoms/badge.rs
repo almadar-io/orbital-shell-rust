@@ -34,7 +34,10 @@ impl PatternRenderer for BadgeRenderer {
         use ratatui::widgets::Paragraph;
         let label = get_string_or(props, "label", "");
         frame.render_widget(
-            Paragraph::new(Span::styled(format!("[{}]", label), Style::default().fg(Color::Cyan))),
+            Paragraph::new(Span::styled(
+                format!("[{}]", label),
+                Style::default().fg(Color::Cyan),
+            )),
             area,
         );
     }

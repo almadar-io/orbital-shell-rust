@@ -24,15 +24,17 @@ pub use dioxus_native_dom::*;
 
 pub use anyrender_vello::{CustomPaintCtx, CustomPaintSource, DeviceHandle, TextureHandle};
 use assets::DioxusNativeNetProvider;
-pub use dioxus_application::{set_frame_hook, DioxusNativeApplication, DioxusNativeEvent};
+pub use dioxus_application::{
+    set_frame_hook, set_layout_hook, wake_layout, DioxusNativeApplication, DioxusNativeEvent,
+    NativeViewport,
+};
 pub use dioxus_renderer::{DioxusNativeWindowRenderer, Features, Limits};
 
-#[cfg(not(all(target_os = "ios", target_abi = "sim")))]
 pub use dioxus_renderer::use_wgpu;
 
 pub use config::Config;
-pub use winit::dpi::{LogicalSize, PhysicalSize};
-pub use winit::window::WindowAttributes;
+pub use winit::dpi::{LogicalSize, PhysicalPosition, PhysicalSize};
+pub use winit::window::{Window, WindowAttributes};
 
 use blitz_shell::{create_default_event_loop, BlitzShellEvent, WindowConfig};
 use dioxus_core::{ComponentFunction, Element, VirtualDom};
@@ -149,10 +151,7 @@ pub fn launch_cfg_with_props<P: Clone + 'static, M: 'static>(
             ..Default::default()
         },
     );
-    #[cfg(not(all(target_os = "ios", target_abi = "sim")))]
     let renderer = DioxusNativeWindowRenderer::with_features_and_limits(features, limits);
-    #[cfg(all(target_os = "ios", target_abi = "sim"))]
-    let renderer = DioxusNativeWindowRenderer::new();
     let config = WindowConfig::with_attributes(
         Box::new(doc) as _,
         renderer.clone(),

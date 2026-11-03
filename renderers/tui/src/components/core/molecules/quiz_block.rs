@@ -32,7 +32,19 @@ impl PatternRenderer for QuizBlockRenderer {
         use ratatui::text::Line;
         use ratatui::widgets::{Block, Borders, Paragraph};
         let mut lines = vec![Line::from(get_string_or(props, "question", "Quiz"))];
-        for o in get_array(props, "options") { lines.push(Line::from(format!("  - {}", o.as_object().and_then(|x| x.get("label")).and_then(|v| v.as_str()).or_else(|| o.as_str()).unwrap_or("")))); }
-        frame.render_widget(Paragraph::new(lines).block(Block::default().borders(Borders::ALL)), area);
+        for o in get_array(props, "options") {
+            lines.push(Line::from(format!(
+                "  - {}",
+                o.as_object()
+                    .and_then(|x| x.get("label"))
+                    .and_then(|v| v.as_str())
+                    .or_else(|| o.as_str())
+                    .unwrap_or("")
+            )));
+        }
+        frame.render_widget(
+            Paragraph::new(lines).block(Block::default().borders(Borders::ALL)),
+            area,
+        );
     }
 }

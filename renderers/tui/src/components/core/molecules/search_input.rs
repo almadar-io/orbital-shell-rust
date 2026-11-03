@@ -33,6 +33,13 @@ impl PatternRenderer for SearchInputRenderer {
         use ratatui::text::{Line, Span};
         use ratatui::widgets::{Block, Borders, Paragraph};
         let placeholder = get_string_or(props, "placeholder", "Search...");
-        frame.render_widget(Paragraph::new(Line::from(vec![Span::raw("🔍 "), Span::styled(placeholder, Style::default().fg(Color::DarkGray))])).block(Block::default().borders(Borders::ALL)), area);
+        frame.render_widget(
+            Paragraph::new(Line::from(vec![
+                Span::raw("🔍 "),
+                Span::styled(placeholder, Style::default().fg(Color::DarkGray)),
+            ]))
+            .block(Block::default().borders(Borders::ALL)),
+            area,
+        );
     }
 }

@@ -32,6 +32,9 @@ impl PatternRenderer for ChatBarRenderer {
         use ratatui::text::Line;
         use ratatui::widgets::Paragraph;
         let placeholder = get_string_or(props, "placeholder", "Message");
-        frame.render_widget(Paragraph::new(Line::from(format!("[chat-bar: {}]", placeholder))), area);
+        frame.render_widget(
+            Paragraph::new(Line::from(format!("[chat-bar: {}]", placeholder))),
+            area,
+        );
     }
 }

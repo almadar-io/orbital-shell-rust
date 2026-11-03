@@ -33,6 +33,12 @@ impl PatternRenderer for PaginationRenderer {
         use ratatui::widgets::Paragraph;
         let page = get_number_or(props, "currentPage", get_number_or(props, "page", 1.0)) as i64;
         let total = get_number_or(props, "totalPages", get_number_or(props, "total", 1.0)) as i64;
-        frame.render_widget(Paragraph::new(Line::from(format!("[Prev]  Page {} / {}  [Next]", page, total))), area);
+        frame.render_widget(
+            Paragraph::new(Line::from(format!(
+                "[Prev]  Page {} / {}  [Next]",
+                page, total
+            ))),
+            area,
+        );
     }
 }

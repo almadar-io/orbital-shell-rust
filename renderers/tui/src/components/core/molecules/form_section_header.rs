@@ -32,8 +32,16 @@ impl PatternRenderer for FormSectionHeaderRenderer {
         use ratatui::style::{Modifier, Style};
         use ratatui::text::{Line, Span};
         use ratatui::widgets::{Block, Borders, Paragraph};
-        let mut lines = vec![Line::from(Span::styled(get_string_or(props, "title", "Section"), Style::default().add_modifier(Modifier::BOLD)))];
-        if let Some(desc) = get_string(props, "description") { lines.push(Line::from(desc)); }
-        frame.render_widget(Paragraph::new(lines).block(Block::default().borders(Borders::ALL)), area);
+        let mut lines = vec![Line::from(Span::styled(
+            get_string_or(props, "title", "Section"),
+            Style::default().add_modifier(Modifier::BOLD),
+        ))];
+        if let Some(desc) = get_string(props, "description") {
+            lines.push(Line::from(desc));
+        }
+        frame.render_widget(
+            Paragraph::new(lines).block(Block::default().borders(Borders::ALL)),
+            area,
+        );
     }
 }

@@ -30,7 +30,12 @@ impl PatternRenderer for IconRenderer {
         _ctx: &mut RenderContext<'_>,
     ) {
         use ratatui::widgets::Paragraph;
-        let name = get_string_or(props, "name", ""); let name = if name.is_empty() { get_string_or(props, "icon", "") } else { name };
+        let name = get_string_or(props, "name", "");
+        let name = if name.is_empty() {
+            get_string_or(props, "icon", "")
+        } else {
+            name
+        };
         frame.render_widget(Paragraph::new(icon_name_to_glyph(name.as_str())), area);
     }
 }

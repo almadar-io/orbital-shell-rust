@@ -32,7 +32,13 @@ impl PatternRenderer for TagInputRenderer {
         use ratatui::text::Line;
         use ratatui::widgets::{Block, Borders, Paragraph};
         let tags = get_string_array(props, "tags");
-        let lines: Vec<Line> = tags.into_iter().map(|t| Line::from(format!("• {}", t))).collect();
-        frame.render_widget(Paragraph::new(lines).block(Block::default().borders(Borders::ALL)), area);
+        let lines: Vec<Line> = tags
+            .into_iter()
+            .map(|t| Line::from(format!("• {}", t)))
+            .collect();
+        frame.render_widget(
+            Paragraph::new(lines).block(Block::default().borders(Borders::ALL)),
+            area,
+        );
     }
 }

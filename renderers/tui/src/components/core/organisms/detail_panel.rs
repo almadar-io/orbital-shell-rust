@@ -31,6 +31,13 @@ impl PatternRenderer for DetailPanelRenderer {
     ) {
         use ratatui::text::Line;
         use ratatui::widgets::{Block, Borders, Paragraph};
-        frame.render_widget(Paragraph::new(Line::from("Detail Panel")).block(Block::default().borders(Borders::ALL).title(get_string_or(props, "title", "Details"))), area);
+        frame.render_widget(
+            Paragraph::new(Line::from("Detail Panel")).block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(get_string_or(props, "title", "Details")),
+            ),
+            area,
+        );
     }
 }

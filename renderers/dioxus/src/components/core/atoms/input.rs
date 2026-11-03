@@ -26,16 +26,45 @@ impl DioxusPatternRenderer for InputRenderer {
         &self,
         props: &Value,
         _entity: Option<&Value>,
-        _view: &DioxusView<'_>,
+        view: &DioxusView<'_>,
         _registry: &DioxusPatternRegistry,
     ) -> Element {
         let __cn_merged = merge_class_name("almadar-input", props); let placeholder = get_string_or(props, "placeholder", "");
-        let value = get_string_or(props, "value", "");
+        let label = get_string_or(props, "label", "");
+        let value = match props.as_object().and_then(|object| object.get("value")) {
+            Some(Value::Number(number)) => number.to_string(),
+            _ => get_string_or(props, "value", ""),
+        };
+        let input_type = get_string_or(props, "inputType", "text");
+        let disabled = get_bool_or(props, "disabled", false);
+        let action = get_string(props, "action");
+        let sink = view.sink;
+        let number_mode = input_type == "number";
         rsx! {
             input {
                 class: "{__cn_merged}",
+                aria_label: "{label}",
+                r#type: "{input_type}",
                 placeholder: "{placeholder}",
-                value: "{value}"
+                value: "{value}",
+                disabled: disabled,
+                oninput: move |event| {
+                    if disabled { return; }
+                    if let (Some(s), Some(action)) = (sink, &action) {
+                        let mut payload = orbital_core::ValueMap::new();
+                        let input_value = event.value();
+                        let value = if number_mode {
+                            match input_value.parse::<f64>() {
+                                Ok(number) => Value::Number(number),
+                                Err(_) => return,
+                            }
+                        } else {
+                            Value::String(input_value.into())
+                        };
+                        payload.insert("value".to_string().into(), value);
+                        s.call((action.clone(), Value::Object(payload.into())));
+                    }
+                }
             }
         }
     }

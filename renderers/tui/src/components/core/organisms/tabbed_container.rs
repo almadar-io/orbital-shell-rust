@@ -32,7 +32,20 @@ impl PatternRenderer for TabbedContainerRenderer {
         use ratatui::text::Line;
         use ratatui::widgets::{Block, Borders, Paragraph};
         let tabs = get_array(props, "tabs");
-        let labels: Vec<String> = tabs.iter().map(|t| t.as_object().and_then(|o| o.get("label")).and_then(|v| v.as_str()).unwrap_or("").to_string()).collect();
-        frame.render_widget(Paragraph::new(Line::from(labels.join("  |  "))).block(Block::default().borders(Borders::ALL)), area);
+        let labels: Vec<String> = tabs
+            .iter()
+            .map(|t| {
+                t.as_object()
+                    .and_then(|o| o.get("label"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string()
+            })
+            .collect();
+        frame.render_widget(
+            Paragraph::new(Line::from(labels.join("  |  ")))
+                .block(Block::default().borders(Borders::ALL)),
+            area,
+        );
     }
 }

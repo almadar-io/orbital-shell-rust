@@ -34,6 +34,9 @@ impl PatternRenderer for ConfettiEffectRenderer {
         use ratatui::widgets::Paragraph;
         let count = get_number_or(props, "particleCount", 40.0) as usize;
         let burst: String = "* . * . ✦ · * ✦ . *".chars().take(count.min(20)).collect();
-        frame.render_widget(Paragraph::new(Line::from(burst).style(Style::default().fg(Color::Yellow))), area);
+        frame.render_widget(
+            Paragraph::new(Line::from(burst).style(Style::default().fg(Color::Yellow))),
+            area,
+        );
     }
 }

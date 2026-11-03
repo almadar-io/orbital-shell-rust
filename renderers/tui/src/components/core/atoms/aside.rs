@@ -30,6 +30,13 @@ impl PatternRenderer for AsideRenderer {
         _ctx: &mut RenderContext<'_>,
     ) {
         use ratatui::widgets::{Block, Borders, Paragraph};
-        frame.render_widget(Paragraph::new(get_string_or(props, "text", "")).block(Block::default().borders(Borders::ALL).title(get_string_or(props, "title", "Note"))), area);
+        frame.render_widget(
+            Paragraph::new(get_string_or(props, "text", "")).block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(get_string_or(props, "title", "Note")),
+            ),
+            area,
+        );
     }
 }

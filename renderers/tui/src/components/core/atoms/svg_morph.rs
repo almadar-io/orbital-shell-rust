@@ -32,7 +32,11 @@ impl PatternRenderer for SvgMorphRenderer {
         use ratatui::text::Line;
         use ratatui::widgets::Paragraph;
         let variant = get_string_or(props, "variant", "circle");
-        let sym = match variant.as_str() { "square" | "rect" => "▪", "triangle" => "▲", _ => "●" };
+        let sym = match variant.as_str() {
+            "square" | "rect" => "▪",
+            "triangle" => "▲",
+            _ => "●",
+        };
         frame.render_widget(Paragraph::new(Line::from(format!("[morph] {}", sym))), area);
     }
 }

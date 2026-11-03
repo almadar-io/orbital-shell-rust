@@ -35,6 +35,7 @@ pub(crate) fn handle_dom_event<F: FnMut(DomEvent)>(
         DomEventData::MouseDown(event) => {
             handle_mousedown(doc, target_node_id, event.x, event.y);
         }
+        DomEventData::MouseLeave(_) => {}
         DomEventData::MouseUp(event) => {
             handle_mouseup(doc, target_node_id, event, dispatch_event);
         }
@@ -56,5 +57,11 @@ pub(crate) fn handle_dom_event<F: FnMut(DomEvent)>(
         DomEventData::Input(_) => {
             // Do nothing (no default action)
         }
+        DomEventData::DragStart(_)
+        | DomEventData::DragEnter(_)
+        | DomEventData::DragOver(_)
+        | DomEventData::DragLeave(_)
+        | DomEventData::Drop(_)
+        | DomEventData::DragEnd(_) => {}
     }
 }

@@ -1,6 +1,7 @@
 //! game pattern renderers, mirroring almadar-ui/components/game.
 
 pub mod register;
+pub mod asset_panel;
 
 pub mod atoms;
 pub mod molecules;

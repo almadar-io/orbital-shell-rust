@@ -1,8 +1,8 @@
-use markup5ever::{LocalName, local_name};
+use markup5ever::{local_name, LocalName};
 
 use crate::{
-    BaseDocument, ElementData,
     traversal::{AncestorTraverser, TreeTraverser},
+    BaseDocument, ElementData,
 };
 use blitz_traits::{
     navigation::NavigationOptions,
@@ -309,7 +309,7 @@ fn construct_entry_list(doc: &BaseDocument, form_id: usize, submitter_id: usize)
         {
             // Let charset be the name of encoding.
             let charset = "UTF-8"; // TODO: Support multiple encodings.
-            // Create an entry with name and charset, and append it to entry list.
+                                   // Create an entry with name and charset, and append it to entry list.
             create_entry(name, charset.into());
         }
         // Otherwise, create an entry with name and the value of the field element, and append it to entry list.

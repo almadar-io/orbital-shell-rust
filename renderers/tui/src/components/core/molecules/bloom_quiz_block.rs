@@ -44,15 +44,24 @@ impl PatternRenderer for BloomQuizBlockRenderer {
             _ => Color::Gray,
         };
         let mut lines = vec![
-            Line::from(Span::styled(format!("[{}]", level), Style::default().fg(level_color).add_modifier(Modifier::BOLD))),
+            Line::from(Span::styled(
+                format!("[{}]", level),
+                Style::default()
+                    .fg(level_color)
+                    .add_modifier(Modifier::BOLD),
+            )),
             Line::from(question),
         ];
         if !answer.is_empty() {
-            lines.push(Line::from(Span::styled("Answer:", Style::default().add_modifier(Modifier::BOLD))));
+            lines.push(Line::from(Span::styled(
+                "Answer:",
+                Style::default().add_modifier(Modifier::BOLD),
+            )));
             lines.push(Line::from(answer));
         }
         frame.render_widget(
-            Paragraph::new(Text::from(lines)).block(Block::default().borders(Borders::ALL).title("Quiz")),
+            Paragraph::new(Text::from(lines))
+                .block(Block::default().borders(Borders::ALL).title("Quiz")),
             area,
         );
     }

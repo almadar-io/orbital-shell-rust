@@ -39,12 +39,30 @@ impl PatternRenderer for AvlTransitionDetailRenderer {
                 .fg(Color::DarkGray)
                 .add_modifier(Modifier::BOLD),
         ))];
-    lines.push(Line::from(format!("orbital: {}", get_string_or(props, "orbital", "-"))));
-    lines.push(Line::from(format!("trait: {}", get_string_or(props, "trait", "-"))));
-    lines.push(Line::from(format!("transition: {}", get_string_or(props, "transition", "-"))));
-    lines.push(Line::from(format!("schema: {}", get_string_or(props, "schema", "-"))));
-    lines.push(Line::from(format!("transitionIndex: {}", get_string_or(props, "transitionIndex", "-"))));
-    lines.push(Line::from(format!("scene: {}", get_string_or(props, "scene", "-"))));
+        lines.push(Line::from(format!(
+            "orbital: {}",
+            get_string_or(props, "orbital", "-")
+        )));
+        lines.push(Line::from(format!(
+            "trait: {}",
+            get_string_or(props, "trait", "-")
+        )));
+        lines.push(Line::from(format!(
+            "transition: {}",
+            get_string_or(props, "transition", "-")
+        )));
+        lines.push(Line::from(format!(
+            "schema: {}",
+            get_string_or(props, "schema", "-")
+        )));
+        lines.push(Line::from(format!(
+            "transitionIndex: {}",
+            get_string_or(props, "transitionIndex", "-")
+        )));
+        lines.push(Line::from(format!(
+            "scene: {}",
+            get_string_or(props, "scene", "-")
+        )));
 
         frame.render_widget(
             Paragraph::new(Text::from(lines)).block(

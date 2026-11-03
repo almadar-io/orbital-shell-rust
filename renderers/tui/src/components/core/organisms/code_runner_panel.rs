@@ -35,14 +35,34 @@ impl PatternRenderer for CodeRunnerPanelRenderer {
         let code = get_string_or(props, "code", "");
         let language = get_string_or(props, "language", "");
         let runnable = get_bool_or(props, "runnable", true);
-        let title = if language.is_empty() { "Code".to_string() } else { language.clone() };
-        let mut lines: Vec<Line> = code.lines().take(10).map(|l| Line::from(l.to_string())).collect();
-        if code.lines().count() > 10 { lines.push(Line::from("...")); }
+        let title = if language.is_empty() {
+            "Code".to_string()
+        } else {
+            language.clone()
+        };
+        let mut lines: Vec<Line> = code
+            .lines()
+            .take(10)
+            .map(|l| Line::from(l.to_string()))
+            .collect();
+        if code.lines().count() > 10 {
+            lines.push(Line::from("..."));
+        }
         if runnable {
-            lines.push(Line::from(Span::styled("[▶ Run]", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))));
+            lines.push(Line::from(Span::styled(
+                "[▶ Run]",
+                Style::default()
+                    .fg(Color::Green)
+                    .add_modifier(Modifier::BOLD),
+            )));
         }
         frame.render_widget(
-            Paragraph::new(Text::from(lines)).block(Block::default().borders(Borders::ALL).border_style(Style::default().fg(Color::DarkGray)).title(title)),
+            Paragraph::new(Text::from(lines)).block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(Color::DarkGray))
+                    .title(title),
+            ),
             area,
         );
     }

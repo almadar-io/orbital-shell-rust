@@ -4,9 +4,8 @@ use style::computed_values::list_style_position::T as ListStylePosition;
 use style::computed_values::list_style_type::T as ListStyleType;
 
 use crate::{
-    BaseDocument,
     node::{ListItemLayout, ListItemLayoutPosition, Marker},
-    stylo_to_parley,
+    stylo_to_parley, BaseDocument,
 };
 
 pub(super) fn collect_list_item_children(

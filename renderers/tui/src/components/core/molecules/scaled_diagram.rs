@@ -34,11 +34,18 @@ impl PatternRenderer for ScaledDiagramRenderer {
         let class_name = get_string_or(props, "title", "diagram");
         let lines = vec![
             Line::from("  ┌──────────────────┐"),
-            Line::from(format!("──│   {}  │──", &class_name[..class_name.len().min(12)])),
+            Line::from(format!(
+                "──│   {}  │──",
+                &class_name[..class_name.len().min(12)]
+            )),
             Line::from("  └──────────────────┘"),
         ];
         frame.render_widget(
-            Paragraph::new(Text::from(lines)).block(Block::default().borders(Borders::ALL).title("scaled-diagram")),
+            Paragraph::new(Text::from(lines)).block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title("scaled-diagram"),
+            ),
             area,
         );
     }

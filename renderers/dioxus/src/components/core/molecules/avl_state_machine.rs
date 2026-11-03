@@ -84,12 +84,19 @@ impl DioxusPatternRenderer for AvlStateMachineRenderer {
             .collect();
         let transition_rows: Vec<_> = transitions
             .iter()
-            .map(|t| {
+            .flat_map(|t| {
                 let index = get_number(t, "index").unwrap_or(0.0);
                 let guard = t.as_object().and_then(|o| o.get("guard")).filter(|g| !matches!(g, Value::Null)).map(sexpr);
                 let effects: Vec<String> = get_array(t, "effects").iter().map(|e| get_string_or(e, "type", "")).collect();
                 let hot = fired == Some(index);
-                (index, get_string_or(t, "from", ""), get_string_or(t, "event", ""), get_string_or(t, "to", ""), guard, effects, hot)
+                let froms: Vec<String> = match t.as_object().and_then(|obj| obj.get("from")) {
+                    Some(Value::String(from)) => vec![from.to_string()],
+                    Some(Value::Array(froms)) => froms.iter().filter_map(Value::as_str).map(str::to_string).collect(),
+                    _ => Vec::new(),
+                };
+                let event = get_string_or(t, "event", "");
+                let to = get_string_or(t, "to", "");
+                froms.into_iter().map(move |from| (index, from, event.clone(), to.clone(), guard.clone(), effects.clone(), hot))
             })
             .collect();
         rsx! {

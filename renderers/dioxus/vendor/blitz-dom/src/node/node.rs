@@ -3,27 +3,27 @@ use bitflags::bitflags;
 use blitz_traits::events::{BlitzMouseButtonEvent, DomEventData, HitResult};
 use html_escape::encode_quoted_attribute_to_string;
 use keyboard_types::Modifiers;
-use markup5ever::{LocalName, local_name};
+use markup5ever::{local_name, LocalName};
 use parley::Cluster;
 use selectors::matching::ElementSelectorFlags;
 use slab::Slab;
 use std::cell::{Cell, RefCell};
 use std::fmt::Write;
 use std::sync::atomic::AtomicBool;
-use style::Atom;
 use style::invalidation::element::restyle_hints::RestyleHint;
-use style::properties::ComputedValues;
 use style::properties::generated::longhands::position::computed_value::T as Position;
+use style::properties::ComputedValues;
 use style::selector_parser::{PseudoElement, RestyleDamage};
 use style::stylesheets::UrlExtraData;
 use style::values::computed::Display as StyloDisplay;
 use style::values::specified::box_::{DisplayInside, DisplayOutside};
+use style::Atom;
 use style::{data::ElementData as StyloElementData, shared_lock::SharedRwLock};
 use style_dom::ElementState;
 use style_traits::values::ToCss;
 use taffy::{
-    Cache,
     prelude::{Layout, Style},
+    Cache,
 };
 
 use super::{Attribute, ElementData};

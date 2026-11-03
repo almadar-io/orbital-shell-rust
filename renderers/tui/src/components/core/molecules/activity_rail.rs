@@ -39,12 +39,30 @@ impl PatternRenderer for ActivityRailRenderer {
                 .fg(Color::DarkGray)
                 .add_modifier(Modifier::BOLD),
         ))];
-    lines.push(Line::from(format!("items: {}", get_string_or(props, "items", "-"))));
-    lines.push(Line::from(format!("active: {}", get_string_or(props, "active", "-"))));
-    lines.push(Line::from(format!("onChange: {}", get_string_or(props, "onChange", "-"))));
-    lines.push(Line::from(format!("onSelect: {}", get_string_or(props, "onSelect", "-"))));
-    lines.push(Line::from(format!("footer: {}", get_string_or(props, "footer", "-"))));
-    lines.push(Line::from(format!("testId: {}", get_string_or(props, "testId", "-"))));
+        lines.push(Line::from(format!(
+            "items: {}",
+            get_string_or(props, "items", "-")
+        )));
+        lines.push(Line::from(format!(
+            "active: {}",
+            get_string_or(props, "active", "-")
+        )));
+        lines.push(Line::from(format!(
+            "onChange: {}",
+            get_string_or(props, "onChange", "-")
+        )));
+        lines.push(Line::from(format!(
+            "onSelect: {}",
+            get_string_or(props, "onSelect", "-")
+        )));
+        lines.push(Line::from(format!(
+            "footer: {}",
+            get_string_or(props, "footer", "-")
+        )));
+        lines.push(Line::from(format!(
+            "testId: {}",
+            get_string_or(props, "testId", "-")
+        )));
 
         frame.render_widget(
             Paragraph::new(Text::from(lines)).block(

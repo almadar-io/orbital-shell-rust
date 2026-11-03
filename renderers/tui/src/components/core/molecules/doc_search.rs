@@ -30,6 +30,10 @@ impl PatternRenderer for DocSearchRenderer {
         _ctx: &mut RenderContext<'_>,
     ) {
         use ratatui::widgets::{Block, Borders, Paragraph};
-        frame.render_widget(Paragraph::new(get_string_or(props, "placeholder", "Search docs...")).block(Block::default().borders(Borders::ALL)), area);
+        frame.render_widget(
+            Paragraph::new(get_string_or(props, "placeholder", "Search docs..."))
+                .block(Block::default().borders(Borders::ALL)),
+            area,
+        );
     }
 }

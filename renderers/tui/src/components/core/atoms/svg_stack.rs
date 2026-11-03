@@ -32,9 +32,9 @@ impl PatternRenderer for SvgStackRenderer {
         use ratatui::text::Line;
         use ratatui::widgets::Paragraph;
         let layers = get_number_or(props, "layers", 3.0) as usize;
-        let stack: Vec<Line> = (0..layers.min(4)).map(|i| {
-            Line::from(format!("  {}", "═".repeat(12 - i * 2)))
-        }).collect();
+        let stack: Vec<Line> = (0..layers.min(4))
+            .map(|i| Line::from(format!("  {}", "═".repeat(12 - i * 2))))
+            .collect();
         frame.render_widget(Paragraph::new(stack), area);
     }
 }

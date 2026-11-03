@@ -30,6 +30,15 @@ impl PatternRenderer for FeatureCardRenderer {
         _ctx: &mut RenderContext<'_>,
     ) {
         use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
-        frame.render_widget(Paragraph::new(get_string_or(props, "description", "")).wrap(Wrap { trim: true }).block(Block::default().borders(Borders::ALL).title(get_string_or(props, "title", "Feature"))), area);
+        frame.render_widget(
+            Paragraph::new(get_string_or(props, "description", ""))
+                .wrap(Wrap { trim: true })
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .title(get_string_or(props, "title", "Feature")),
+                ),
+            area,
+        );
     }
 }

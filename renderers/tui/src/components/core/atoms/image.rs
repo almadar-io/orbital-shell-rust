@@ -32,6 +32,11 @@ impl PatternRenderer for ImageRenderer {
         use ratatui::layout::Alignment;
         use ratatui::widgets::{Block, Borders, Paragraph};
         let alt = get_string_or(props, "alt", "image");
-        frame.render_widget(Paragraph::new(alt).alignment(Alignment::Center).block(Block::default().borders(Borders::ALL).title("image")), area);
+        frame.render_widget(
+            Paragraph::new(alt)
+                .alignment(Alignment::Center)
+                .block(Block::default().borders(Borders::ALL).title("image")),
+            area,
+        );
     }
 }

@@ -32,6 +32,9 @@ impl PatternRenderer for SvgShieldRenderer {
         use ratatui::text::Line;
         use ratatui::widgets::Paragraph;
         let size = get_number_or(props, "size", 60.0) as usize;
-        frame.render_widget(Paragraph::new(Line::from(format!("[shield sz={}] 🛡", size))), area);
+        frame.render_widget(
+            Paragraph::new(Line::from(format!("[shield sz={}] 🛡", size))),
+            area,
+        );
     }
 }

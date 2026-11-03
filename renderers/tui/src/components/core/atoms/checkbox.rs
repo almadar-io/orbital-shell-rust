@@ -34,6 +34,9 @@ impl PatternRenderer for CheckboxRenderer {
         let label = get_string_or(props, "label", "");
         let checked = get_bool_or(props, "checked", false);
         let mark = if checked { "[x]" } else { "[ ]" };
-        frame.render_widget(Paragraph::new(Line::from(format!("{} {}", mark, label))), area);
+        frame.render_widget(
+            Paragraph::new(Line::from(format!("{} {}", mark, label))),
+            area,
+        );
     }
 }

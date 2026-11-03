@@ -1,19 +1,21 @@
 use super::{PatternRenderer, TuiApp};
+use crossterm::event::{self, Event, KeyEventKind};
+use crossterm::terminal::{
+    disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
+};
+use crossterm::ExecutableCommand;
 use orbital_core::client::bridge::{KernelBridge, ServerBridge};
 use orbital_core::client::client_core::ClientCore;
 use orbital_core::client::client_kernel::ClientKernel;
 use orbital_core::client::http::SyncServerBridge;
 use orbital_core::OrbitalSchema;
-use std::sync::Arc;
-use tracing::info;
-use crossterm::event::{self, Event, KeyEventKind};
-use crossterm::terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen};
-use crossterm::ExecutableCommand;
 use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 use std::io::{self, Stdout};
 use std::path::Path;
+use std::sync::Arc;
 use std::time::Duration;
+use tracing::info;
 
 /// Run the terminal UI application with the default renderer set.
 pub fn run(schema_path: &Path, server_url: Option<&str>) -> anyhow::Result<()> {
@@ -70,7 +72,6 @@ fn run_app(
     Ok(())
 }
 
-
 /// The transport for a terminal app: a server at `server_url`, else the
 /// in-process kernel (offline).
 fn bridge(
@@ -86,7 +87,6 @@ fn bridge(
         }
     })
 }
-
 
 impl TuiApp {
     /// Build the app over `bridge` (none: offline) and mount the first page.
@@ -106,5 +106,4 @@ impl TuiApp {
         };
         Ok(Self::with_core(core, renderers))
     }
-
 }

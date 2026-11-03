@@ -29,11 +29,21 @@ impl PatternRenderer for PageHeaderRenderer {
         _entity: Option<&Value>,
         _ctx: &mut RenderContext<'_>,
     ) {
-        use ratatui::text::{Line, Span};
         use ratatui::style::{Modifier, Style};
+        use ratatui::text::{Line, Span};
         use ratatui::widgets::{Block, Borders, Paragraph};
         let title = get_string_or(props, "title", "");
         let subtitle = get_string_or(props, "subtitle", "");
-        frame.render_widget(Paragraph::new(vec![Line::from(Span::styled(title, Style::default().add_modifier(Modifier::BOLD))), Line::from(subtitle)]).block(Block::default().borders(Borders::BOTTOM)), area);
+        frame.render_widget(
+            Paragraph::new(vec![
+                Line::from(Span::styled(
+                    title,
+                    Style::default().add_modifier(Modifier::BOLD),
+                )),
+                Line::from(subtitle),
+            ])
+            .block(Block::default().borders(Borders::BOTTOM)),
+            area,
+        );
     }
 }

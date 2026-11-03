@@ -31,8 +31,32 @@ impl PatternRenderer for DashboardGridRenderer {
     ) {
         use ratatui::text::Line;
         use ratatui::widgets::{Block, Borders, Paragraph};
-        let stats = { let mut s = get_array(props, "stats"); if s.is_empty() { s = get_array(props, "metrics"); } s };
-        let lines: Vec<Line> = stats.iter().map(|s| Line::from(format!("{}: {}", s.as_object().and_then(|o| o.get("label")).and_then(|v| v.as_str()).unwrap_or(""), s.as_object().and_then(|o| o.get("value")).map(format_value).unwrap_or_default()))).collect();
-        frame.render_widget(Paragraph::new(lines).block(Block::default().borders(Borders::ALL).title("Dashboard")), area);
+        let stats = {
+            let mut s = get_array(props, "stats");
+            if s.is_empty() {
+                s = get_array(props, "metrics");
+            }
+            s
+        };
+        let lines: Vec<Line> = stats
+            .iter()
+            .map(|s| {
+                Line::from(format!(
+                    "{}: {}",
+                    s.as_object()
+                        .and_then(|o| o.get("label"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or(""),
+                    s.as_object()
+                        .and_then(|o| o.get("value"))
+                        .map(format_value)
+                        .unwrap_or_default()
+                ))
+            })
+            .collect();
+        frame.render_widget(
+            Paragraph::new(lines).block(Block::default().borders(Borders::ALL).title("Dashboard")),
+            area,
+        );
     }
 }

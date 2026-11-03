@@ -33,14 +33,45 @@ impl PatternRenderer for BehaviorViewRenderer {
         use ratatui::text::{Line, Span, Text};
         use ratatui::widgets::{Block, Borders, Paragraph};
         let data = props.as_object().and_then(|o| o.get("data"));
-        let orbital_name = data.and_then(|v| v.as_object()).and_then(|o| o.get("orbitalName")).and_then(|v| v.as_str()).unwrap_or("Orbital").to_string();
-        let traits = data.and_then(|v| v.as_object()).and_then(|o| o.get("traits")).and_then(|v| v.as_array()).map(|a| a.to_vec()).unwrap_or_default();
-        let mut lines: Vec<Line> = vec![Line::from(Span::styled(orbital_name, Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)))];
+        let orbital_name = data
+            .and_then(|v| v.as_object())
+            .and_then(|o| o.get("orbitalName"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("Orbital")
+            .to_string();
+        let traits = data
+            .and_then(|v| v.as_object())
+            .and_then(|o| o.get("traits"))
+            .and_then(|v| v.as_array())
+            .map(|a| a.to_vec())
+            .unwrap_or_default();
+        let mut lines: Vec<Line> = vec![Line::from(Span::styled(
+            orbital_name,
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ))];
         for t in &traits {
-            let tname = t.as_object().and_then(|o| o.get("name")).and_then(|v| v.as_str()).unwrap_or("trait").to_string();
-            let state_count = t.as_object().and_then(|o| o.get("stateCount")).and_then(|v| v.as_number()).unwrap_or(0.0) as i64;
+            let tname = t
+                .as_object()
+                .and_then(|o| o.get("name"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("trait")
+                .to_string();
+            let state_count = t
+                .as_object()
+                .and_then(|o| o.get("stateCount"))
+                .and_then(|v| v.as_number())
+                .unwrap_or(0.0) as i64;
             lines.push(Line::from(format!("{}  ({} states)", tname, state_count)));
         }
-        frame.render_widget(Paragraph::new(Text::from(lines)).block(Block::default().borders(Borders::ALL).title("behavior-view")), area);
+        frame.render_widget(
+            Paragraph::new(Text::from(lines)).block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title("behavior-view"),
+            ),
+            area,
+        );
     }
 }

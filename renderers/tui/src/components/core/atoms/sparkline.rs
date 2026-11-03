@@ -31,9 +31,14 @@ impl PatternRenderer for SparklineRenderer {
     ) {
         use ratatui::text::Line;
         use ratatui::widgets::Paragraph;
-        let nums: Vec<f64> = get_array(props, "data").iter().filter_map(|v| v.as_number()).collect();
+        let nums: Vec<f64> = get_array(props, "data")
+            .iter()
+            .filter_map(|v| v.as_number())
+            .collect();
         let blocks = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
-        let (lo, hi) = nums.iter().fold((f64::MAX, f64::MIN), |(lo, hi), &n| (lo.min(n), hi.max(n)));
+        let (lo, hi) = nums
+            .iter()
+            .fold((f64::MAX, f64::MIN), |(lo, hi), &n| (lo.min(n), hi.max(n)));
         let span = (hi - lo).max(1e-9);
         let spark: String = nums
             .iter()

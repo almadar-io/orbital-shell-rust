@@ -31,8 +31,28 @@ impl PatternRenderer for TabsRenderer {
     ) {
         use ratatui::text::Line;
         use ratatui::widgets::{Block, Borders, Paragraph};
-        let items = { let mut i = get_array(props, "tabs"); if i.is_empty() { i = get_array(props, "items"); } i };
-        let labels: Vec<String> = items.iter().map(|it| it.as_object().and_then(|o| o.get("label")).and_then(|v| v.as_str()).or_else(|| it.as_str()).unwrap_or("").to_string()).collect();
-        frame.render_widget(Paragraph::new(Line::from(labels.join("  |  "))).block(Block::default().borders(Borders::ALL)), area);
+        let items = {
+            let mut i = get_array(props, "tabs");
+            if i.is_empty() {
+                i = get_array(props, "items");
+            }
+            i
+        };
+        let labels: Vec<String> = items
+            .iter()
+            .map(|it| {
+                it.as_object()
+                    .and_then(|o| o.get("label"))
+                    .and_then(|v| v.as_str())
+                    .or_else(|| it.as_str())
+                    .unwrap_or("")
+                    .to_string()
+            })
+            .collect();
+        frame.render_widget(
+            Paragraph::new(Line::from(labels.join("  |  ")))
+                .block(Block::default().borders(Borders::ALL)),
+            area,
+        );
     }
 }

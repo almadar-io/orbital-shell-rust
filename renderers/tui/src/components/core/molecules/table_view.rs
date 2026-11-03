@@ -32,16 +32,65 @@ impl PatternRenderer for TableViewRenderer {
         use ratatui::style::{Modifier, Style};
         use ratatui::text::{Line, Span, Text};
         use ratatui::widgets::{Block, Borders, Paragraph};
-        let rows = { let mut r = get_array(props, "rows"); if r.is_empty() { r = get_array(props, "items"); } if r.is_empty() { r = get_array(props, "data"); } r };
+        let rows = {
+            let mut r = get_array(props, "rows");
+            if r.is_empty() {
+                r = get_array(props, "items");
+            }
+            if r.is_empty() {
+                r = get_array(props, "data");
+            }
+            r
+        };
         let cols = get_columns(props, &rows);
-        let keyfor = |c: &Value| c.as_object().and_then(|o| o.get("key").or_else(|| o.get("field")).or_else(|| o.get("name"))).and_then(|v| v.as_str()).map(|s| s.to_string()).unwrap_or_default();
+        let keyfor = |c: &Value| {
+            c.as_object()
+                .and_then(|o| {
+                    o.get("key")
+                        .or_else(|| o.get("field"))
+                        .or_else(|| o.get("name"))
+                })
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+                .unwrap_or_default()
+        };
         let mut lines: Vec<Line> = Vec::new();
-        let header = cols.iter().map(|c| c.as_object().and_then(|o| o.get("label").or_else(|| o.get("header")).or_else(|| o.get("key"))).and_then(|v| v.as_str()).unwrap_or("").to_string()).collect::<Vec<_>>().join(" | ");
-        lines.push(Line::from(Span::styled(header, Style::default().add_modifier(Modifier::BOLD))));
+        let header = cols
+            .iter()
+            .map(|c| {
+                c.as_object()
+                    .and_then(|o| {
+                        o.get("label")
+                            .or_else(|| o.get("header"))
+                            .or_else(|| o.get("key"))
+                    })
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string()
+            })
+            .collect::<Vec<_>>()
+            .join(" | ");
+        lines.push(Line::from(Span::styled(
+            header,
+            Style::default().add_modifier(Modifier::BOLD),
+        )));
         for row in &rows {
-            let cells = cols.iter().map(|c| row.as_object().and_then(|o| o.get(&keyfor(c))).map(format_value).unwrap_or_default()).collect::<Vec<_>>().join(" | ");
+            let cells = cols
+                .iter()
+                .map(|c| {
+                    row.as_object()
+                        .and_then(|o| o.get(&keyfor(c)))
+                        .map(format_value)
+                        .unwrap_or_default()
+                })
+                .collect::<Vec<_>>()
+                .join(" | ");
             lines.push(Line::from(cells));
         }
-        frame.render_widget(Paragraph::new(Text::from(lines)).block(Block::default().borders(Borders::ALL).title("Table")), area);
+        frame.render_widget(
+            Paragraph::new(Text::from(lines))
+                .block(Block::default().borders(Borders::ALL).title("Table")),
+            area,
+        );
     }
 }

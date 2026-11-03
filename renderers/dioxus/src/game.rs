@@ -21,9 +21,9 @@ use anyrender_vello::wgpu;
 use anyrender_vello::{CustomPaintCtx, CustomPaintSource, DeviceHandle, TextureHandle};
 use dioxus::prelude::*;
 use dioxus_native::use_wgpu;
-use orbital_core::Value;
 use orbital_canvas::mappers::scene;
 use orbital_canvas::{SceneHost, SharedDeviceRenderer};
+use orbital_core::Value;
 use std::sync::{Arc, Mutex};
 use web_time::Instant;
 
@@ -154,8 +154,7 @@ impl CustomPaintSource for GamePaintSource {
                 host.set_viewport(phys_w, phys_h);
             }
             #[cfg(not(target_arch = "wasm32"))]
-            let fonts_landed =
-                orbital_canvas::system_fonts::supply_missing_from_system() > 0;
+            let fonts_landed = orbital_canvas::system_fonts::supply_missing_from_system() > 0;
             #[cfg(target_arch = "wasm32")]
             let fonts_landed = false;
             if host.scene() != Some(&node) || fonts_landed {
@@ -166,6 +165,9 @@ impl CustomPaintSource for GamePaintSource {
             }
             host.refresh_assets();
             host.set_clock(self.started.elapsed().as_secs_f64() * 1000.0);
+            if let Ok(epoch) = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
+                host.set_epoch_clock(epoch.as_secs_f64() * 1000.0);
+            }
             host.frame_packet()?
         };
         let (texture, handle, _, _) = self.target.as_ref()?;
@@ -195,6 +197,65 @@ impl CustomPaintSource for GamePaintSource {
 struct SceneCanvasProps {
     node: serde_json::Value,
     sink: Option<crate::renderer::EventSink>,
+    fill_parent: bool,
+    a11y: SceneA11y,
+}
+
+#[derive(Clone, Default, PartialEq)]
+struct SceneA11y {
+    label: Option<String>,
+    labelledby: Option<String>,
+    describedby: Option<String>,
+    live: Option<String>,
+    current: Option<String>,
+    pressed: Option<String>,
+    expanded: Option<String>,
+    selected: Option<String>,
+    hidden: Option<String>,
+    busy: Option<String>,
+    role: Option<String>,
+    lang: Option<String>,
+    dir: Option<String>,
+    tabindex: Option<String>,
+}
+
+impl SceneA11y {
+    fn from_props(props: &Value) -> Self {
+        let get = |key| {
+            props
+                .as_object()
+                .and_then(|fields| fields.get(key))
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+        };
+        let boolean = |key| {
+            props
+                .as_object()
+                .and_then(|fields| fields.get(key))
+                .and_then(Value::as_bool)
+                .map(|value| value.to_string())
+        };
+        Self {
+            label: get("aria-label"),
+            labelledby: get("aria-labelledby"),
+            describedby: get("aria-describedby"),
+            live: get("aria-live"),
+            current: get("aria-current"),
+            pressed: get("aria-pressed"),
+            expanded: boolean("aria-expanded"),
+            selected: boolean("aria-selected"),
+            hidden: boolean("aria-hidden"),
+            busy: boolean("aria-busy"),
+            role: get("role"),
+            lang: get("lang"),
+            dir: get("dir"),
+            tabindex: props
+                .as_object()
+                .and_then(|fields| fields.get("tabIndex"))
+                .and_then(Value::as_number)
+                .map(|value| value.to_string()),
+        }
+    }
 }
 
 #[allow(non_snake_case)] // dioxus component convention (PascalCase)
@@ -207,13 +268,38 @@ fn SceneCanvas(props: SceneCanvasProps) -> Element {
         let (node_cell, host) = (node_cell.clone(), host.clone());
         move || GamePaintSource::new(node_cell, host)
     });
-    let Some((w, h)) = canvas_size(&props.node) else {
-        return rsx! {};
+    let (w, h) = if props.fill_parent {
+        (1, 1)
+    } else {
+        let Some(size) = canvas_size(&props.node) else {
+            return rsx! {};
+        };
+        size
+    };
+    let style = if props.fill_parent {
+        Some("display:block;width:100%;height:100%")
+    } else {
+        None
     };
     let sink = props.sink;
     rsx! {
         canvas {
             class: "almadar-game-canvas",
+            style: style,
+            aria_label: props.a11y.label,
+            aria_labelledby: props.a11y.labelledby,
+            aria_describedby: props.a11y.describedby,
+            aria_live: props.a11y.live,
+            aria_current: props.a11y.current,
+            aria_pressed: props.a11y.pressed,
+            aria_expanded: props.a11y.expanded,
+            aria_selected: props.a11y.selected,
+            aria_hidden: props.a11y.hidden,
+            aria_busy: props.a11y.busy,
+            role: props.a11y.role,
+            lang: props.a11y.lang,
+            dir: props.a11y.dir,
+            tabindex: props.a11y.tabindex,
             "src": "{id}",
             width: w,
             height: h,
@@ -258,8 +344,15 @@ impl DioxusPatternRenderer for SceneCanvasRenderer {
         _registry: &DioxusPatternRegistry,
     ) -> Element {
         let node = scene_node(self.name, props, view.canvas_theme.as_ref());
-        rsx! { SceneCanvas { node, sink: view.sink } }
+        let a11y = SceneA11y::from_props(props);
+        rsx! { SceneCanvas { node, sink: view.sink, fill_parent: false, a11y } }
     }
+}
+
+pub(crate) fn fill_parent_atlas_panel(asset: &Value, mode: &str, view: &DioxusView<'_>) -> Element {
+    let props = serde_json::json!({ "asset": asset, "mode": mode });
+    let node = scene::host_node("atlas-panel", props, view.canvas_theme.as_ref());
+    rsx! { SceneCanvas { node, sink: None, fill_parent: true, a11y: SceneA11y::default() } }
 }
 
 /// Renderer for the `game-hud` pattern — stats/items/elements resolved against

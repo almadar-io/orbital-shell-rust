@@ -35,7 +35,12 @@ impl PatternRenderer for ProgressBarRenderer {
         let max = get_number_or(props, "max", 100.0);
         let pct = ((value / max).clamp(0.0, 1.0) * 100.0) as i64;
         let filled = (pct as usize) / 10;
-        let bar = format!("[{}{}] {}", "█".repeat(filled), "-".repeat(10 - filled), pct);
+        let bar = format!(
+            "[{}{}] {}",
+            "█".repeat(filled),
+            "-".repeat(10 - filled),
+            pct
+        );
         frame.render_widget(Paragraph::new(Line::from(bar)), area);
     }
 }

@@ -2,6 +2,7 @@
 
 pub mod accordion;
 pub mod activation_block;
+pub mod activity_rail;
 pub mod agent_activity_feed;
 pub mod agent_activity_row;
 pub mod agent_chat_feed;

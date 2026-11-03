@@ -30,7 +30,14 @@ impl PatternRenderer for TopNavItemRenderer {
         _ctx: &mut RenderContext<'_>,
     ) {
         use ratatui::widgets::Paragraph;
-        let label = props.as_object().and_then(|o| o.get("item")).and_then(|v| v.as_object()).and_then(|o| o.get("label")).and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let label = props
+            .as_object()
+            .and_then(|o| o.get("item"))
+            .and_then(|v| v.as_object())
+            .and_then(|o| o.get("label"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
         frame.render_widget(Paragraph::new(label), area);
     }
 }

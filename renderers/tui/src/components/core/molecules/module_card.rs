@@ -33,13 +33,37 @@ impl PatternRenderer for ModuleCardRenderer {
         use ratatui::text::{Line, Span, Text};
         use ratatui::widgets::{Block, Borders, Paragraph};
         let data = props.as_object().and_then(|o| o.get("data"));
-        let title = data.and_then(|v| v.as_object()).and_then(|o| o.get("orbitalName")).and_then(|v| v.as_str()).unwrap_or("Module").to_string();
-        let field_count = data.and_then(|v| v.as_object()).and_then(|o| o.get("fields")).and_then(|v| v.as_array()).map(|a| a.len()).unwrap_or(0);
-        let trait_count = data.and_then(|v| v.as_object()).and_then(|o| o.get("traits")).and_then(|v| v.as_array()).map(|a| a.len()).unwrap_or(0);
+        let title = data
+            .and_then(|v| v.as_object())
+            .and_then(|o| o.get("orbitalName"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("Module")
+            .to_string();
+        let field_count = data
+            .and_then(|v| v.as_object())
+            .and_then(|o| o.get("fields"))
+            .and_then(|v| v.as_array())
+            .map(|a| a.len())
+            .unwrap_or(0);
+        let trait_count = data
+            .and_then(|v| v.as_object())
+            .and_then(|o| o.get("traits"))
+            .and_then(|v| v.as_array())
+            .map(|a| a.len())
+            .unwrap_or(0);
         let lines = vec![
-            Line::from(Span::styled(title, Style::default().fg(Color::White).add_modifier(Modifier::BOLD))),
+            Line::from(Span::styled(
+                title,
+                Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+            )),
             Line::from(format!("{} fields  {} traits", field_count, trait_count)),
         ];
-        frame.render_widget(Paragraph::new(Text::from(lines)).block(Block::default().borders(Borders::ALL).title("module-card")), area);
+        frame.render_widget(
+            Paragraph::new(Text::from(lines))
+                .block(Block::default().borders(Borders::ALL).title("module-card")),
+            area,
+        );
     }
 }

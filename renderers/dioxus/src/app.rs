@@ -10,11 +10,252 @@
 use crate::client_core::ClientCore;
 use crate::recurse;
 use crate::registry::DioxusPatternRegistry;
-use crate::renderer::{DioxusView, EventSink};
+use crate::renderer::{DioxusView, EventSink, NavigationSink};
 use dioxus::prelude::*;
 use orbital_core::client::helpers::{resolve_row_set_markers, SlotContent};
 use orbital_core::{Value, ValueMap};
 use std::cell::RefCell;
+#[cfg(all(feature = "native-http", not(target_arch = "wasm32")))]
+fn spawn_server_leg<T: Send + 'static>(
+    job: impl FnOnce() -> T + Send + 'static,
+    finish: impl FnOnce(T) + 'static,
+) {
+    let (tx, rx) = futures_channel::oneshot::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(job());
+    });
+    spawn(async move {
+        match rx.await {
+            Ok(result) => finish(result),
+            Err(_) => tracing::error!(target: "almadar::client", "server worker stopped"),
+        }
+    });
+}
+
+#[cfg(all(
+    any(feature = "native-http", feature = "native-audio"),
+    not(target_arch = "wasm32")
+))]
+fn bump(mut version: Signal<u32>) {
+    let next = version.peek().wrapping_add(1);
+    version.set(next);
+}
+
+#[cfg(all(feature = "native-http", not(target_arch = "wasm32")))]
+fn remote_mount(version: Signal<u32>) {
+    let begun = APP.with(|cell| {
+        let mut borrow = cell.borrow_mut();
+        let state = borrow.as_mut()?;
+        let kernel = state.core.client_kernel.clone()?;
+        match state.core.begin_mount_page() {
+            Ok(begun) => Some((kernel, begun)),
+            Err(error) => {
+                tracing::error!(target: "almadar::client", %error, "remote mount refused");
+                state.core.status_message = Some((format!("Error: {error}"), true));
+                None
+            }
+        }
+    });
+    let Some((kernel, begun)) = begun else { return };
+    let awaiting = if begun.has_legs() {
+        APP.with(|cell| {
+            cell.borrow_mut().as_mut().and_then(|state| {
+                state
+                    .core
+                    .begin_awaiting(&begun.awaiting(), web_time::Instant::now())
+            })
+        })
+    } else {
+        None
+    };
+    bump(version);
+    tracing::info!(target: "almadar::client", server_legs = begun.has_legs(), "remote mount begun");
+    remote_followups(version);
+    if !begun.has_legs() {
+        APP.with(|cell| {
+            if let Some(state) = cell.borrow_mut().as_mut() {
+                state.core.finish_mount_page(begun.settle(&kernel));
+            }
+        });
+        bump(version);
+        remote_followups(version);
+        return;
+    }
+    spawn_server_leg(
+        move || begun.settle(&kernel),
+        move |result| {
+            if let Err(error) = &result {
+                tracing::error!(target: "almadar::client", %error, "remote mount failed");
+            }
+            if let Ok(response) = &result {
+                tracing::info!(target: "almadar::client", success = response.success, emitted = response.emitted_events.len(), paints = response.client_effects_by_trait.as_ref().map_or(0, Vec::len), "remote mount settled");
+            }
+            APP.with(|cell| {
+                if let Some(state) = cell.borrow_mut().as_mut() {
+                    if let Some(token) = awaiting {
+                        state.core.end_awaiting(token);
+                    }
+                    state.core.finish_mount_page(result);
+                }
+            });
+            bump(version);
+            remote_followups(version);
+        },
+    );
+}
+
+#[cfg(all(feature = "native-http", not(target_arch = "wasm32")))]
+fn remote_control(event: String, source: Option<String>, payload: Value, version: Signal<u32>) {
+    let begun = APP.with(|cell| {
+        let mut borrow = cell.borrow_mut();
+        let state = borrow.as_mut()?;
+        let kernel = state.core.client_kernel.clone()?;
+        match state.core.begin_control(&event, source.as_deref(), payload) {
+            Ok(begun) => Some((kernel, begun)),
+            Err(error) => {
+                tracing::error!(target: "almadar::client", %error, "remote control refused");
+                state.core.status_message = Some((format!("Error: {error}"), true));
+                None
+            }
+        }
+    });
+    let Some((kernel, begun)) = begun else { return };
+    let awaiting = if begun.has_legs() {
+        APP.with(|cell| {
+            cell.borrow_mut().as_mut().and_then(|state| {
+                state
+                    .core
+                    .begin_awaiting(begun.awaiting(), web_time::Instant::now())
+            })
+        })
+    } else {
+        None
+    };
+    bump(version);
+    remote_followups(version);
+    if !begun.has_legs() {
+        APP.with(|cell| {
+            if let Some(state) = cell.borrow_mut().as_mut() {
+                state.core.finish_control(&begun, kernel.settle(&begun));
+            }
+        });
+        remote_followups(version);
+        return;
+    }
+    spawn_server_leg(
+        move || {
+            let result = kernel.settle(&begun);
+            (begun, result)
+        },
+        move |(begun, result)| {
+            if let Err(error) = &result {
+                tracing::error!(target: "almadar::client", %error, "remote control failed");
+            }
+            APP.with(|cell| {
+                if let Some(state) = cell.borrow_mut().as_mut() {
+                    if let Some(token) = awaiting {
+                        state.core.end_awaiting(token);
+                    }
+                    state.core.finish_control(&begun, result);
+                }
+            });
+            bump(version);
+            remote_followups(version);
+        },
+    );
+}
+
+#[cfg(all(feature = "native-http", not(target_arch = "wasm32")))]
+fn remote_followups(version: Signal<u32>) {
+    if REMOTE_PUMPING.with(|pumping| pumping.replace(true)) {
+        return;
+    }
+    for _ in 0..8 {
+        let (navigate, events) = APP.with(|cell| {
+            let mut borrow = cell.borrow_mut();
+            let Some(state) = borrow.as_mut() else {
+                return (false, Vec::new());
+            };
+            (
+                state.core.needs_page_mount(),
+                std::mem::take(&mut state.core.pending_events),
+            )
+        });
+        if !navigate && events.is_empty() {
+            break;
+        }
+        tracing::info!(target: "almadar::client", navigate, events = events.len(), "remote followups");
+        if navigate {
+            remote_mount(version);
+        }
+        for (event, source, payload) in events {
+            remote_control(event, source, payload, version);
+        }
+    }
+    REMOTE_PUMPING.with(|pumping| pumping.set(false));
+}
+
+#[cfg(all(feature = "native-http", not(target_arch = "wasm32")))]
+fn remote_frame(version: Signal<u32>) {
+    if APP.with(|cell| {
+        cell.borrow()
+            .as_ref()
+            .is_some_and(|state| state.core.has_awaiting())
+    }) {
+        bump(version);
+    }
+    let begun = APP.with(|cell| {
+        let mut borrow = cell.borrow_mut();
+        let state = borrow.as_mut()?;
+        let kernel = state.core.client_kernel.clone()?;
+        match state.core.begin_frame() {
+            Ok(Some(begun)) => Some((kernel, begun)),
+            Ok(None) => None,
+            Err(error) => {
+                state.core.finish_frame(Err(error));
+                None
+            }
+        }
+    });
+    let Some((kernel, begun)) = begun else { return };
+    let awaiting = if begun.has_legs() {
+        APP.with(|cell| {
+            cell.borrow_mut().as_mut().and_then(|state| {
+                state
+                    .core
+                    .begin_awaiting(&begun.awaiting(), web_time::Instant::now())
+            })
+        })
+    } else {
+        None
+    };
+    bump(version);
+    remote_followups(version);
+    if !begun.has_legs() {
+        APP.with(|cell| {
+            if let Some(state) = cell.borrow_mut().as_mut() {
+                state.core.finish_frame(kernel.settle_frame(&begun));
+            }
+        });
+        remote_followups(version);
+        return;
+    }
+    spawn_server_leg(
+        move || kernel.settle_frame(&begun),
+        move |result| {
+            APP.with(|cell| {
+                if let Some(state) = cell.borrow_mut().as_mut() {
+                    if let Some(token) = awaiting {
+                        state.core.end_awaiting(token);
+                    }
+                    state.core.finish_frame(result);
+                }
+            });
+            bump(version);
+            remote_followups(version);
+        },
+    );
+}
 
 /// Everything a running Dioxus Orbital app needs: the shared circuit and the
 /// pattern registry that paints its slots.
@@ -23,6 +264,8 @@ pub struct AppState {
     pub core: ClientCore,
     /// Dioxus pattern registry (built once at mount from the generated sets).
     pub registry: DioxusPatternRegistry,
+    /// Whether this mount delegates server legs over HTTP.
+    pub remote: bool,
 }
 
 std::thread_local! {
@@ -32,6 +275,8 @@ std::thread_local! {
     /// external `web::send_event` (driven from JS, outside a Dioxus render) can
     /// invalidate the component exactly like an in-app click does.
     static VERSION: RefCell<Option<Signal<u32>>> = RefCell::new(None);
+    #[cfg(all(feature = "native-http", not(target_arch = "wasm32")))]
+    static FRAME_CALLBACK: RefCell<Option<Callback<()>>> = RefCell::new(None);
     /// Stylesheet texts injected into the document head at mount. Set by the
     /// native (Blitz) shell from `--css` files — Blitz resolves `class:`
     /// attributes against them (almadar.css base + Tailwind utilities). Empty
@@ -42,6 +287,8 @@ std::thread_local! {
     /// theme applies, exactly like the React shell. Read by the root `App`
     /// component into the `data-theme` attribute.
     pub static THEME: RefCell<Option<String>> = RefCell::new(None);
+    #[cfg(all(feature = "native-http", not(target_arch = "wasm32")))]
+    static REMOTE_PUMPING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 /// Bump the root component's version signal (no-op if the app is not mounted).
@@ -55,14 +302,44 @@ pub fn poke_rerender() {
     });
 }
 
+#[cfg(all(feature = "native-http", not(target_arch = "wasm32")))]
+pub fn drive_remote_frame() -> bool {
+    let remote = APP.with(|cell| cell.borrow().as_ref().is_some_and(|state| state.remote));
+    if !remote {
+        return false;
+    }
+    FRAME_CALLBACK.with(|cell| {
+        if let Some(callback) = cell.borrow().as_ref() {
+            callback.call(());
+        }
+    });
+    true
+}
+
 /// `slot`'s contents as painted: every row-set marker in a prop is replaced by the rows the kernel's one resolver
 /// ([`ClientCore::resolve_rows`]) answers now, re-checked for the current viewer. A repaint of a slot holding a
 /// reference (`repaint: "rows-changed"`) replaces its content, and this re-resolves it.
 pub fn painted_slot_contents(core: &ClientCore, slot: &str) -> Vec<SlotContent> {
-    core.slot_contents(slot)
+    painted_slot_contents_at(core, slot, web_time::Instant::now())
+}
+
+fn painted_slot_contents_at(
+    core: &ClientCore,
+    slot: &str,
+    now: web_time::Instant,
+) -> Vec<SlotContent> {
+    let mut contents = core.slot_contents(slot);
+    if slot == "main" {
+        contents.extend(core.awaiting_main_contents(now));
+    } else if contents.is_empty() {
+        contents.extend(core.awaiting_slot_content(slot, now));
+    }
+    contents
         .into_iter()
         .map(|content| SlotContent {
-            props: resolve_row_set_markers(&content.props, &|reference| core.resolve_rows(reference)),
+            props: resolve_row_set_markers(&content.props, &|reference| {
+                core.resolve_rows(reference)
+            }),
             ..content
         })
         .collect()
@@ -70,28 +347,174 @@ pub fn painted_slot_contents(core: &ClientCore, slot: &str) -> Vec<SlotContent> 
 
 /// The per-trait composed content (`@trait.X`) as painted, resolved like [`painted_slot_contents`].
 pub fn painted_trait_content(core: &ClientCore) -> ValueMap {
-    core.trait_content
+    painted_trait_content_at(core, web_time::Instant::now())
+}
+
+fn painted_trait_content_at(core: &ClientCore, now: web_time::Instant) -> ValueMap {
+    core.trait_content_with_awaiting(now)
         .iter()
-        .map(|(name, content)| (name.clone(), resolve_row_set_markers(content, &|reference| core.resolve_rows(reference))))
+        .map(|(name, content)| {
+            (
+                name.clone(),
+                resolve_row_set_markers(content, &|reference| core.resolve_rows(reference)),
+            )
+        })
         .collect()
 }
 
 /// Root Orbital component. Reads [`APP`], paints `ui_slots` through the registry,
 /// and wires an [`EventSink`] so button clicks drive the shared circuit.
+#[cfg(all(feature = "native-audio", not(target_arch = "wasm32")))]
+fn answer_host_ask(
+    ask: orbital_core::client::client_core::PendingHostAsk,
+    answer: Result<(), crate::audio::AudioFailure>,
+    version: Signal<u32>,
+) {
+    if let Err(error) = &answer {
+        tracing::error!(op = %ask.op, source_trait = %ask.source_trait, kind = error.kind, message = %error.error, "native host ask failed");
+    }
+    let Some(completion) = ask.completion else {
+        return;
+    };
+    let event = match &answer {
+        Ok(()) => completion.success.clone(),
+        Err(_) => completion.failure.clone(),
+    };
+    let Some(event) = event else { return };
+    let payload = if let Err(error) = &answer {
+        orbital_core::client::client_core::host_ask_failure_payload(
+            &completion,
+            &error.error,
+            error.kind,
+        )
+    } else {
+        let mut payload = ValueMap::new();
+        if let Some(key) = &completion.key {
+            payload.insert("key".into(), Value::string(key.as_str()));
+        }
+        Value::object(payload)
+    };
+    let begun = APP.with(|cell| {
+        let mut borrow = cell.borrow_mut();
+        let state = borrow.as_mut()?;
+        let kernel = state.core.client_kernel.clone()?;
+        match state
+            .core
+            .begin_host_completion(&completion, &event, payload)
+        {
+            Ok(begun) => Some((kernel, begun, state.remote)),
+            Err(error) => {
+                tracing::error!(%error, op = %ask.op, "host-ask return refused");
+                None
+            }
+        }
+    });
+    let Some((kernel, begun, remote)) = begun else {
+        return;
+    };
+    bump(version);
+    #[cfg(feature = "native-http")]
+    if remote && begun.has_legs() {
+        spawn_server_leg(
+            move || {
+                let result = kernel.settle(&begun);
+                (begun, result)
+            },
+            move |(begun, result)| {
+                APP.with(|cell| {
+                    if let Some(state) = cell.borrow_mut().as_mut() {
+                        state.core.finish_control(&begun, result);
+                    }
+                });
+                bump(version);
+                remote_followups(version);
+            },
+        );
+        return;
+    }
+    #[cfg(not(feature = "native-http"))]
+    let _ = remote;
+    let result = kernel.settle(&begun);
+    APP.with(|cell| {
+        if let Some(state) = cell.borrow_mut().as_mut() {
+            state.core.finish_control(&begun, result);
+        }
+    });
+    bump(version);
+    #[cfg(feature = "native-http")]
+    remote_followups(version);
+}
+
 #[component]
 pub fn App() -> Element {
     let mut version = use_signal(|| 0u32);
+    #[cfg(all(feature = "native", not(target_arch = "wasm32")))]
+    let viewport_width =
+        try_use_context::<dioxus_native::NativeViewport>().map(|viewport| viewport.width() as f64);
+    #[cfg(not(all(feature = "native", not(target_arch = "wasm32"))))]
+    let viewport_width = None;
+    #[cfg(all(feature = "native-http", not(target_arch = "wasm32")))]
+    use_effect(move || {
+        let remote = APP.with(|cell| cell.borrow().as_ref().is_some_and(|state| state.remote));
+        if remote {
+            remote_mount(version);
+        }
+    });
     // Register the version signal for external pokes and subscribe to it.
     VERSION.with(|v| *v.borrow_mut() = Some(version));
+    #[cfg(all(feature = "native-http", not(target_arch = "wasm32")))]
+    FRAME_CALLBACK
+        .with(|cell| *cell.borrow_mut() = Some(use_callback(move |()| remote_frame(version))));
     let _tick = *version.read();
+    #[cfg(all(feature = "native-audio", not(target_arch = "wasm32")))]
+    use_effect(move || {
+        let _tick = *version.read();
+        let asks = APP.with(|cell| {
+            cell.borrow_mut()
+                .as_mut()
+                .map(|state| std::mem::take(&mut state.core.pending_host_asks))
+                .unwrap_or_default()
+        });
+        for ask in asks {
+            if ask.op.starts_with("audio/") {
+                let answer = crate::audio::host_ask(
+                    ask.source_trait.clone(),
+                    ask.op.clone(),
+                    ask.args.clone(),
+                );
+                spawn(async move {
+                    let result = answer.await.unwrap_or_else(|_| {
+                        Err(crate::audio::AudioFailure {
+                            kind: "unavailable",
+                            error: "native audio worker stopped before answering".into(),
+                        })
+                    });
+                    answer_host_ask(ask, result, version);
+                });
+            } else {
+                let error = crate::audio::AudioFailure {
+                    kind: "unavailable",
+                    error: format!("native host has no action for host-ask `{}`", ask.op),
+                };
+                answer_host_ask(ask, Err(error), version);
+            }
+        }
+    });
 
     // A control dispatches as the trait whose content rendered it (the egui shell's
     // `RenderContext::queue_event`), the active trait when the content carries no source.
     let routed = use_callback(
         move |(event, source, payload): (String, Option<String>, Value)| {
+            #[cfg(all(feature = "native-http", not(target_arch = "wasm32")))]
+            if APP.with(|cell| cell.borrow().as_ref().is_some_and(|state| state.remote)) {
+                remote_control(event, source, payload, version);
+                return;
+            }
             APP.with(|cell| {
                 if let Some(state) = cell.borrow_mut().as_mut() {
-                    state.core.dispatch_control(&event, source.as_deref(), payload);
+                    state
+                        .core
+                        .dispatch_control(&event, source.as_deref(), payload);
                     state.core.settle(8);
                 }
             });
@@ -99,6 +522,33 @@ pub fn App() -> Element {
             version.set(next);
         },
     );
+    let navigate: NavigationSink = use_callback(move |path: String| {
+        let remote = APP.with(|cell| {
+            let mut borrow = cell.borrow_mut();
+            let Some(state) = borrow.as_mut() else {
+                return false;
+            };
+            state.core.navigate_to(&path, None);
+            state.remote
+        });
+        #[cfg(all(feature = "native-http", not(target_arch = "wasm32")))]
+        if remote {
+            remote_mount(version);
+            return;
+        }
+        #[cfg(not(all(feature = "native-http", not(target_arch = "wasm32"))))]
+        let _ = remote;
+        APP.with(|cell| {
+            if let Some(state) = cell.borrow_mut().as_mut() {
+                if state.core.needs_page_mount() {
+                    state.core.mount_page_blocking();
+                    state.core.settle(8);
+                }
+            }
+        });
+        let next = version.peek().wrapping_add(1);
+        version.set(next);
+    });
     // One sink per source trait, made once: a callback made per render lives as long as this root scope.
     let bound = use_hook(|| {
         std::rc::Rc::new(RefCell::new(std::collections::HashMap::<
@@ -127,10 +577,16 @@ pub fn App() -> Element {
         let core = &state.core;
         let registry = &state.registry;
         let orbital = core.orbital_name();
+        let now = web_time::Instant::now();
         let mut slot_names: Vec<String> = core.ui_slots.keys().cloned().collect();
+        if !core.awaiting_main_contents(now).is_empty() && !slot_names.iter().any(|name| name == "main") {
+            slot_names.push("main".into());
+        }
+        slot_names.extend(core.awaiting_slot_contents(now).into_iter().map(|(slot, _)| slot));
         slot_names.sort();
+        slot_names.dedup();
 
-        let trait_content = painted_trait_content(core);
+        let trait_content = painted_trait_content_at(core, now);
         let view = DioxusView {
             trait_name: &core.current_trait_name,
             orbital_name: &orbital,
@@ -139,6 +595,9 @@ pub fn App() -> Element {
             trait_content: &trait_content,
             source_trait: None,
             sink: Some(sink),
+            navigate: Some(navigate),
+            dock: None,
+            viewport_width,
             canvas_theme: core.canvas_theme(),
         };
 
@@ -152,9 +611,17 @@ pub fn App() -> Element {
                 document::Style { key: "almadar-css-{i}", href: "almadar-css-{i}", "{css}" }
             }
             div { class: "almadar-orbital-dioxus", "data-state": "{core.current_state}", "data-theme": "{theme}",
+                onmousedown: move |_| {
+                    #[cfg(all(feature = "native-audio", not(target_arch = "wasm32")))]
+                    crate::audio::user_gesture();
+                },
+                onkeydown: move |_| {
+                    #[cfg(all(feature = "native-audio", not(target_arch = "wasm32")))]
+                    crate::audio::user_gesture();
+                },
                 for slot_name in slot_names.iter() {
                     div { class: "almadar-slot", "data-slot": "{slot_name}",
-                        for sc in painted_slot_contents(core, slot_name).iter() {
+                        for sc in painted_slot_contents_at(core, slot_name, now).iter() {
                             {registry.render_spec(&sc.props, sc.entity.as_ref(), &view.for_source(sc.source_trait.clone(), sink_for(sc.source_trait.clone())))}
                         }
                     }

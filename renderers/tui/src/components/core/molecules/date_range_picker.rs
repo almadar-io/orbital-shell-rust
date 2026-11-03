@@ -30,6 +30,9 @@ impl PatternRenderer for DateRangePickerRenderer {
         _ctx: &mut RenderContext<'_>,
     ) {
         use ratatui::widgets::{Block, Borders, Paragraph};
-        frame.render_widget(Paragraph::new("From ___  To ___").block(Block::default().borders(Borders::ALL)), area);
+        frame.render_widget(
+            Paragraph::new("From ___  To ___").block(Block::default().borders(Borders::ALL)),
+            area,
+        );
     }
 }

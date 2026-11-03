@@ -31,6 +31,9 @@ impl PatternRenderer for DividerRenderer {
     ) {
         use ratatui::text::Line;
         use ratatui::widgets::Paragraph;
-        frame.render_widget(Paragraph::new(Line::from("─".repeat(area.width as usize))), area);
+        frame.render_widget(
+            Paragraph::new(Line::from("─".repeat(area.width as usize))),
+            area,
+        );
     }
 }

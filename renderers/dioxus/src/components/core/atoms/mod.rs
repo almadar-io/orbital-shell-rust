@@ -58,6 +58,8 @@ pub mod textarea;
 pub mod theme_toggle;
 pub mod time_slot_cell;
 pub mod trait_frame;
+#[cfg(all(feature = "native", not(target_arch = "wasm32")))]
+pub mod video_embed;
 pub mod trend_indicator;
 pub mod typewriter_text;
 pub mod typography;

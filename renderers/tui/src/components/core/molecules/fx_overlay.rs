@@ -39,7 +39,8 @@ impl PatternRenderer for FxOverlayRenderer {
             .map(|it| {
                 let effect = get_string_or(it, "effect", "sparkle");
                 let message = get_string_or(it, "message", "");
-                Line::from(format!("✦ {} {}", effect, message)).style(Style::default().fg(Color::Yellow))
+                Line::from(format!("✦ {} {}", effect, message))
+                    .style(Style::default().fg(Color::Yellow))
             })
             .collect();
         frame.render_widget(Paragraph::new(Text::from(lines)), area);

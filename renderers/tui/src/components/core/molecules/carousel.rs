@@ -31,7 +31,17 @@ impl PatternRenderer for CarouselRenderer {
     ) {
         use ratatui::text::Line;
         use ratatui::widgets::{Block, Borders, Paragraph};
-        let items = { let mut i = get_array(props, "items"); if i.is_empty() { i = get_array(props, "slides"); } i };
-        frame.render_widget(Paragraph::new(Line::from(format!("Carousel (1 / {})", items.len()))).block(Block::default().borders(Borders::ALL)), area);
+        let items = {
+            let mut i = get_array(props, "items");
+            if i.is_empty() {
+                i = get_array(props, "slides");
+            }
+            i
+        };
+        frame.render_widget(
+            Paragraph::new(Line::from(format!("Carousel (1 / {})", items.len())))
+                .block(Block::default().borders(Borders::ALL)),
+            area,
+        );
     }
 }

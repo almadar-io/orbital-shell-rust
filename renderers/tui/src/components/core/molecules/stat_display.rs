@@ -35,9 +35,15 @@ impl PatternRenderer for StatDisplayRenderer {
         let label = get_string_or(props, "label", "");
         let value = get_string_or(props, "value", "0");
         let lines = vec![
-            Line::from(Span::styled(value, Style::default().add_modifier(Modifier::BOLD))),
+            Line::from(Span::styled(
+                value,
+                Style::default().add_modifier(Modifier::BOLD),
+            )),
             Line::from(label),
         ];
-        frame.render_widget(Paragraph::new(Text::from(lines)).block(Block::default().borders(Borders::ALL)), area);
+        frame.render_widget(
+            Paragraph::new(Text::from(lines)).block(Block::default().borders(Borders::ALL)),
+            area,
+        );
     }
 }

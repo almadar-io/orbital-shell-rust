@@ -32,7 +32,19 @@ impl PatternRenderer for CounterTemplateRenderer {
         use ratatui::layout::Alignment;
         use ratatui::widgets::{Block, Borders, Paragraph};
         let count = get_number_or(props, "count", 0.0) as i64;
-        frame.render_widget(Paragraph::new(format!("{}
-[ − ] [ + ]", count)).alignment(Alignment::Center).block(Block::default().borders(Borders::ALL).title(get_string_or(props, "title", "Counter"))), area);
+        frame.render_widget(
+            Paragraph::new(format!(
+                "{}
+[ − ] [ + ]",
+                count
+            ))
+            .alignment(Alignment::Center)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(get_string_or(props, "title", "Counter")),
+            ),
+            area,
+        );
     }
 }

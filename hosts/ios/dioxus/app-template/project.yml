@@ -1,0 +1,25 @@
+name: OrbitalNativeGpu
+targets:
+  OrbitalNativeGpu:
+    type: application
+    platform: iOS
+    deploymentTarget: "16.0"
+    sources:
+      - path: main.c
+      - path: OrbitalVideoOverlay.m
+      - path: program.orb
+        buildPhase: resources
+      - path: language.json
+        buildPhase: resources
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.almadar.nativegpu
+        TARGETED_DEVICE_FAMILY: "1,2"
+        ENABLE_DEBUG_DYLIB: "NO"
+        OTHER_LDFLAGS: "$(inherited) $(ORB_GPU_LIB_DIR)/liborbital_client_dioxus.a -framework Metal -framework QuartzCore -framework Foundation -framework CoreFoundation -framework CoreGraphics -framework CoreText -framework Security -framework SystemConfiguration -framework UIKit -framework WebKit -lobjc"
+    info:
+      path: Info.plist
+      properties:
+        CFBundleDisplayName: Native TODO
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait

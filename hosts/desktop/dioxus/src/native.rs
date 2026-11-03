@@ -13,6 +13,8 @@
 
 use crate::app::{App, CSS_TEXT};
 use crate::shell;
+#[cfg(feature = "native-http")]
+use std::sync::Arc;
 
 /// Mount a schema and open the native window. Blocks on the winit event loop
 /// until the window closes. `css_texts` are stylesheet contents (already read
@@ -25,6 +27,17 @@ pub fn start(schema_json: &str, css_texts: Vec<String>, title: &str) -> Result<(
     Ok(())
 }
 
+/// Mount the same client circuit with a server bridge supplied by the host.
+#[cfg(feature = "native-http")]
+pub fn start_server(schema_json: &str, server_url: &str, css_texts: Vec<String>, title: &str) -> Result<(), String> {
+    let schema = orbital_core::schema::parse_schema(schema_json).map_err(|e| format!("parse schema: {e}"))?;
+    let bridge = Arc::new(orbital_core::client::SyncServerBridge::new(server_url));
+    let (orbitals, traits) = shell::mount_remote(schema, bridge)?;
+    tracing::info!(target: shell::NS, orbitals, traits, "native server mount");
+    open_window(css_texts, title);
+    Ok(())
+}
+
 /// Open the window over the already-mounted app ([`shell::mount`]); returns when it closes.
 pub fn open_window(css_texts: Vec<String>, title: &str) {
     tracing::info!(target: shell::NS, css_sheets = css_texts.len(), "native window");
@@ -32,16 +45,20 @@ pub fn open_window(css_texts: Vec<String>, title: &str) {
 
     let attrs = dioxus_native::WindowAttributes::default().with_title(title.to_string());
     let cfg = dioxus_native::Config::new().with_window_attributes(attrs);
+    dioxus_native::set_layout_hook(Some(crate::video_overlay::sync_layout));
     // Game tick driver: the frame hook (vendored dioxus-native patch,
     // dioxus_application.rs) runs the kernel's tick clock through ClientCore on the vsync
     // cadence so `set`-effect loops advance without waiting on a user event.
     dioxus_native::set_frame_hook(Some(Box::new(|| {
+        #[cfg(feature = "native-http")]
+        if crate::app::drive_remote_frame() { return; }
         if shell::drive_ticks() {
             crate::app::poke_rerender();
         }
     })));
     dioxus_native::launch_cfg(App, vec![], vec![Box::new(cfg)]);
     dioxus_native::set_frame_hook(None);
+    dioxus_native::set_layout_hook(None);
 }
 
 /// Drive one event from outside a render (used by the `--events` CLI flag and
