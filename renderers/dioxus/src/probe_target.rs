@@ -26,7 +26,7 @@ impl Default for DioxusTarget {
 
 impl RenderTarget for DioxusTarget {
     fn supports(&self, pattern: &str) -> bool {
-        self.registry.supports(pattern)
+        self.registry.is_complete(pattern)
     }
 
     fn is_stub(&self, pattern: &str) -> bool {
@@ -36,6 +36,44 @@ impl RenderTarget for DioxusTarget {
     #[cfg(all(feature = "native", not(target_arch = "wasm32")))]
     fn probe_game_canvas(&self, pattern: &str, props: &Value) -> GameCanvasOutcome {
         paint_game_canvas(pattern, props)
+    }
+}
+
+#[cfg(all(test, feature = "native", not(target_arch = "wasm32")))]
+mod tests {
+    use super::*;
+    use orbital_core::client::render_probe::probe;
+    use orbital_core::schema::OrbitalSchema;
+
+    #[test]
+    fn pattern_tile_paints_but_is_reported_incomplete_by_render_probe() {
+        let target = DioxusTarget::new();
+        assert!(target.registry.supports("pattern-tile"));
+        assert!(target.registry.is_partial("pattern-tile"));
+        assert!(!target.supports("pattern-tile"));
+        assert!(target.is_stub("pattern-tile"));
+        let program: OrbitalSchema = serde_json::from_value(serde_json::json!({
+            "name": "pattern-tile-probe", "typeContractVersion": 1,
+            "orbitals": [{
+                "name": "Main", "entity": {"name": "Row", "persistence": "runtime", "fields": []},
+                "traits": [{"name": "View", "linkedEntity": "Row", "stateMachine": {
+                    "states": [{"name": "idle", "isInitial": true}],
+                    "transitions": [{"from": "idle", "to": "idle", "event": "INIT",
+                        "effects": [["render-ui", "main", {"type": "pattern-tile", "variant": "star8", "size": 120}]]}]
+                }}],
+                "pages": [{"name": "Home", "path": "/", "traits": [{"ref": "View"}]}]
+            }]
+        }))
+        .unwrap();
+        let report = probe("pattern-tile-probe", program, None, &target).unwrap();
+        assert_eq!(report.stubbed, vec!["pattern-tile".to_string()]);
+        assert!(report
+            .verdicts
+            .iter()
+            .find(|verdict| verdict.name == "renderer_coverage")
+            .expect("renderer coverage verdict")
+            .offenders
+            .is_empty());
     }
 }
 

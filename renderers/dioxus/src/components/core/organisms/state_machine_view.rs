@@ -1,4 +1,4 @@
-use crate::registry::DioxusPatternRegistry;
+use crate::registry::{shared_root_attrs, DioxusPatternRegistry};
 use crate::renderer::{DioxusPatternRenderer, DioxusView};
 use dioxus::prelude::*;
 use orbital_core::client::avl_playback::{trait_level_from_description, AvlTraitDescription};
@@ -20,14 +20,14 @@ impl DioxusPatternRenderer for StateMachineViewRenderer {
         registry: &DioxusPatternRegistry,
     ) -> Element {
         if get_bool_or(props, "isLoading", false) {
-            return rsx! { div { class: "almadar-loading-state", role: "status", "Loading…" } };
+            return rsx! { div { ..shared_root_attrs(props), span { class: "almadar-loading-state", role: "status", "Loading…" } } };
         }
         if let Some(error) = props.as_object().and_then(|obj| obj.get("error")) {
             if !matches!(error, Value::Null) {
                 let message = get_string(error, "message")
                     .or_else(|| error.as_str().map(str::to_string))
                     .unwrap_or_else(|| to_json(error).to_string());
-                return rsx! { div { class: "almadar-alert almadar-alert--error", role: "alert", "{message}" } };
+                return rsx! { div { ..shared_root_attrs(props), span { class: "almadar-alert almadar-alert--error", role: "alert", "{message}" } } };
             }
         }
         let trait_value = props
@@ -46,7 +46,7 @@ impl DioxusPatternRenderer for StateMachineViewRenderer {
                 serde_json::to_value(level).ok().map(from_json)
             });
         let Some(trait_value) = trait_value else {
-            return rsx! { div { class: "almadar-state-machine-view-empty", "No state machine" } };
+            return rsx! { div { class: "almadar-state-machine-view-empty", ..shared_root_attrs(props), "No state machine" } };
         };
         let mut spec = ValueMap::new();
         spec.insert("type".into(), Value::string("avl-state-machine"));
@@ -61,6 +61,7 @@ impl DioxusPatternRenderer for StateMachineViewRenderer {
                 }
             }
         }
-        registry.render_spec(&Value::Object(spec.into()), entity, view)
+        let machine = registry.render_spec(&Value::Object(spec.into()), entity, view);
+        rsx! { div { ..shared_root_attrs(props), {machine} } }
     }
 }

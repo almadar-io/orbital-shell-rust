@@ -1,4 +1,4 @@
-use crate::registry::DioxusPatternRegistry;
+use crate::registry::{shared_root_attrs, DioxusPatternRegistry};
 use crate::renderer::{DioxusPatternRenderer, DioxusView, EventSink};
 use dioxus::prelude::*;
 use orbital_core::client::helpers::{
@@ -119,6 +119,7 @@ impl DioxusPatternRenderer for ControlGridRenderer {
             return rsx! {};
         }
         let class = merge_class_name("almadar-control-grid", props);
+        let root_attrs = shared_root_attrs(props);
         let size = get_string_or(props, "size", "md");
         let disabled = get_bool_or(props, "disabled", false);
         let kind = get_string_or(props, "kind", "dpad");
@@ -131,7 +132,7 @@ impl DioxusPatternRenderer for ControlGridRenderer {
                 _ => "display:flex;flex-direction:row;gap:8px",
             };
             return rsx! {
-                div { class: "{class}", style: "{layout_style}",
+                div { class: "{class}", style: "{layout_style}", ..root_attrs,
                     for (index, button) in buttons.iter().enumerate() {
                         {
                             let id = get_string_or(button, "id", "");
@@ -176,7 +177,7 @@ impl DioxusPatternRenderer for ControlGridRenderer {
             .as_object()
             .and_then(|value| value.get("directionAssets"));
         rsx! {
-            div { class: "{class}", style: "display:grid;grid-template-columns:repeat(3,max-content);gap:4px",
+            div { class: "{class}", style: "display:grid;grid-template-columns:repeat(3,max-content);gap:4px", ..root_attrs,
                 for (direction, glyph) in directions {
                     if direction.is_empty()
                         || (direction.contains('-') && !include_diagonals)

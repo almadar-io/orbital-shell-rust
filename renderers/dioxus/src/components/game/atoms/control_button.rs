@@ -1,4 +1,4 @@
-use crate::registry::DioxusPatternRegistry;
+use crate::registry::{shared_root_attrs_with_defaults, DioxusPatternRegistry};
 use crate::renderer::{DioxusPatternRenderer, DioxusView, EventSink};
 use dioxus::prelude::*;
 use orbital_core::client::helpers::{
@@ -10,6 +10,7 @@ pub struct ControlButtonRenderer;
 
 #[derive(Props, Clone, PartialEq)]
 struct ControlButtonProps {
+    root_props: Value,
     class: String,
     label: String,
     content: Element,
@@ -44,22 +45,30 @@ fn ControlButton(props: ControlButtonProps) -> Element {
     let on_release_on_leave = props.on_release.clone();
     let sink = props.sink;
     let disabled = props.disabled;
+    let root_attrs = shared_root_attrs_with_defaults(
+        &props.root_props,
+        &[
+            ("aria-label", Value::String(props.label.clone().into())),
+            (
+                "aria-pressed",
+                Value::String((props.pressed || held()).to_string().into()),
+            ),
+        ],
+    );
     rsx! {
         button {
             class: "{class}",
             style: "{props.style}",
             disabled: disabled,
-            "aria-label": "{props.label}",
-            "aria-pressed": props.pressed || held(),
             onmousedown: move |_| {
                 if !disabled && !held() {
                     held.set(true);
                     pointer_cycle.set(true);
                     if let (Some(sink), Some(event)) = (sink, &press) {
-                        sink.call((event.clone(), Value::Null));
+                        sink.call((event.clone(), Value::object(orbital_core::ValueMap::new())));
                     }
                     if let (Some(sink), Some(event)) = (sink, &on_press) {
-                        sink.call((event.clone(), Value::Null));
+                        sink.call((event.clone(), Value::object(orbital_core::ValueMap::new())));
                     }
                 }
             },
@@ -67,10 +76,10 @@ fn ControlButton(props: ControlButtonProps) -> Element {
                 if held() {
                     held.set(false);
                     if let (Some(sink), Some(event)) = (sink, &release) {
-                        sink.call((event.clone(), Value::Null));
+                        sink.call((event.clone(), Value::object(orbital_core::ValueMap::new())));
                     }
                     if let (Some(sink), Some(event)) = (sink, &on_release) {
-                        sink.call((event.clone(), Value::Null));
+                        sink.call((event.clone(), Value::object(orbital_core::ValueMap::new())));
                     }
                 }
             },
@@ -78,10 +87,10 @@ fn ControlButton(props: ControlButtonProps) -> Element {
                 if held() {
                     held.set(false);
                     if let (Some(sink), Some(event)) = (sink, &release_on_leave) {
-                        sink.call((event.clone(), Value::Null));
+                        sink.call((event.clone(), Value::object(orbital_core::ValueMap::new())));
                     }
                     if let (Some(sink), Some(event)) = (sink, &on_release_on_leave) {
-                        sink.call((event.clone(), Value::Null));
+                        sink.call((event.clone(), Value::object(orbital_core::ValueMap::new())));
                     }
                 }
             },
@@ -91,20 +100,21 @@ fn ControlButton(props: ControlButtonProps) -> Element {
                 } else if !disabled {
                     if let Some(sink) = sink {
                         if let Some(event) = &press_on_click {
-                            sink.call((event.clone(), Value::Null));
+                            sink.call((event.clone(), Value::object(orbital_core::ValueMap::new())));
                         }
                         if let Some(event) = &on_press_on_click {
-                            sink.call((event.clone(), Value::Null));
+                            sink.call((event.clone(), Value::object(orbital_core::ValueMap::new())));
                         }
                         if let Some(event) = &release_on_click {
-                            sink.call((event.clone(), Value::Null));
+                            sink.call((event.clone(), Value::object(orbital_core::ValueMap::new())));
                         }
                         if let Some(event) = &on_release_on_click {
-                            sink.call((event.clone(), Value::Null));
+                            sink.call((event.clone(), Value::object(orbital_core::ValueMap::new())));
                         }
                     }
                 }
             },
+            ..root_attrs,
             {props.content}
         }
     }
@@ -159,6 +169,7 @@ impl DioxusPatternRenderer for ControlButtonRenderer {
         };
         rsx! {
             ControlButton {
+                root_props: props.clone(),
                 class: format!("{} {variant}", merge_class_name("almadar-button almadar-control-button", props)),
                 label,
                 content,

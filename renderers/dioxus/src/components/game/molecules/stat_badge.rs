@@ -1,4 +1,4 @@
-use crate::registry::DioxusPatternRegistry;
+use crate::registry::{shared_root_attrs, DioxusPatternRegistry};
 use crate::renderer::{DioxusPatternRenderer, DioxusView};
 use dioxus::prelude::*;
 use orbital_core::client::helpers::{
@@ -95,6 +95,7 @@ impl DioxusPatternRenderer for StatBadgeRenderer {
         };
         rsx! {
             div { class: "{class}", style: "display:inline-flex;align-items:center;gap:8px;padding:{padding};border:1px solid {color};border-radius:var(--almadar-radius);background:var(--almadar-bg)",
+                ..shared_root_attrs(props),
                 {icon}
                 span { class: "almadar-stat-badge__label almadar-muted", "{label}" }
                 {display}

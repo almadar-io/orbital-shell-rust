@@ -1,9 +1,9 @@
 use crate::components::game::molecules::trait_slot::render_slot;
-use crate::registry::DioxusPatternRegistry;
+use crate::registry::{shared_root_attrs, DioxusPatternRegistry};
 use crate::renderer::{DioxusPatternRenderer, DioxusView};
 use dioxus::prelude::*;
 use orbital_core::client::helpers::{
-    get_array, get_bool_or, get_number, get_number_or, get_string, merge_class_name,
+    get_array, get_bool_or, get_number_or, get_string, merge_class_name,
 };
 use orbital_core::{Value, ValueMap};
 
@@ -21,20 +21,7 @@ impl DioxusPatternRenderer for SequenceBarRenderer {
         view: &DioxusView<'_>,
         registry: &DioxusPatternRegistry,
     ) -> Element {
-        let aria_label = get_string(props, "aria-label");
-        let aria_labelledby = get_string(props, "aria-labelledby");
-        let aria_describedby = get_string(props, "aria-describedby");
-        let aria_live = get_string(props, "aria-live");
-        let aria_current = get_string(props, "aria-current");
-        let aria_pressed = get_string(props, "aria-pressed");
-        let aria_expanded = get_bool_or(props, "aria-expanded", false);
-        let aria_selected = get_bool_or(props, "aria-selected", false);
-        let aria_hidden = get_bool_or(props, "aria-hidden", false);
-        let aria_busy = get_bool_or(props, "aria-busy", false);
-        let role = get_string(props, "role");
-        let lang = get_string(props, "lang");
-        let dir = get_string(props, "dir");
-        let tab_index = get_number(props, "tabIndex").map(|index| index.to_string());
+        let root_attrs = shared_root_attrs(props);
         let slots = get_array(props, "slots");
         let feedback = get_array(props, "slotFeedback");
         let max_slots = get_number_or(props, "maxSlots", 0.0).max(0.0) as usize;
@@ -49,6 +36,8 @@ impl DioxusPatternRenderer for SequenceBarRenderer {
             .cloned();
         let drop_event = get_string(props, "slotDropEvent").filter(|event| !event.is_empty());
         let remove_event = get_string(props, "slotRemoveEvent").filter(|event| !event.is_empty());
+        let drop_callback = get_string(props, "onSlotDrop").filter(|event| !event.is_empty());
+        let remove_callback = get_string(props, "onSlotRemove").filter(|event| !event.is_empty());
         let class = merge_class_name("almadar-sequence-bar", props);
         let children: Vec<(usize, Element)> = (0..max_slots)
             .map(|index| {
@@ -69,9 +58,15 @@ impl DioxusPatternRenderer for SequenceBarRenderer {
                     if let Some(event) = &remove_event {
                         slot.insert("removeEvent".into(), Value::String(event.clone().into()));
                     }
+                    if let Some(event) = &remove_callback {
+                        slot.insert("onSlotRemove".into(), Value::String(event.clone().into()));
+                    }
                 }
                 if let Some(event) = &drop_event {
                     slot.insert("dropEvent".into(), Value::String(event.clone().into()));
+                }
+                if let Some(event) = &drop_callback {
+                    slot.insert("onSlotDrop".into(), Value::String(event.clone().into()));
                 }
                 if let Some(size) = &size {
                     slot.insert("size".into(), Value::String(size.clone().into()));
@@ -88,26 +83,12 @@ impl DioxusPatternRenderer for SequenceBarRenderer {
                 if let Some(value) = feedback.get(index) {
                     slot.insert("feedback".into(), value.clone());
                 }
-                let child = render_slot(&Value::Object(slot.into()), index, view, registry);
+                let child = render_slot(&Value::Object(slot.into()), index + 1, view, registry);
                 (index, child)
             })
             .collect();
         rsx! {
-            div { class: "{class}", style: "display:flex;align-items:center;gap:8px",
-                aria_label: aria_label,
-                aria_labelledby: aria_labelledby,
-                aria_describedby: aria_describedby,
-                aria_live: aria_live,
-                aria_current: aria_current,
-                aria_pressed: aria_pressed,
-                aria_expanded: aria_expanded,
-                aria_selected: aria_selected,
-                aria_hidden: aria_hidden,
-                aria_busy: aria_busy,
-                role: role,
-                lang: lang,
-                dir: dir,
-                tabindex: tab_index,
+            div { class: "{class}", style: "display:flex;align-items:center;gap:8px", ..root_attrs,
                 for (index, child) in children.into_iter() {
                     if index > 0 {
                         span {

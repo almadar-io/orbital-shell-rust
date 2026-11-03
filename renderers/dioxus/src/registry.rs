@@ -10,7 +10,53 @@ use orbital_core::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-fn entry_props(spec: &Value) -> Option<Value> {
+pub(crate) fn shared_root_attrs(props: &Value) -> Vec<Attribute> {
+    shared_root_attrs_with_defaults(props, &[])
+}
+
+pub(crate) fn shared_root_attrs_with_defaults(
+    props: &Value,
+    defaults: &[(&'static str, Value)],
+) -> Vec<Attribute> {
+    let fields = props.as_object();
+    let field = |name: &str| {
+        fields.and_then(|fields| fields.get(name)).or_else(|| {
+            defaults
+                .iter()
+                .find(|(key, _)| *key == name)
+                .map(|(_, value)| value)
+        })
+    };
+    let mut attrs = Vec::new();
+    for name in [
+        "aria-label",
+        "aria-labelledby",
+        "aria-describedby",
+        "aria-live",
+        "aria-current",
+        "aria-pressed",
+        "role",
+        "lang",
+        "dir",
+    ] {
+        if let Some(value) = field(name).and_then(Value::as_str) {
+            attrs.push(Attribute::new(name, value.to_string(), None, false));
+        }
+    }
+    for name in ["aria-expanded", "aria-selected", "aria-hidden", "aria-busy"] {
+        if let Some(Value::Bool(value)) = field(name) {
+            attrs.push(Attribute::new(name, value.to_string(), None, false));
+        }
+    }
+    if let Some(Value::Number(index)) = field("tabIndex") {
+        if *index == -1.0 || *index == 0.0 {
+            attrs.push(Attribute::new("tabindex", *index as i64, None, false));
+        }
+    }
+    attrs
+}
+
+pub(crate) fn entry_props(spec: &Value) -> Option<Value> {
     let fields = spec.as_object()?;
     if !fields.contains_key("enter") && !fields.contains_key("enterDelay") {
         return None;
@@ -48,10 +94,10 @@ pub const RENDERER_ID: &str = "rust-dioxus";
 /// The error code a pattern this renderer lacks carries.
 pub const CODE_PATTERN_UNSUPPORTED: &str = "ORB_PATTERN_UNSUPPORTED_BY_RENDERER";
 
-/// Game patterns this renderer stubs for now (G-ORB-238): they draw the declared
-/// unsupported answer, and the render probe reports them as stubbed, not failed.
-/// Exactly the registry patterns this renderer lacks — `orbital-integration-tests`
-/// `tests/native_snapshot_baselines.rs` keeps the two equal.
+/// Patterns whose full shared contract this renderer has not yet proven (G-ORB-238).
+/// Most draw the unsupported answer. Registered research bodies and PatternTile's
+/// Canvas paint path remain usable, but render-probe coverage still reports them
+/// as incomplete. `orbital-integration-tests` guards this classification.
 pub const STUBBED_PATTERNS: &[&str] = &[
     "action-palette",
     "action-tile",
@@ -174,7 +220,7 @@ impl DioxusPatternRegistry {
         Arc::make_mut(&mut self.renderers).insert(name, Arc::from(renderer));
     }
 
-    /// The patterns this client implements, sorted — its declared coverage list.
+    /// Registered paint paths, sorted; this includes incomplete research bodies.
     pub fn coverage(&self) -> Vec<&str> {
         let mut names: Vec<&str> = self.renderers.keys().map(String::as_str).collect();
         names.sort_unstable();
@@ -186,9 +232,27 @@ impl DioxusPatternRegistry {
         self.renderers.contains_key(name)
     }
 
-    /// Whether `name` is one of this renderer's declared stubs.
+    /// Whether `name` has a renderer but has not proven its full contract.
+    pub fn is_partial(&self, name: &str) -> bool {
+        self.supports(name) && STUBBED_PATTERNS.contains(&name)
+    }
+
+    /// Whether `name` is complete enough for production render-probe coverage.
+    pub fn is_complete(&self, name: &str) -> bool {
+        self.supports(name) && !STUBBED_PATTERNS.contains(&name)
+    }
+
+    /// The complete patterns, sorted; partial paint paths are excluded.
+    pub fn complete_coverage(&self) -> Vec<&str> {
+        self.coverage()
+            .into_iter()
+            .filter(|name| self.is_complete(name))
+            .collect()
+    }
+
+    /// Whether `name` is an incomplete contract reported by the render probe.
     pub fn is_stub(&self, name: &str) -> bool {
-        !self.supports(name) && STUBBED_PATTERNS.contains(&name)
+        STUBBED_PATTERNS.contains(&name)
     }
 
     /// Look up a renderer by pattern name, else the unsupported-pattern answer.
@@ -250,6 +314,14 @@ pub fn default_registry() -> DioxusPatternRegistry {
         crate::components::core::atoms::video_embed::VideoEmbedRenderer,
     ));
     #[cfg(all(
+        feature = "research-audio",
+        feature = "native-audio",
+        not(target_arch = "wasm32")
+    ))]
+    registry.register(Box::new(
+        crate::components::game::atoms::game_audio_cue::GameAudioCueRenderer,
+    ));
+    #[cfg(all(
         feature = "research-drag",
         feature = "native",
         not(target_arch = "wasm32")
@@ -276,7 +348,8 @@ pub fn default_registry() -> DioxusPatternRegistry {
 
 #[cfg(test)]
 mod tests {
-    use super::entry_props;
+    use super::{entry_props, shared_root_attrs, shared_root_attrs_with_defaults};
+    use dioxus::core::AttributeValue;
     use orbital_core::Value;
 
     #[test]
@@ -305,6 +378,63 @@ mod tests {
             assert!(rendered.get("enter").is_none());
             assert!(rendered.get("enterDelay").is_none());
         }
+    }
+
+    #[test]
+    fn shared_root_attrs_preserve_declared_accessibility_values() {
+        let props = serde_json::from_str(
+            r#"{"aria-label":"Start","aria-expanded":false,"aria-busy":true,"role":"button","lang":"ar","dir":"rtl","tabIndex":-1}"#,
+        )
+        .unwrap();
+        let attrs = shared_root_attrs(&props);
+        let values: Vec<_> = attrs
+            .iter()
+            .map(|attr| {
+                let value = match &attr.value {
+                    AttributeValue::Text(value) => value.clone(),
+                    AttributeValue::Int(value) => value.to_string(),
+                    value => panic!("unexpected attribute value: {value:?}"),
+                };
+                (attr.name, value)
+            })
+            .collect();
+        assert_eq!(
+            values,
+            vec![
+                ("aria-label", "Start".into()),
+                ("role", "button".into()),
+                ("lang", "ar".into()),
+                ("dir", "rtl".into()),
+                ("aria-expanded", "false".into()),
+                ("aria-busy", "true".into()),
+                ("tabindex", "-1".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn shared_root_attrs_prefer_authored_values_to_component_defaults() {
+        let props = serde_json::from_str(r#"{"aria-pressed":"mixed"}"#).unwrap();
+        let attrs = shared_root_attrs_with_defaults(
+            &props,
+            &[("aria-pressed", Value::String("false".into()))],
+        );
+        let pressed: Vec<_> = attrs
+            .iter()
+            .filter(|attr| attr.name == "aria-pressed")
+            .collect();
+        assert_eq!(pressed.len(), 1);
+        assert!(matches!(&pressed[0].value, AttributeValue::Text(value) if value == "mixed"));
+    }
+
+    #[cfg(all(feature = "research-audio", feature = "native-audio"))]
+    #[test]
+    fn research_audio_registers_only_the_cue_host() {
+        let registry = super::default_registry();
+        assert!(registry.supports("game-audio-cue"));
+        assert!(registry.is_partial("game-audio-cue"));
+        assert!(!registry.is_complete("game-audio-cue"));
+        assert!(!registry.supports("game-audio-toggle"));
     }
 }
 

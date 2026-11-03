@@ -1,9 +1,7 @@
-use crate::registry::DioxusPatternRegistry;
+use crate::registry::{shared_root_attrs, DioxusPatternRegistry};
 use crate::renderer::{DioxusPatternRenderer, DioxusView};
 use dioxus::prelude::*;
-use orbital_core::client::helpers::{
-    get_bool_or, get_number, get_string, get_string_or, merge_class_name,
-};
+use orbital_core::client::helpers::{get_bool_or, get_string, get_string_or, merge_class_name};
 use orbital_core::{Value, ValueMap};
 
 pub struct ActionTileRenderer;
@@ -20,20 +18,7 @@ impl DioxusPatternRenderer for ActionTileRenderer {
         view: &DioxusView<'_>,
         registry: &DioxusPatternRegistry,
     ) -> Element {
-        let aria_label = get_string(props, "aria-label");
-        let aria_labelledby = get_string(props, "aria-labelledby");
-        let aria_describedby = get_string(props, "aria-describedby");
-        let aria_live = get_string(props, "aria-live");
-        let aria_current = get_string(props, "aria-current");
-        let aria_pressed = get_string(props, "aria-pressed");
-        let aria_expanded = get_bool_or(props, "aria-expanded", false);
-        let aria_selected = get_bool_or(props, "aria-selected", false);
-        let aria_hidden = get_bool_or(props, "aria-hidden", false);
-        let aria_busy = get_bool_or(props, "aria-busy", false);
-        let role = get_string(props, "role");
-        let lang = get_string(props, "lang");
-        let dir = get_string(props, "dir");
-        let tab_index = get_number(props, "tabIndex").map(|index| index.to_string());
+        let root_attrs = shared_root_attrs(props);
         let action = props
             .as_object()
             .and_then(|value| value.get("action"))
@@ -87,20 +72,6 @@ impl DioxusPatternRenderer for ActionTileRenderer {
         rsx! {
             div {
                 class: "{class}",
-                aria_label: aria_label,
-                aria_labelledby: aria_labelledby,
-                aria_describedby: aria_describedby,
-                aria_live: aria_live,
-                aria_current: aria_current,
-                aria_pressed: aria_pressed,
-                aria_expanded: aria_expanded,
-                aria_selected: aria_selected,
-                aria_hidden: aria_hidden,
-                aria_busy: aria_busy,
-                role: role,
-                lang: lang,
-                dir: dir,
-                tabindex: tab_index,
                 style: "{style}",
                 draggable: !disabled,
                 "aria-disabled": disabled,
@@ -125,6 +96,7 @@ impl DioxusPatternRenderer for ActionTileRenderer {
                     }
                     transfer.set_effect_allowed("copy");
                 },
+                ..root_attrs,
                 {icon}
                 span { class: "almadar-action-tile__name", "{name}" }
             }

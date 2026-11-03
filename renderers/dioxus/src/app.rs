@@ -620,7 +620,7 @@ pub fn App() -> Element {
                     crate::audio::user_gesture();
                 },
                 for slot_name in slot_names.iter() {
-                    div { class: "almadar-slot", "data-slot": "{slot_name}",
+                    div { key: "{slot_name}", class: "almadar-slot", "data-slot": "{slot_name}",
                         for sc in painted_slot_contents_at(core, slot_name, now).iter() {
                             {registry.render_spec(&sc.props, sc.entity.as_ref(), &view.for_source(sc.source_trait.clone(), sink_for(sc.source_trait.clone())))}
                         }

@@ -24,6 +24,8 @@ pub mod renderer;
 pub mod offscreen;
 pub mod probe_target;
 pub mod styles;
+#[cfg(all(feature = "native", not(target_arch = "wasm32")))]
+pub(crate) mod timer;
 #[path = "../../../runtime/dioxus/src/shell.rs"]
 pub mod shell;
 pub mod video_overlay;

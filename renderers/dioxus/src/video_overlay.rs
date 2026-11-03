@@ -535,6 +535,8 @@ struct VideoEntry {
 thread_local! {
     static VIDEO_ENTRIES: RefCell<HashMap<usize, VideoEntry>> = RefCell::new(HashMap::new());
     static VISIBLE_VIDEO: RefCell<HashMap<usize, VideoOverlay>> = RefCell::new(HashMap::new());
+    #[cfg(target_os = "android")]
+    static LAST_VIDEO_LAYOUT: RefCell<Option<Vec<(usize, [f32; 4])>>> = const { RefCell::new(None) };
 }
 
 #[cfg(all(feature = "native", not(target_arch = "wasm32")))]
@@ -672,6 +674,16 @@ fn overlay_from_props(node_id: usize, props: &Value, bounds: VideoBounds) -> Opt
 
 #[cfg(all(feature = "native", not(target_arch = "wasm32")))]
 pub fn sync_layout(window: &dioxus_native::Window, positions: &[(usize, [f32; 4])]) {
+    #[cfg(target_os = "android")]
+    LAST_VIDEO_LAYOUT.with(|last| {
+        let changed = last.borrow().as_deref() != Some(positions);
+        if changed {
+            let entries =
+                VIDEO_ENTRIES.with(|entries| entries.borrow().keys().copied().collect::<Vec<_>>());
+            tracing::info!(?positions, ?entries, "native video layout changed");
+            *last.borrow_mut() = Some(positions.to_vec());
+        }
+    });
     let mut seen = HashSet::new();
     let mut updates = Vec::new();
     for &(id, [x, y, width, height]) in positions {
@@ -757,6 +769,119 @@ pub fn sync_layout(window: &dioxus_native::Window, positions: &[(usize, [f32; 4]
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(all(feature = "native", not(target_arch = "wasm32")))]
+    #[test]
+    fn video_anchor_has_a_nonzero_native_layout_box() {
+        use blitz_dom::{Document as _, DocumentConfig};
+        use blitz_traits::shell::{ColorScheme, Viewport};
+        use dioxus_native::DioxusDocument;
+
+        fn app() -> Element {
+            rsx! {
+                div { class: "almadar-orbital-dioxus",
+                    div { class: "almadar-slot",
+                        div { class: "almadar-stack", style: "display:flex;flex-direction:column;gap:16px",
+                            h2 { "Video probe" }
+                            VideoAnchor {
+                                props: Value::Object(
+                                    [("src".into(), Value::String("file:///android_asset/video-probe.html".into()))]
+                                        .into_iter()
+                                        .collect(),
+                                ),
+                                sink: None,
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        let mut doc = DioxusDocument::new(
+            dioxus_core::VirtualDom::new(app),
+            DocumentConfig {
+                viewport: Some(Viewport::new(400, 300, 1.0, ColorScheme::Light)),
+                ..Default::default()
+            },
+        );
+        for css in crate::styles::stylesheets() {
+            doc.add_user_agent_stylesheet(&css);
+        }
+        doc.initial_build();
+        doc.resolve(0.0);
+        let id = doc.query_selector("[data-orbital-video]").unwrap().unwrap();
+        let size = doc.get_node(id).unwrap().final_layout.size;
+        let mut ancestry = Vec::new();
+        let mut parent = Some(id);
+        while let Some(node_id) = parent {
+            let node = doc.get_node(node_id).unwrap();
+            ancestry.push(format!(
+                "{}: {:?}",
+                node.node_debug_str(),
+                node.final_layout.size
+            ));
+            parent = node.parent;
+        }
+        assert!(
+            size.width > 300.0,
+            "video width: {}; ancestors: {ancestry:?}",
+            size.width
+        );
+        assert!(size.height > 150.0, "video height: {}", size.height);
+    }
+
+    #[cfg(all(
+        feature = "native",
+        feature = "research-video",
+        not(target_arch = "wasm32")
+    ))]
+    #[test]
+    fn video_anchor_id_survives_inserting_an_authored_hud_slot() {
+        use blitz_dom::{Document as _, DocumentConfig};
+        use blitz_traits::shell::{ColorScheme, Viewport};
+        use dioxus_native::DioxusDocument;
+
+        let schema = serde_json::json!({
+            "name": "video-slot-key",
+            "typeContractVersion": 1,
+            "orbitals": [{
+                "name": "Main",
+                "entity": { "name": "Row", "persistence": "runtime", "fields": [{ "name": "id", "type": "string" }] },
+                "traits": [{ "name": "View", "linkedEntity": "Row", "stateMachine": {
+                    "states": [{ "name": "idle", "isInitial": true }],
+                    "transitions": [
+                        { "from": "idle", "to": "idle", "event": "INIT", "effects": [["render-ui", "main", { "type": "video-embed", "src": "file:///android_asset/video-probe.html" }]] },
+                        { "from": "idle", "to": "idle", "event": "SHOW_STATUS", "effects": [["render-ui", "hud", { "type": "typography", "content": "READY" }]] }
+                    ]
+                } }],
+                "pages": [{ "name": "Home", "path": "/", "traits": [{ "ref": "View" }] }]
+            }]
+        })
+        .to_string();
+        crate::shell::mount_core(&schema).unwrap();
+        crate::app::CSS_TEXT.with(|css| css.borrow_mut().clear());
+        let mut doc = DioxusDocument::new(
+            dioxus_core::VirtualDom::new(crate::app::App),
+            DocumentConfig {
+                viewport: Some(Viewport::new(400, 300, 1.0, ColorScheme::Light)),
+                ..Default::default()
+            },
+        );
+        doc.initial_build();
+        doc.resolve(0.0);
+        let before =
+            VIDEO_ENTRIES.with(|entries| entries.borrow().keys().copied().collect::<HashSet<_>>());
+        assert_eq!(before.len(), 1, "initial video mounts: {before:?}");
+
+        crate::shell::drive_event("SHOW_STATUS", "{}").unwrap();
+        crate::app::poke_rerender();
+        assert!(doc.poll(None));
+        doc.resolve(0.0);
+        let after =
+            VIDEO_ENTRIES.with(|entries| entries.borrow().keys().copied().collect::<HashSet<_>>());
+        assert_eq!(after, before, "HUD insertion remounted video anchors");
+        assert!(doc.query_selector("[data-slot=hud]").unwrap().is_some());
+    }
 
     #[test]
     fn video_source_prefers_authored_id_and_events_keep_declared_payloads() {

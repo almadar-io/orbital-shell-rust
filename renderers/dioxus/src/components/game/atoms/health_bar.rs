@@ -1,4 +1,4 @@
-use crate::registry::DioxusPatternRegistry;
+use crate::registry::{shared_root_attrs_with_defaults, DioxusPatternRegistry};
 use crate::renderer::{DioxusPatternRenderer, DioxusView};
 use dioxus::prelude::*;
 use orbital_core::client::helpers::{
@@ -67,7 +67,8 @@ impl DioxusPatternRenderer for HealthBarRenderer {
                     _ => 24,
                 };
                 rsx! {
-                    div { class: "{class}", aria_label: "{label}", style: "display:flex;align-items:center;gap:4px;",
+                    div { class: "{class}", style: "display:flex;align-items:center;gap:4px;",
+                        ..shared_root_attrs_with_defaults(props, &[("aria-label", Value::String(label.clone().into()))]),
                         for index in 0..count {
                             {
                                 let filled = (index as f64) < current;
@@ -80,7 +81,9 @@ impl DioxusPatternRenderer for HealthBarRenderer {
                 }
             }
             "bar" => rsx! {
-                div { class: "{class}", role: "progressbar", aria_label: "{label}", style: "{track_style}",
+                div { class: "{class}", style: "{track_style}",
+                    aria_valuenow: current.to_string(), aria_valuemin: "0", aria_valuemax: max.to_string(),
+                    ..shared_root_attrs_with_defaults(props, &[("aria-label", Value::String(label.clone().into())), ("role", Value::String("progressbar".into()))]),
                     if let Some(asset) = frame_asset.as_ref() {
                         div { style: "position:absolute;inset:0;", {crate::components::game::asset_panel::fill_parent(asset, "stretch", view, registry)} }
                     }
@@ -102,11 +105,13 @@ impl DioxusPatternRenderer for HealthBarRenderer {
                 };
                 rsx! {
                     div { class: "{class}", style: "display:flex;align-items:center;gap:8px;",
+                        ..shared_root_attrs_with_defaults(props, &[("aria-label", Value::String(label.clone().into()))]),
                         if let Some(level) = level {
                             span { class: "almadar-health-bar__level", "Lv.{level}" }
                         }
                         div { style: "display:flex;flex-direction:column;flex:1;",
                             div { role: "progressbar", aria_label: "{label}", style: "{track_style}",
+                                aria_valuenow: current.to_string(), aria_valuemin: "0", aria_valuemax: max.to_string(),
                                 if let Some(asset) = frame_asset.as_ref() {
                                     div { style: "position:absolute;inset:0;", {crate::components::game::asset_panel::fill_parent(asset, "stretch", view, registry)} }
                                 }
@@ -122,7 +127,7 @@ impl DioxusPatternRenderer for HealthBarRenderer {
                 }
             }
             _ => rsx! {
-                span { class: "{class}", aria_label: "{label}", style: "font-family:monospace;font-weight:700;", "{current}/{max}" }
+                span { class: "{class}", style: "font-family:monospace;font-weight:700;", ..shared_root_attrs_with_defaults(props, &[("aria-label", Value::String(label.into()))]), "{current}/{max}" }
             },
         }
     }

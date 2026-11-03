@@ -1,8 +1,8 @@
-use crate::registry::DioxusPatternRegistry;
+use crate::registry::{shared_root_attrs, DioxusPatternRegistry};
 use crate::renderer::{DioxusPatternRenderer, DioxusView, EventSink};
 use dioxus::prelude::*;
 use orbital_core::client::helpers::{
-    get_bool_or, get_number, get_number_or, get_string, get_string_or, merge_class_name,
+    get_bool_or, get_number_or, get_string, get_string_or, merge_class_name,
 };
 use orbital_core::{Value, ValueMap};
 
@@ -22,22 +22,11 @@ struct SlotProps {
     lock_label: Option<String>,
     empty_label: Option<String>,
     remove_label: Option<String>,
-    aria_label: Option<String>,
-    aria_labelledby: Option<String>,
-    aria_describedby: Option<String>,
-    aria_live: Option<String>,
-    aria_current: Option<String>,
-    aria_pressed: Option<String>,
-    aria_expanded: bool,
-    aria_selected: bool,
-    aria_hidden: bool,
-    aria_busy: bool,
-    role: Option<String>,
-    lang: Option<String>,
-    dir: Option<String>,
-    tab_index: Option<String>,
+    root_attrs: Vec<Attribute>,
     icon_content: Element,
+    tooltip_frame: Option<Element>,
     drag_json: Option<String>,
+    drag_item: Option<Value>,
     machine_states: Vec<String>,
     machine_transitions: Vec<String>,
     locked: bool,
@@ -45,8 +34,14 @@ struct SlotProps {
     draggable: bool,
     show_tooltip: bool,
     click_event: Option<String>,
+    click_callback: Option<String>,
     remove_event: Option<String>,
+    remove_callback: Option<String>,
+    sequence_remove_callback: Option<String>,
     drop_event: Option<String>,
+    drop_callback: Option<String>,
+    sequence_drop_callback: Option<String>,
+    drag_start_callback: Option<String>,
     sink: Option<EventSink>,
 }
 
@@ -70,27 +65,28 @@ fn Slot(props: SlotProps) -> Element {
     };
     let item_name = props.item_name.clone();
     let item_description = props.item_description.clone();
-    let accessible_name = props
-        .aria_label
-        .clone()
-        .or(item_name.clone())
-        .or_else(|| props.empty_label.clone())
-        .unwrap_or_else(|| "Empty slot".to_string());
+    let root_attrs = props.root_attrs.clone();
     let lock_label = props.lock_label.clone();
-    let remove_label = props
-        .remove_label
-        .clone()
-        .unwrap_or_else(|| "Remove".to_string());
+    let remove_label = props.remove_label.clone();
     let icon_content = props.icon_content.clone();
+    let tooltip_frame = props.tooltip_frame.clone();
     let slot_number = props.slot_number;
     let event_slot_number = props.event_slot_number;
     let locked = props.locked;
     let draggable = props.draggable && props.item_id.is_some() && !locked;
     let click_event = props.click_event.clone();
+    let click_callback = props.click_callback.clone();
     let remove_event = props.remove_event.clone();
+    let remove_callback = props.remove_callback.clone();
+    let sequence_remove_callback = props.sequence_remove_callback.clone();
     let drop_event = props.drop_event.clone();
-    let drop_event_over = drop_event.clone();
+    let drop_callback = props.drop_callback.clone();
+    let sequence_drop_callback = props.sequence_drop_callback.clone();
+    let drag_start_callback = props.drag_start_callback.clone();
+    let accepts_drop =
+        drop_event.is_some() || drop_callback.is_some() || sequence_drop_callback.is_some();
     let drag_json = props.drag_json.clone();
+    let drag_item = props.drag_item.clone();
     let sink = props.sink;
     let sink_remove = sink;
     let sink_drop = sink;
@@ -106,24 +102,15 @@ fn Slot(props: SlotProps) -> Element {
                 style: "{props.style}",
                 disabled: locked,
                 draggable: draggable,
-                aria_label: accessible_name,
-                aria_labelledby: props.aria_labelledby,
-                aria_describedby: props.aria_describedby,
-                aria_live: props.aria_live,
-                aria_current: props.aria_current,
-                aria_pressed: props.aria_pressed,
-                aria_expanded: props.aria_expanded,
-                aria_selected: props.aria_selected,
-                aria_hidden: props.aria_hidden,
-                aria_busy: props.aria_busy,
-                role: props.role,
-                lang: props.lang,
-                dir: props.dir,
-                tabindex: props.tab_index,
                 onclick: move |_| {
                     if !locked {
-                        if let (Some(sink), Some(event)) = (sink, &click_event) {
-                            sink.call((event.clone(), slot_payload(event_slot_number, None)));
+                        if let Some(sink) = sink {
+                            if let Some(event) = &click_event {
+                                sink.call((event.clone(), slot_payload(event_slot_number, None)));
+                            }
+                            if let Some(event) = &click_callback {
+                                sink.call((event.clone(), Value::Null));
+                            }
                         }
                     }
                 },
@@ -142,10 +129,15 @@ fn Slot(props: SlotProps) -> Element {
                             return;
                         }
                         transfer.set_effect_allowed("move");
+                        if let (Some(sink), Some(name), Some(item)) = (sink, &drag_start_callback, &drag_item) {
+                            let mut payload = ValueMap::new();
+                            payload.insert("item".into(), item.clone());
+                            sink.call((name.clone(), Value::Object(payload.into())));
+                        }
                     }
                 },
                 ondragover: move |event| {
-                    if locked || drop_event_over.is_none() {
+                    if locked || !accepts_drop {
                         return;
                     }
                     let transfer = event.data().data_transfer();
@@ -161,15 +153,29 @@ fn Slot(props: SlotProps) -> Element {
                     if locked {
                         return;
                     }
-                    let Some(name) = &drop_event else { return };
+                    if !accepts_drop { return; }
                     let Some(raw) = event.data().data_transfer().get_data(DRAG_MIME) else { return };
                     let Ok(item) = serde_json::from_str::<Value>(&raw) else { return };
                     let Some(id) = get_string(&item, "id") else { return };
                     event.prevent_default();
                     if let Some(sink) = sink_drop {
-                        sink.call((name.clone(), slot_payload(event_slot_number, Some(&id))));
+                        if let Some(name) = &drop_event {
+                            sink.call((name.clone(), slot_payload(event_slot_number, Some(&id))));
+                        }
+                        if let Some(name) = &drop_callback {
+                            let mut payload = ValueMap::new();
+                            payload.insert("item".into(), item.clone());
+                            sink.call((name.clone(), Value::Object(payload.into())));
+                        }
+                        if let Some(name) = &sequence_drop_callback {
+                            let mut payload = ValueMap::new();
+                            payload.insert("index".into(), Value::Number(event_slot_number as f64));
+                            payload.insert("item".into(), item);
+                            sink.call((name.clone(), Value::Object(payload.into())));
+                        }
                     }
                 },
+                ..root_attrs,
                 if locked {
                     span { "🔒" }
                     if let Some(label) = &lock_label { span { "{label}" } }
@@ -179,14 +185,24 @@ fn Slot(props: SlotProps) -> Element {
                     span { "+" }
                 }
             }
-            if item_present && remove_event.is_some() && !locked {
+            if item_present && (remove_event.is_some() || remove_callback.is_some() || sequence_remove_callback.is_some()) && !locked {
                 button {
                     class: "almadar-trait-slot__remove",
                     style: "position:absolute;top:-6px;right:-6px;border-radius:50%;width:18px;height:18px",
                     "aria-label": remove_label,
                     onclick: move |_| {
-                        if let (Some(sink), Some(event)) = (sink_remove, &remove_event) {
-                            sink.call((event.clone(), slot_payload(event_slot_number, None)));
+                        if let Some(sink) = sink_remove {
+                            if let Some(event) = &remove_event {
+                                sink.call((event.clone(), slot_payload(event_slot_number, None)));
+                            }
+                            if let Some(event) = &remove_callback {
+                                sink.call((event.clone(), Value::Null));
+                            }
+                            if let Some(event) = &sequence_remove_callback {
+                                let mut payload = ValueMap::new();
+                                payload.insert("index".into(), Value::Number(event_slot_number as f64));
+                                sink.call((event.clone(), Value::Object(payload.into())));
+                            }
                         }
                     },
                     "×"
@@ -195,12 +211,15 @@ fn Slot(props: SlotProps) -> Element {
             span { class: "almadar-trait-slot__number", style: "position:absolute;bottom:-7px;left:-7px", "{slot_number}" }
             if props.show_tooltip && hovered() && item_present {
                 div { class: "almadar-trait-slot__tooltip", style: "position:absolute;bottom:100%;left:50%;transform:translateX(-50%);z-index:10;padding:12px;min-width:200px;background:var(--color-background);border:1px solid var(--color-border)",
-                    strong { "{tooltip_name}" }
-                    if let Some(description) = &item_description { p { "{description}" } }
-                    if !machine_states.is_empty() {
-                        p { "States: {states_line}" }
+                    if let Some(frame) = tooltip_frame {
+                        div { style: "position:absolute;inset:0;pointer-events:none", {frame} }
                     }
-                    for transition in machine_transitions.iter() { p { "{transition}" } }
+                    div { style: "position:relative",
+                        strong { "{tooltip_name}" }
+                        if let Some(description) = &item_description { p { "{description}" } }
+                        if !machine_states.is_empty() { p { "{states_line}" } }
+                        for transition in machine_transitions.iter() { p { "{transition}" } }
+                    }
                 }
             }
         }
@@ -221,20 +240,12 @@ pub(crate) fn render_slot(
     let lock_label = get_string(props, "lockLabel");
     let empty_label = get_string(props, "emptyLabel");
     let remove_label = get_string(props, "removeLabel");
-    let aria_label = get_string(props, "aria-label");
-    let aria_labelledby = get_string(props, "aria-labelledby");
-    let aria_describedby = get_string(props, "aria-describedby");
-    let aria_live = get_string(props, "aria-live");
-    let aria_current = get_string(props, "aria-current");
-    let aria_pressed = get_string(props, "aria-pressed");
-    let aria_expanded = get_bool_or(props, "aria-expanded", false);
-    let aria_selected = get_bool_or(props, "aria-selected", false);
-    let aria_hidden = get_bool_or(props, "aria-hidden", false);
-    let aria_busy = get_bool_or(props, "aria-busy", false);
-    let role = get_string(props, "role");
-    let lang = get_string(props, "lang");
-    let dir = get_string(props, "dir");
-    let tab_index = get_number(props, "tabIndex").map(|index| index.to_string());
+    let mut root_attrs = shared_root_attrs(props);
+    if get_string(props, "aria-label").is_none() {
+        if let Some(name) = item_name.clone().or_else(|| empty_label.clone()) {
+            root_attrs.push(Attribute::new("aria-label", name, None, false));
+        }
+    }
     let category = item
         .map(|item| get_string_or(item, "category", ""))
         .unwrap_or_default();
@@ -285,6 +296,12 @@ pub(crate) fn render_slot(
     } else {
         rsx! { span { "{icon}" } }
     };
+    let tooltip_frame = props
+        .as_object()
+        .and_then(|props| props.get("tooltipFrameUrl"))
+        .map(|asset| {
+            crate::components::game::asset_panel::fill_parent(asset, "slice", view, registry)
+        });
     let drag_json = item.and_then(|item| serde_json::to_string(item).ok());
     let machine = item
         .and_then(|item| item.as_object())
@@ -307,18 +324,26 @@ pub(crate) fn render_slot(
         .collect();
     let class = merge_class_name("almadar-trait-slot", props);
     let click_event = get_string(props, "clickEvent").filter(|event| !event.is_empty());
+    let click_callback = get_string(props, "onClick").filter(|event| !event.is_empty());
     let remove_event = get_string(props, "removeEvent").filter(|event| !event.is_empty());
+    let remove_callback = get_string(props, "onRemove").filter(|event| !event.is_empty());
+    let sequence_remove_callback =
+        get_string(props, "onSlotRemove").filter(|event| !event.is_empty());
     let drop_event = get_string(props, "dropEvent").filter(|event| !event.is_empty());
+    let drop_callback = get_string(props, "onItemDrop").filter(|event| !event.is_empty());
+    let sequence_drop_callback = get_string(props, "onSlotDrop").filter(|event| !event.is_empty());
+    let drag_start_callback = get_string(props, "onDragStart").filter(|event| !event.is_empty());
     rsx! {
         Slot {
             class, style, slot_number, event_slot_number,
-            item_id, item_name, item_description, lock_label, empty_label, remove_label, icon_content, drag_json,
-            aria_label, aria_labelledby, aria_describedby, aria_live, aria_current, aria_pressed,
-            aria_expanded, aria_selected, aria_hidden, aria_busy, role, lang, dir, tab_index,
+            item_id, item_name, item_description, lock_label, empty_label, remove_label, icon_content, tooltip_frame, drag_json,
+            drag_item: item.cloned(),
+            root_attrs,
             machine_states, machine_transitions, locked, selected,
             draggable: get_bool_or(props, "draggable", false),
             show_tooltip: get_bool_or(props, "showTooltip", true),
-            click_event, remove_event, drop_event, sink: view.sink
+            click_event, click_callback, remove_event, remove_callback, sequence_remove_callback,
+            drop_event, drop_callback, sequence_drop_callback, drag_start_callback, sink: view.sink
         }
     }
 }

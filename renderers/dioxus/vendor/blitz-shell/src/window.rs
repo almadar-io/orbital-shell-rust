@@ -215,6 +215,9 @@ impl<Rend: WindowRenderer> View<Rend> {
         // Render
         self.renderer
             .render(|scene| paint_scene(scene, &self.doc, scale, width, height));
+        // Android may not compose the first present; schedule one vsync redraw.
+        #[cfg(target_os = "android")]
+        self.window.request_redraw();
         #[cfg(feature = "accessibility")]
         if self.accessibility_dirty.replace(false) {
             self.accessibility.update_tree(&self.doc);

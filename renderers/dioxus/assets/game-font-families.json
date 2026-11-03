@@ -1,0 +1,13 @@
+{
+  "source": "@almadar/pattern-sync/game-font-families-source.json",
+  "fallback": "ui-sans-serif, system-ui, sans-serif",
+  "unknownKey": "css-font-family",
+  "aliases": {
+    "fredoka": "Fredoka",
+    "future": "Kenney Future",
+    "future-narrow": "Kenney Future Narrow",
+    "pixel": "Kenney Pixel",
+    "blocks": "Kenney Blocks",
+    "mini": "Kenney Mini"
+  }
+}

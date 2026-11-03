@@ -1,9 +1,7 @@
-use crate::registry::DioxusPatternRegistry;
+use crate::registry::{shared_root_attrs_with_defaults, DioxusPatternRegistry};
 use crate::renderer::{DioxusPatternRenderer, DioxusView};
 use dioxus::prelude::*;
-use orbital_core::client::helpers::{
-    get_bool_or, get_number, get_string, get_string_or, merge_class_name,
-};
+use orbital_core::client::helpers::{get_bool_or, get_string, get_string_or, merge_class_name};
 use orbital_core::{Value, ValueMap};
 
 pub struct GameAudioToggleRenderer;
@@ -46,49 +44,18 @@ impl DioxusPatternRenderer for GameAudioToggleRenderer {
         let sink = view.sink;
         let size = get_string_or(props, "size", "sm");
         let class = merge_class_name("almadar-button almadar-game-audio-toggle", props);
-        let accessible_name = get_string(props, "aria-label").unwrap_or(label);
-        let labelled_by = get_string(props, "aria-labelledby");
-        let described_by = get_string(props, "aria-describedby");
-        let live = get_string(props, "aria-live");
-        let current = get_string(props, "aria-current");
-        let expanded = props
-            .as_object()
-            .and_then(|value| value.get("aria-expanded"))
-            .and_then(Value::as_bool)
-            .map(|value| value.to_string());
-        let selected = props
-            .as_object()
-            .and_then(|value| value.get("aria-selected"))
-            .and_then(Value::as_bool)
-            .map(|value| value.to_string());
-        let hidden = props
-            .as_object()
-            .and_then(|value| value.get("aria-hidden"))
-            .and_then(Value::as_bool)
-            .map(|value| value.to_string());
-        let busy = get_bool_or(props, "aria-busy", disabled).to_string();
-        let tab_index = get_number(props, "tabIndex").map(|value| (value as i64).to_string());
-        let role = get_string(props, "role");
-        let lang = get_string(props, "lang");
-        let dir = get_string(props, "dir");
+        let root_attrs = shared_root_attrs_with_defaults(
+            props,
+            &[
+                ("aria-label", Value::String(label.into())),
+                ("aria-pressed", Value::String(muted.to_string().into())),
+                ("aria-busy", Value::Bool(disabled)),
+            ],
+        );
         rsx! {
             button {
                 class: "{class}",
                 "data-size": "{size}",
-                aria_label: accessible_name,
-                aria_labelledby: labelled_by,
-                aria_describedby: described_by,
-                aria_live: live,
-                aria_current: current,
-                aria_pressed: muted.to_string(),
-                aria_expanded: expanded,
-                aria_selected: selected,
-                aria_hidden: hidden,
-                aria_busy: busy,
-                tabindex: tab_index,
-                role: role,
-                lang: lang,
-                dir: dir,
                 disabled: disabled,
                 onclick: move |_| {
                     if !disabled {
@@ -99,6 +66,7 @@ impl DioxusPatternRenderer for GameAudioToggleRenderer {
                         }
                     }
                 },
+                ..root_attrs,
                 span { aria_hidden: "true", {content} }
             }
         }

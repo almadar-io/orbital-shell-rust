@@ -1,4 +1,5 @@
-use crate::registry::DioxusPatternRegistry;
+use crate::components::avl::schema::schema_from_props;
+use crate::registry::{shared_root_attrs, DioxusPatternRegistry};
 use crate::renderer::{DioxusPatternRenderer, DioxusView, EventSink};
 use dioxus::prelude::*;
 use orbital_core::client::avl_playback::{
@@ -7,7 +8,7 @@ use orbital_core::client::avl_playback::{
 use orbital_core::client::helpers::{
     from_json, get_array, get_string, get_string_or, merge_class_name, to_json,
 };
-use orbital_core::schema::{format_sexpr, trait_machine, transition_at, OrbitalSchema};
+use orbital_core::schema::{format_sexpr, trait_machine, transition_at};
 use orbital_core::{Value, ValueMap};
 
 pub struct AvlTransitionDetailRenderer;
@@ -21,14 +22,6 @@ struct Detail {
     event: String,
     guard: Option<String>,
     effects: Vec<(String, String)>,
-}
-
-fn schema_from_props(props: &Value) -> Option<OrbitalSchema> {
-    let schema = props.as_object()?.get("schema")?;
-    match schema {
-        Value::String(text) => serde_json::from_str(text.as_str()).ok(),
-        other => serde_json::from_value(to_json(other)).ok(),
-    }
 }
 
 fn scene_playback(props: &Value, detail: &Detail) -> Option<AvlTransitionPlayback> {
@@ -218,7 +211,7 @@ impl DioxusPatternRenderer for AvlTransitionDetailRenderer {
         _registry: &DioxusPatternRegistry,
     ) -> Element {
         let Some(detail) = detail_from_props(props) else {
-            return rsx! { div { class: "almadar-avl-transition-missing", "Transition missing" } };
+            return rsx! { div { class: "almadar-avl-transition-missing", ..shared_root_attrs(props), "Transition missing" } };
         };
         let class = merge_class_name("almadar-avl-transition-detail", props);
         let step_event = get_string(props, "stepEvent");
@@ -289,7 +282,7 @@ impl DioxusPatternRenderer for AvlTransitionDetailRenderer {
             })
             .collect();
         rsx! {
-            section { class: "{class}",
+            section { class: "{class}", ..shared_root_attrs(props),
                 header { class: "almadar-avl-transition-detail__header",
                     for (index, from) in detail.from.iter().enumerate() {
                         span { key: "{from}-{index}", "{from}" }

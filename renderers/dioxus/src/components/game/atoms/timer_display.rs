@@ -1,4 +1,4 @@
-use crate::registry::DioxusPatternRegistry;
+use crate::registry::{shared_root_attrs, DioxusPatternRegistry};
 use crate::renderer::{DioxusPatternRenderer, DioxusView};
 use dioxus::prelude::*;
 use orbital_core::client::helpers::{
@@ -58,6 +58,7 @@ impl DioxusPatternRenderer for TimerDisplayRenderer {
             div {
                 class: "{class}",
                 style: "display:inline-flex;align-items:center;justify-content:center;gap:4px;padding:{padding};border:1px solid {border_color};border-radius:var(--almadar-radius);font-family:monospace;font-weight:700;font-size:{font_size};color:{color};font-variant-numeric:tabular-nums",
+                ..shared_root_attrs(props),
                 {icon}
                 "{text}"
             }

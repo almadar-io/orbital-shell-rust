@@ -1,4 +1,4 @@
-use crate::registry::DioxusPatternRegistry;
+use crate::registry::{shared_root_attrs_with_defaults, DioxusPatternRegistry};
 use crate::renderer::{DioxusPatternRenderer, DioxusView};
 use dioxus::prelude::*;
 use orbital_core::client::helpers::{
@@ -48,13 +48,16 @@ impl DioxusPatternRenderer for ChoiceButtonRenderer {
             .as_object()
             .and_then(|value| value.get("payload"))
             .cloned()
-            .unwrap_or(Value::Null);
+            .unwrap_or_else(|| Value::object(orbital_core::ValueMap::new()));
         let sink = view.sink;
+        let root_attrs = shared_root_attrs_with_defaults(
+            props,
+            &[("aria-pressed", Value::String(selected.to_string().into()))],
+        );
         rsx! {
             button {
                 class: "{class}",
                 disabled: disabled,
-                "aria-pressed": selected,
                 onclick: move |_| {
                     if disabled {
                         return;
@@ -64,10 +67,11 @@ impl DioxusPatternRenderer for ChoiceButtonRenderer {
                             sink.call((event.clone(), payload.clone()));
                         }
                         if let Some(event) = &on_click {
-                            sink.call((event.clone(), Value::Null));
+                            sink.call((event.clone(), Value::object(orbital_core::ValueMap::new())));
                         }
                     }
                 },
+                ..root_attrs,
                 if let Some(index) = index {
                     span { class: "almadar-choice-button__index", "{index}." }
                 }

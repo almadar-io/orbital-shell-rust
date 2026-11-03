@@ -1,4 +1,4 @@
-use crate::registry::DioxusPatternRegistry;
+use crate::registry::{shared_root_attrs, DioxusPatternRegistry};
 use crate::renderer::{DioxusPatternRenderer, DioxusView, EventSink};
 use dioxus::prelude::*;
 use orbital_core::client::helpers::{
@@ -43,11 +43,12 @@ impl DioxusPatternRenderer for GameMenuRenderer {
                 registry.render_spec(&Value::Object(spec.into()), entity, view)
             });
         let class = merge_class_name("almadar-game-menu", props);
+        let root_attrs = shared_root_attrs(props);
         let selected_event = get_string(props, "onSelect");
         let sink = view.sink;
         let navigate = view.navigate;
         rsx! {
-            div { class: "{class}", style: "{background_style}",
+            div { class: "{class}", style: "{background_style}", ..root_attrs,
                 div { class: "almadar-game-menu__card",
                     if let Some(logo) = logo {
                         div { class: "almadar-game-menu__logo", {logo} }

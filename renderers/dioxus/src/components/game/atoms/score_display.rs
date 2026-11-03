@@ -1,4 +1,4 @@
-use crate::registry::DioxusPatternRegistry;
+use crate::registry::{shared_root_attrs, DioxusPatternRegistry};
 use crate::renderer::{DioxusPatternRenderer, DioxusView};
 use dioxus::prelude::*;
 use orbital_core::client::helpers::{
@@ -50,6 +50,7 @@ impl DioxusPatternRenderer for ScoreDisplayRenderer {
         };
         rsx! {
             div { class: "{class}", style: "display:flex;align-items:center;gap:8px;font-weight:700;font-size:{font_size}",
+                ..shared_root_attrs(props),
                 {icon}
                 if let Some(label) = label { span { class: "almadar-score-display__label almadar-muted", "{label}" } }
                 span { class: "almadar-score-display__value", style: "font-variant-numeric:tabular-nums", "{value}" }

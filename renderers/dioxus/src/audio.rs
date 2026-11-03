@@ -201,14 +201,20 @@ impl Session {
         self.props = next;
         for action in actions {
             match action {
-                AudioAction::PlayCue { key, .. } => {
-                    if let Err(error) = self.play_effect(stream, &key) {
-                        tracing::error!(%error, "audio cue failed");
+                AudioAction::PlayCue { key, .. } => match self.play_effect(stream, &key) {
+                    Ok(()) => {
+                        #[cfg(feature = "research-audio")]
+                        tracing::info!(cue = %key, "native audio cue scheduled");
                     }
-                }
+                    Err(error) => tracing::error!(%error, "audio cue failed"),
+                },
                 AudioAction::ChangeMusic { .. } | AudioAction::StopMusic => {
-                    if let Err(error) = self.change_music(stream) {
-                        tracing::error!(%error, "audio music change failed");
+                    match self.change_music(stream) {
+                        Ok(()) => {
+                            #[cfg(feature = "research-audio")]
+                            tracing::info!(music = %self.props.music, "native audio music changed");
+                        }
+                        Err(error) => tracing::error!(%error, "audio music change failed"),
                     }
                 }
                 AudioAction::SetMuted { .. } | AudioAction::SetVolume { .. } => self.apply_levels(),

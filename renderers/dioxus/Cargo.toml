@@ -16,6 +16,7 @@ default = []
 research-drag = []
 research-video = ["native", "dep:wry"]
 research-dock = []
+research-audio = []
 # Native (Blitz) shell: the SAME kernel circuit (`ClientCore` + `KernelBridge`,
 # offline, no HTTP) + renderers, painted through Blitz (Stylo CSS + Taffy +
 # wgpu) instead of browser DOM. On desktop the shell uses

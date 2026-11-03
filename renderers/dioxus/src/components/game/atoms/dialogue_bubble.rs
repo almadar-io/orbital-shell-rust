@@ -1,9 +1,7 @@
-use crate::registry::DioxusPatternRegistry;
+use crate::registry::{shared_root_attrs, DioxusPatternRegistry};
 use crate::renderer::{DioxusPatternRenderer, DioxusView};
 use dioxus::prelude::*;
-use orbital_core::client::helpers::{
-    get_bool_or, get_number, get_number_or, get_string, get_string_or, merge_class_name,
-};
+use orbital_core::client::helpers::{get_number_or, get_string_or, merge_class_name};
 use orbital_core::{Value, ValueMap};
 
 pub struct DialogueBubbleRenderer;
@@ -61,46 +59,11 @@ impl DioxusPatternRenderer for DialogueBubbleRenderer {
         let portrait_style = format!(
             "width:48px;height:48px;border-radius:50%;object-fit:cover;border:3px solid {ring};"
         );
-        let name = get_string(props, "aria-label");
-        let live = get_string(props, "aria-live");
-        let labelled_by = get_string(props, "aria-labelledby");
-        let described_by = get_string(props, "aria-describedby");
-        let current = get_string(props, "aria-current");
-        let pressed = get_string(props, "aria-pressed");
-        let expanded = props
-            .as_object()
-            .and_then(|p| p.get("aria-expanded"))
-            .and_then(Value::as_bool)
-            .map(|value| value.to_string());
-        let selected = props
-            .as_object()
-            .and_then(|p| p.get("aria-selected"))
-            .and_then(Value::as_bool)
-            .map(|value| value.to_string());
-        let tab_index = get_number(props, "tabIndex").map(|n| n.to_string());
-        let role = get_string(props, "role");
-        let lang = get_string(props, "lang");
-        let dir = get_string(props, "dir");
-        let hidden = get_bool_or(props, "aria-hidden", false);
-        let busy = get_bool_or(props, "aria-busy", false);
         rsx! {
             div {
                 class: "{class} almadar-dialogue-bubble--{position} almadar-dialogue-bubble--{mood}",
                 style: "{bubble_style}",
-                aria_label: name,
-                aria_live: live,
-                aria_labelledby: labelled_by,
-                aria_describedby: described_by,
-                aria_current: current,
-                aria_pressed: pressed,
-                aria_expanded: expanded,
-                aria_selected: selected,
-                aria_hidden: hidden,
-                aria_busy: busy,
-                tabindex: tab_index,
-                role: role,
-                lang: lang,
-                dir: dir,
+                ..shared_root_attrs(props),
                 if let Some(spec) = portrait {
                     div {
                         class: "almadar-dialogue-bubble__portrait",

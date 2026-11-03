@@ -145,7 +145,7 @@ fn flow_app() -> dioxus::prelude::Element {
 
     let props: orbital_core::Value = serde_json::from_str(r#"{
       "type":"flow-canvas", "initialLevel":"trait-expanded", "initialOrbital":"Main",
-      "traitView":{"lens":"flow","filter":null}, "flowSelectEvent":"SELECT_FLOW",
+      "traitView":{"lens":"flow","filter":null}, "onFlowSelect":"FLOW_CALLBACK", "flowSelectEvent":"SELECT_FLOW", "onTraitViewChange":"VIEW_CHANGED",
       "schema":{"name":"app","typeContractVersion":1,"orbitals":[{"name":"Main",
         "entity":{"name":"Item","fields":[]},"traits":[
           {"name":"One","sourceBehavior":{"behavior":"std/atoms/flow","alias":"Flow","originalName":"One"},
@@ -207,11 +207,236 @@ fn flow_canvas_selects_a_core_grouped_unit() {
     let mut selected = Mutations::default();
     dom.render_immediate(&mut selected);
     let events = FLOW_EVENTS.lock().unwrap();
+    assert_eq!(events.len(), 2);
+    assert_eq!(events[0].0, "FLOW_CALLBACK");
+    assert_eq!(events[1].0, "SELECT_FLOW");
+    let callback: serde_json::Value = serde_json::from_str(&events[0].1).unwrap();
+    let event: serde_json::Value = serde_json::from_str(&events[1].1).unwrap();
+    assert_eq!(callback["unit"]["id"], "behavior:flow");
+    assert_eq!(
+        callback["unit"]["traits"],
+        serde_json::json!(["One", "Two"])
+    );
+    assert_eq!(callback["unit"], event);
+    drop(events);
+    let show_traits = selected
+        .edits
+        .iter()
+        .find_map(|edit| match edit {
+            Mutation::NewEventListener { name, id } if name == "click" && *id != button => {
+                Some(*id)
+            }
+            _ => None,
+        })
+        .expect("show traits action after flow selection");
+    let mouse = Rc::new(PlatformEventData::new(Box::<
+        dioxus_html::SerializedMouseData,
+    >::default())) as Rc<dyn Any>;
+    dom.runtime()
+        .handle_event("click", Event::new(mouse, true), show_traits);
+    let events = FLOW_EVENTS.lock().unwrap();
+    assert_eq!(events.len(), 3);
+    assert_eq!(events[2].0, "VIEW_CHANGED");
+    let view: serde_json::Value = serde_json::from_str(&events[2].1).unwrap();
+    assert_eq!(
+        view,
+        serde_json::json!({"view":{"lens":"traits","filter":{"unit":"flow","traits":["One","Two"]}}})
+    );
+}
+
+#[cfg(feature = "native")]
+fn machine_panel_app() -> dioxus::prelude::Element {
+    use orbital_client_dioxus::components::core::organisms::machine_panel::MachinePanelRenderer;
+    use orbital_client_dioxus::components::core::organisms::state_machine_view::StateMachineViewRenderer;
+    use orbital_client_dioxus::DioxusView;
+
+    let props: orbital_core::Value = serde_json::from_str(
+        r#"{
+      "type":"machine-panel", "replayStepMs":60000, "behavior":"game.tasks",
+      "descriptions":{"game.tasks.traits.One":{
+        "value":{"trait":"One"},"events":{"emits":[],"listens":["GO"]},
+        "machine":{"stateMachine":{"states":[{"name":"idle"},{"name":"ready"}],
+          "transitions":[{"from":"idle","to":"ready","event":"GO"}]}},
+        "source":{"text":"trait One\n  idle -> ready on GO\nend\n",
+          "transitions":[{"index":0,"start":2,"end":2}]}}},
+      "schema":{"name":"app","typeContractVersion":1,"orbitals":[{"name":"Main",
+        "entity":{"name":"Item","fields":[]},"traits":[
+          {"name":"One","stateMachine":{"states":[{"name":"idle"},{"name":"ready"}],
+            "transitions":[{"from":"idle","to":"ready","event":"GO"}]}},
+          {"name":"Two","stateMachine":{"states":[{"name":"idle"},{"name":"ready"}],
+            "transitions":[{"from":"idle","to":"ready","event":"GO"},
+                           {"from":"ready","to":"idle","event":"BACK"}]}}
+        ]}]},
+      "transitions":[
+        {"traitName":"Two","from":"idle","to":"ready","event":"GO"},
+        {"traitName":"Two","from":"ready","to":"idle","event":"BACK"},
+        {"traitName":"One","from":"idle","to":"ready","event":"GO"}
+      ]
+    }"#,
+    )
+    .unwrap();
+    let mut registry = orbital_client_dioxus::registry::default_registry();
+    registry.register(Box::new(MachinePanelRenderer));
+    registry.register(Box::new(StateMachineViewRenderer));
+    let entities = std::collections::HashMap::new();
+    let trait_content = orbital_core::ValueMap::new();
+    let view = DioxusView {
+        trait_name: "One",
+        orbital_name: "Main",
+        current_state: "ready",
+        entities: &entities,
+        trait_content: &trait_content,
+        source_trait: None,
+        sink: None,
+        navigate: None,
+        dock: None,
+        viewport_width: None,
+        canvas_theme: None,
+    };
+    registry.render_spec(&props, None, &view)
+}
+
+#[cfg(feature = "native")]
+#[test]
+fn machine_panel_follows_latest_then_pins_a_group_for_replay() {
+    use dioxus::prelude::*;
+    use dioxus_core::{AttributeValue, Mutation, Mutations};
+    use std::{any::Any, rc::Rc};
+
+    set_event_converter(Box::new(dioxus_html::SerializedHtmlEventConverter));
+    let mut dom = VirtualDom::new(machine_panel_app);
+    let mut initial = Mutations::default();
+    dom.rebuild(&mut initial);
+    assert!(initial.edits.iter().any(|edit| matches!(edit,
+        Mutation::SetAttribute { name: "data-trait", value: AttributeValue::Text(value), .. } if value == "One"
+    )));
+    let flow_buttons: Vec<_> = initial
+        .edits
+        .iter()
+        .filter_map(|edit| match edit {
+            Mutation::SetAttribute {
+                name: "class",
+                value: AttributeValue::Text(value),
+                id,
+                ..
+            } if value.contains("almadar-flow-canvas__unit") => Some(*id),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(flow_buttons.len(), 2);
+    let second = flow_buttons[1];
+    assert!(initial.edits.iter().any(|edit| matches!(edit,
+        Mutation::NewEventListener { name, id } if name == "click" && *id == second
+    )));
+    let mouse = Rc::new(PlatformEventData::new(Box::<
+        dioxus_html::SerializedMouseData,
+    >::default())) as Rc<dyn Any>;
+    dom.runtime()
+        .handle_event("click", Event::new(mouse, true), second);
+    let mut selected = Mutations::default();
+    dom.render_immediate(&mut selected);
+    assert!(selected.edits.iter().any(|edit| matches!(edit,
+        Mutation::SetAttribute { name: "data-trait", value: AttributeValue::Text(value), .. } if value == "Two"
+    )));
+    assert!(selected.edits.iter().any(|edit| matches!(edit,
+        Mutation::SetAttribute { name: "data-replay-step", value: AttributeValue::Text(value), .. } if value == "0"
+    )));
+}
+
+#[cfg(feature = "native")]
+#[test]
+fn machine_panel_renders_described_source_and_highlights_played_transition() {
+    use dioxus::prelude::*;
+    use dioxus_core::{AttributeValue, Mutation, Mutations};
+
+    let mut dom = VirtualDom::new(machine_panel_app);
+    let mut initial = Mutations::default();
+    dom.rebuild(&mut initial);
+    assert!(initial.edits.iter().any(|edit| matches!(edit,
+        Mutation::SetAttribute { name: "aria-label", value: AttributeValue::Text(value), .. }
+        if value == "Source for One"
+    )));
+    assert!(initial.edits.iter().any(|edit| matches!(edit,
+        Mutation::CreateTextNode { value, .. } if value == "  idle -> ready on GO\n"
+    )));
+    assert!(initial.edits.iter().any(|edit| matches!(edit,
+        Mutation::SetAttribute { name: "class", value: AttributeValue::Text(value), .. }
+        if value == "almadar-machine-panel__code-line almadar-machine-panel__code-line--highlight"
+    )));
+}
+
+#[cfg(feature = "native")]
+static TRANSITION_DETAIL_EVENTS: std::sync::Mutex<Vec<(String, String)>> =
+    std::sync::Mutex::new(Vec::new());
+
+#[cfg(feature = "native")]
+fn transition_detail_app() -> dioxus::prelude::Element {
+    use dioxus::prelude::*;
+    use orbital_client_dioxus::components::avl::molecules::avl_transition_detail::AvlTransitionDetailRenderer;
+    use orbital_client_dioxus::DioxusView;
+
+    let props: orbital_core::Value = serde_json::from_str(
+        r#"{"type":"avl-transition-detail","orbital":"Main","trait":"Task","stepEvent":"STEP_TASK","transition":{"from":"idle","to":"done","event":"DONE","guard":null,"effects":[],"index":0}}"#,
+    )
+    .unwrap();
+    let mut registry = orbital_client_dioxus::registry::DioxusPatternRegistry::new();
+    registry.register(Box::new(AvlTransitionDetailRenderer));
+    let entities = std::collections::HashMap::new();
+    let trait_content = orbital_core::ValueMap::new();
+    let sink = Callback::new(|(event, payload): (String, orbital_core::Value)| {
+        TRANSITION_DETAIL_EVENTS
+            .lock()
+            .unwrap()
+            .push((event, serde_json::to_string(&payload).unwrap()));
+    });
+    let view = DioxusView {
+        trait_name: "Task",
+        orbital_name: "Main",
+        current_state: "idle",
+        entities: &entities,
+        trait_content: &trait_content,
+        source_trait: None,
+        sink: Some(sink),
+        navigate: None,
+        dock: None,
+        viewport_width: None,
+        canvas_theme: None,
+    };
+    registry.render_spec(&props, None, &view)
+}
+
+#[cfg(feature = "native")]
+#[test]
+fn transition_detail_step_sends_a_declared_request() {
+    use dioxus::prelude::*;
+    use dioxus_core::{Mutation, Mutations};
+    use std::{any::Any, rc::Rc};
+
+    set_event_converter(Box::new(dioxus_html::SerializedHtmlEventConverter));
+    TRANSITION_DETAIL_EVENTS.lock().unwrap().clear();
+    let mut dom = VirtualDom::new(transition_detail_app);
+    let mut initial = Mutations::default();
+    dom.rebuild(&mut initial);
+    let button = initial
+        .edits
+        .iter()
+        .find_map(|edit| match edit {
+            Mutation::NewEventListener { name, id } if name == "click" => Some(*id),
+            _ => None,
+        })
+        .expect("transition step button");
+    let mouse = Rc::new(PlatformEventData::new(Box::<
+        dioxus_html::SerializedMouseData,
+    >::default())) as Rc<dyn Any>;
+    dom.runtime()
+        .handle_event("click", Event::new(mouse, true), button);
+    let events = TRANSITION_DETAIL_EVENTS.lock().unwrap();
     assert_eq!(events.len(), 1);
-    assert_eq!(events[0].0, "SELECT_FLOW");
-    let payload: serde_json::Value = serde_json::from_str(&events[0].1).unwrap();
-    assert_eq!(payload["id"], "behavior:flow");
-    assert_eq!(payload["traits"], serde_json::json!(["One", "Two"]));
+    assert_eq!(events[0].0, "STEP_TASK");
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&events[0].1).unwrap(),
+        serde_json::json!({"orbital":"Main","trait":"Task","from":"idle","event":"DONE","payload":{}})
+    );
 }
 
 #[cfg(feature = "native")]
@@ -341,7 +566,11 @@ fn new_control_app() -> dioxus::prelude::Element {
         game::atoms::game_audio_toggle::GameAudioToggleRenderer,
     ));
     registry.register(Box::new(game::molecules::control_grid::ControlGridRenderer));
+    registry.register(Box::new(game::molecules::action_tile::ActionTileRenderer));
     registry.register(Box::new(game::molecules::game_menu::GameMenuRenderer));
+    registry.register(Box::new(game::molecules::trait_slot::TraitSlotRenderer));
+    registry.register(Box::new(game::molecules::sequence_bar::SequenceBarRenderer));
+    registry.register(Box::new(game::templates::game_shell::GameShellRenderer));
     let entities = std::collections::HashMap::new();
     let trait_content = orbital_core::ValueMap::new();
     let sink = Callback::new(|(event, payload): (String, orbital_core::Value)| {
@@ -402,6 +631,176 @@ fn new_control_events(pattern: &'static str, names: &[&str]) -> Vec<(String, Str
             .handle_event(name, Event::new(mouse, *name != "mouseleave"), id);
     }
     NEW_CONTROL_EVENTS.lock().unwrap().clone()
+}
+
+#[cfg(feature = "native")]
+fn new_control_click_at(pattern: &'static str, index: usize) -> Vec<(String, String)> {
+    use dioxus::prelude::*;
+    use dioxus_core::{Mutation, Mutations};
+    use std::{any::Any, rc::Rc};
+
+    set_event_converter(Box::new(dioxus_html::SerializedHtmlEventConverter));
+    *NEW_CONTROL_PATTERN.lock().unwrap() = pattern;
+    NEW_CONTROL_EVENTS.lock().unwrap().clear();
+    let mut dom = VirtualDom::new(new_control_app);
+    let mut mutations = Mutations::default();
+    dom.rebuild(&mut mutations);
+    let id = mutations
+        .edits
+        .iter()
+        .filter_map(|edit| match edit {
+            Mutation::NewEventListener { name, id } if name == "click" => Some(*id),
+            _ => None,
+        })
+        .nth(index)
+        .expect("requested slot click listener");
+    let mouse = Rc::new(PlatformEventData::new(Box::<
+        dioxus_html::SerializedMouseData,
+    >::default())) as Rc<dyn Any>;
+    dom.runtime()
+        .handle_event("click", Event::new(mouse, true), id);
+    NEW_CONTROL_EVENTS.lock().unwrap().clone()
+}
+
+#[cfg(feature = "native")]
+#[test]
+fn authored_aria_pressed_overrides_game_atom_defaults() {
+    use dioxus::prelude::*;
+    use dioxus_core::{AttributeValue, Mutation, Mutations};
+
+    let _guard = NEW_CONTROL_TEST_LOCK.lock().unwrap();
+    for pattern in [
+        r#"{"type":"choice-button","text":"Choice","selected":true,"aria-pressed":"mixed"}"#,
+        r#"{"type":"game-audio-toggle","muted":true,"soundOnLabel":"Sound on","mutedLabel":"Muted","aria-pressed":"mixed"}"#,
+    ] {
+        *NEW_CONTROL_PATTERN.lock().unwrap() = pattern;
+        let mut dom = VirtualDom::new(new_control_app);
+        let mut mutations = Mutations::default();
+        dom.rebuild(&mut mutations);
+        let pressed: Vec<_> = mutations
+            .edits
+            .iter()
+            .filter_map(|edit| match edit {
+                Mutation::SetAttribute {
+                    name: "aria-pressed",
+                    value: AttributeValue::Text(value),
+                    ..
+                } => Some(value.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(pressed, ["mixed"]);
+    }
+}
+
+#[cfg(feature = "native")]
+#[test]
+fn action_tile_renders_authored_drag_and_category_presentation() {
+    use dioxus::prelude::*;
+    use dioxus_core::{AttributeValue, Mutation, Mutations};
+
+    let _guard = NEW_CONTROL_TEST_LOCK.lock().unwrap();
+    for (disabled, draggable, color) in [
+        (false, true, "background:#112233"),
+        (true, false, "background:var(--almadar-bg)"),
+    ] {
+        *NEW_CONTROL_PATTERN.lock().unwrap() = if disabled {
+            r##"{"type":"action-tile","action":{"id":"jump","name":"Jump","category":"move"},"disabled":true,"categoryColors":{"move":{"bg":"#112233","border":"#445566"}}}"##
+        } else {
+            r##"{"type":"action-tile","action":{"id":"jump","name":"Jump","category":"move"},"categoryColors":{"move":{"bg":"#112233","border":"#445566"}}}"##
+        };
+        let mut dom = VirtualDom::new(new_control_app);
+        let mut mutations = Mutations::default();
+        dom.rebuild(&mut mutations);
+        assert!(mutations.edits.iter().any(|edit| matches!(edit,
+            Mutation::SetAttribute { name: "draggable", value: AttributeValue::Bool(value), .. }
+                if *value == draggable
+        )));
+        assert!(mutations.edits.iter().any(|edit| matches!(edit,
+            Mutation::SetAttribute { name: "style", value: AttributeValue::Text(value), .. }
+                if value.contains(color)
+        )));
+    }
+}
+
+#[cfg(feature = "native")]
+#[test]
+fn game_shell_and_action_tile_keep_authored_accessibility_attrs() {
+    use dioxus::prelude::*;
+    use dioxus_core::{AttributeValue, Mutation, Mutations};
+
+    let _guard = NEW_CONTROL_TEST_LOCK.lock().unwrap();
+    for (pattern, label, role) in [
+        (
+            r#"{"type":"game-shell","appName":"Snake","showTopBar":false,"aria-label":"Game surface","role":"application","lang":"ar","dir":"rtl","tabIndex":0}"#,
+            "Game surface",
+            "application",
+        ),
+        (
+            r#"{"type":"action-tile","action":{"id":"jump","name":"Jump","category":"move"},"aria-label":"Jump action","role":"button","lang":"ar","dir":"rtl","tabIndex":0}"#,
+            "Jump action",
+            "button",
+        ),
+    ] {
+        *NEW_CONTROL_PATTERN.lock().unwrap() = pattern;
+        let mut dom = VirtualDom::new(new_control_app);
+        let mut mutations = Mutations::default();
+        dom.rebuild(&mut mutations);
+        for (name, expected) in [("role", role), ("lang", "ar"), ("dir", "rtl")] {
+            assert!(mutations.edits.iter().any(|edit| matches!(edit,
+                Mutation::SetAttribute { name: actual, value: AttributeValue::Text(value), .. }
+                    if *actual == name && value == expected
+            )));
+        }
+        assert!(mutations.edits.iter().any(|edit| matches!(
+            edit,
+            Mutation::SetAttribute {
+                name: "tabindex",
+                value: AttributeValue::Int(0),
+                ..
+            }
+        )));
+        assert!(mutations.edits.iter().any(|edit| matches!(edit,
+            Mutation::SetAttribute { name: "aria-label", value: AttributeValue::Text(value), .. }
+                if value == label
+        )));
+    }
+}
+
+#[cfg(feature = "native")]
+#[test]
+fn game_shell_null_slots_do_not_create_empty_overlays() {
+    use dioxus::prelude::*;
+    use dioxus_core::{AttributeValue, Mutation, Mutations};
+
+    let _guard = NEW_CONTROL_TEST_LOCK.lock().unwrap();
+    *NEW_CONTROL_PATTERN.lock().unwrap() = r#"{"type":"game-shell","showTopBar":false,"hud":null,"controls":null,"addons":null,"overlay":null,"data-theme":""}"#;
+    let mut dom = VirtualDom::new(new_control_app);
+    let mut mutations = Mutations::default();
+    dom.rebuild(&mut mutations);
+    for class in [
+        "game-shell__top",
+        "game-shell__hud",
+        "game-shell__controls",
+        "game-shell__actions",
+        "game-shell__overlay",
+    ] {
+        assert!(!mutations.edits.iter().any(|edit| matches!(edit,
+            Mutation::SetAttribute { name: "class", value: AttributeValue::Text(value), .. }
+                if value.contains(class)
+        )));
+    }
+    assert!(mutations.edits.iter().all(|edit| match edit {
+        Mutation::SetAttribute {
+            name: "data-theme",
+            value,
+            ..
+        } => {
+            matches!(value, AttributeValue::None)
+                || matches!(value, AttributeValue::Text(text) if text.is_empty())
+        }
+        _ => true,
+    }));
 }
 
 #[cfg(feature = "native")]
@@ -589,8 +988,15 @@ fn new_atomic_controls_emit_only_declared_events() {
         ),
         vec![
             ("CHOOSE".into(), r#"{"nextId":"scene-2"}"#.into()),
-            ("CALLBACK".into(), "null".into()),
+            ("CALLBACK".into(), "{}".into()),
         ]
+    );
+    assert_eq!(
+        new_control_events(
+            r#"{"type":"choice-button","text":"Open","action":"CHOOSE"}"#,
+            &["click"]
+        ),
+        vec![("CHOOSE".into(), "{}".into())]
     );
     assert_eq!(
         new_control_events(
@@ -606,19 +1012,19 @@ fn new_atomic_controls_emit_only_declared_events() {
     assert_eq!(
         new_control_events(button, &["mousedown", "mouseup", "click"]),
         vec![
-            ("FIRE".into(), "null".into()),
-            ("CALLBACK".into(), "null".into()),
-            ("STOP".into(), "null".into()),
-            ("CALLBACK".into(), "null".into()),
+            ("FIRE".into(), "{}".into()),
+            ("CALLBACK".into(), "{}".into()),
+            ("STOP".into(), "{}".into()),
+            ("CALLBACK".into(), "{}".into()),
         ]
     );
     assert_eq!(
         new_control_events(button, &["mousedown", "mouseleave", "click"]),
         vec![
-            ("FIRE".into(), "null".into()),
-            ("CALLBACK".into(), "null".into()),
-            ("STOP".into(), "null".into()),
-            ("CALLBACK".into(), "null".into()),
+            ("FIRE".into(), "{}".into()),
+            ("CALLBACK".into(), "{}".into()),
+            ("STOP".into(), "{}".into()),
+            ("CALLBACK".into(), "{}".into()),
         ]
     );
 }
@@ -736,6 +1142,32 @@ fn game_menu_dispatches_option_event_callback_and_kernel_navigation() {
             &["click"],
         )[0].0,
         "RESUME",
+    );
+}
+
+#[cfg(feature = "native")]
+#[test]
+fn trait_slot_and_sequence_bar_dispatch_distinct_authored_click_callbacks() {
+    let _guard = NEW_CONTROL_TEST_LOCK.lock().unwrap();
+    assert_eq!(
+        new_control_click_at(
+            r#"{"type":"trait-slot","slotNumber":2,"emptyLabel":"Empty","clickEvent":"CLICK","onClick":"CALLBACK"}"#,
+            0,
+        ),
+        vec![
+            ("CLICK".into(), r#"{"slotNumber":2.0}"#.into()),
+            ("CALLBACK".into(), "null".into()),
+        ]
+    );
+    assert_eq!(
+        new_control_click_at(
+            r#"{"type":"sequence-bar","maxSlots":1,"slots":[{"id":"jump","name":"Jump","category":"move"}],"slotRemoveEvent":"REMOVE","onSlotRemove":"CALLBACK","removeLabel":"Remove"}"#,
+            1,
+        ),
+        vec![
+            ("REMOVE".into(), r#"{"slotNumber":1.0}"#.into()),
+            ("CALLBACK".into(), r#"{"index":1.0}"#.into()),
+        ]
     );
 }
 

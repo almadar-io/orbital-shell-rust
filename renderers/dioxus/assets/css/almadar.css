@@ -42,7 +42,7 @@
   font-size: 14px;
   line-height: 1.5;
 }
-.almadar-slot { display: contents; }
+.almadar-slot { display: block; }
 .almadar-fallback {
   font-family: var(--almadar-mono);
   font-size: 12px;
@@ -169,7 +169,8 @@
 
 .almadar-confetti-effect, .almadar-game-icon { display: inline-block; }
 .almadar-action-tile__icon, .almadar-choice-button__icon,
-.almadar-stat-badge__icon, .almadar-score-display__icon {
+.almadar-stat-badge__icon, .almadar-score-display__icon,
+.almadar-activity-rail__icon {
   font-family: var(--almadar-symbol-font);
 }
 .almadar-signature-pad__label { font-weight: 600; margin-bottom: 4px; }

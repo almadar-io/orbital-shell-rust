@@ -23,6 +23,7 @@ use dioxus::prelude::*;
 use dioxus_native::use_wgpu;
 use orbital_canvas::mappers::scene;
 use orbital_canvas::{SceneHost, SharedDeviceRenderer};
+use orbital_core::client::helpers::merge_class_name;
 use orbital_core::Value;
 use std::sync::{Arc, Mutex};
 use web_time::Instant;
@@ -199,9 +200,10 @@ struct SceneCanvasProps {
     sink: Option<crate::renderer::EventSink>,
     fill_parent: bool,
     a11y: SceneA11y,
+    class_name: String,
 }
 
-#[derive(Clone, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 struct SceneA11y {
     label: Option<String>,
     labelledby: Option<String>,
@@ -258,6 +260,13 @@ impl SceneA11y {
     }
 }
 
+fn scene_presentation(props: &Value) -> (String, SceneA11y) {
+    (
+        merge_class_name("almadar-game-canvas", props),
+        SceneA11y::from_props(props),
+    )
+}
+
 #[allow(non_snake_case)] // dioxus component convention (PascalCase)
 fn SceneCanvas(props: SceneCanvasProps) -> Element {
     let node_cell = use_hook(|| Arc::new(Mutex::new(props.node.clone())));
@@ -282,9 +291,10 @@ fn SceneCanvas(props: SceneCanvasProps) -> Element {
         None
     };
     let sink = props.sink;
+    let class_name = props.class_name.clone();
     rsx! {
         canvas {
-            class: "almadar-game-canvas",
+            class: "{class_name}",
             style: style,
             aria_label: props.a11y.label,
             aria_labelledby: props.a11y.labelledby,
@@ -344,15 +354,15 @@ impl DioxusPatternRenderer for SceneCanvasRenderer {
         _registry: &DioxusPatternRegistry,
     ) -> Element {
         let node = scene_node(self.name, props, view.canvas_theme.as_ref());
-        let a11y = SceneA11y::from_props(props);
-        rsx! { SceneCanvas { node, sink: view.sink, fill_parent: false, a11y } }
+        let (class_name, a11y) = scene_presentation(props);
+        rsx! { SceneCanvas { node, sink: view.sink, fill_parent: false, a11y, class_name } }
     }
 }
 
 pub(crate) fn fill_parent_atlas_panel(asset: &Value, mode: &str, view: &DioxusView<'_>) -> Element {
     let props = serde_json::json!({ "asset": asset, "mode": mode });
     let node = scene::host_node("atlas-panel", props, view.canvas_theme.as_ref());
-    rsx! { SceneCanvas { node, sink: None, fill_parent: true, a11y: SceneA11y::default() } }
+    rsx! { SceneCanvas { node, sink: None, fill_parent: true, a11y: SceneA11y::default(), class_name: "almadar-game-canvas".to_string() } }
 }
 
 /// Renderer for the `game-hud` pattern — stats/items/elements resolved against
@@ -426,5 +436,45 @@ mod tests {
     fn control_a_refused_three_d_scene_takes_no_room() {
         let props: Value = serde_json::from_value(json!({ "mode": "3d" })).unwrap();
         assert_eq!(canvas_size(&scene_node("canvas", &props, None)), None);
+    }
+
+    #[test]
+    fn pattern_tile_projects_authored_entry_and_accessibility_without_a_window() {
+        let spec: Value = serde_json::from_value(json!({
+            "type":"pattern-tile", "variant":"star8", "size":80,
+            "color":"#101010", "strokeWidth":2,
+            "className":"tile-accent", "enter":"fade", "enterDelay":2,
+            "aria-label":"Eight-point star", "aria-labelledby":"tile-title",
+            "aria-describedby":"tile-description", "aria-live":"polite",
+            "aria-current":"step", "aria-pressed":"mixed", "aria-expanded":true,
+            "aria-selected":false, "aria-hidden":false, "aria-busy":true,
+            "role":"img", "lang":"ar", "dir":"rtl", "tabIndex":0
+        }))
+        .unwrap();
+        let entry = crate::registry::entry_props(&spec).unwrap();
+        let (class_name, a11y) = scene_presentation(&entry);
+        assert_eq!(
+            class_name,
+            "almadar-game-canvas tile-accent almadar-enter-fade almadar-enter-delay-2"
+        );
+        assert_eq!(
+            a11y,
+            SceneA11y {
+                label: Some("Eight-point star".into()),
+                labelledby: Some("tile-title".into()),
+                describedby: Some("tile-description".into()),
+                live: Some("polite".into()),
+                current: Some("step".into()),
+                pressed: Some("mixed".into()),
+                expanded: Some("true".into()),
+                selected: Some("false".into()),
+                hidden: Some("false".into()),
+                busy: Some("true".into()),
+                role: Some("img".into()),
+                lang: Some("ar".into()),
+                dir: Some("rtl".into()),
+                tabindex: Some("0".into()),
+            }
+        );
     }
 }
