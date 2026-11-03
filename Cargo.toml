@@ -9,7 +9,7 @@ description = "Rust shell for the Orbital compiler"
 
 # The orb versions this shell program runs under (its npm package records it as orbProgram.compiler).
 [package.metadata.orb]
-compiler = ">=18.0.0"
+language = "^1"
 [dependencies]
 orbital-core = { git = "https://github.com/almadar-io/orbital-core", branch = "main" }
 thiserror = "1.0"
