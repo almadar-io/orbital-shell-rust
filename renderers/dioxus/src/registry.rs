@@ -48,9 +48,9 @@ pub(crate) fn shared_root_attrs_with_defaults(
             attrs.push(Attribute::new(name, value.to_string(), None, false));
         }
     }
-    if let Some(Value::Number(index)) = field("tabIndex") {
-        if *index == -1.0 || *index == 0.0 {
-            attrs.push(Attribute::new("tabindex", *index as i64, None, false));
+    if let Some(index) = field("tabIndex").and_then(Value::as_int) {
+        if index == -1 || index == 0 {
+            attrs.push(Attribute::new("tabindex", index, None, false));
         }
     }
     attrs
