@@ -1022,7 +1022,7 @@ impl Host {
         let client_id = request.client_id.as_deref();
         let (outcomes, response): Ran = if let Some(seeds) = request.mount.as_deref().filter(|seeds| !seeds.is_empty()) {
             let plan = self.kernel.prepare_mount(&restored, seeds, request.traits.as_deref(), request.entity_by_trait.as_ref(), Some(&entity_id));
-            let outcomes = if plan.unseeded.is_empty() { Vec::new() } else { self.dispatch_mount(&plan.unseeded, &entity_id, payload.clone()).map_err(failed)? };
+            let outcomes = if plan.unseeded.is_empty() { Vec::new() } else { self.dispatch_mount(request.route.as_deref(), &plan.unseeded, &entity_id, payload.clone()).map_err(failed)? };
             let mut response = EventResponse::from_process_results(&outcomes, &seeds[0].r#trait, seeds[0].event.as_str());
             let mut writes = self.kernel.frame_writes(&outcomes, Some(&entity_id), true);
             writes.extend(plan.restored_rows.iter().filter_map(|(trait_name, row)| {
@@ -1377,16 +1377,18 @@ impl Host {
         self.kernel.boot_mounts(side)
     }
 
-    /// A mount batch (`EventRequest.mount`) — see `RuntimeKernel::dispatch_mount`.
+    /// A mount batch (`EventRequest.mount`) opening `route` when it names one: the route's `$MOUNT` listeners run
+    /// first (EXEC-SEED-7) — see `RuntimeKernel::dispatch_route_mount`.
     pub fn dispatch_mount(
         &self,
+        route: Option<&str>,
         seeds: &[orbital_core::effects::MountSeed],
         entity_id: &str,
         payload: Value,
     ) -> Result<Vec<(String, ProcessEventResult)>, HostError> {
         let started = self
             .kernel
-            .start_dispatch_mount(seeds, Some(entity_id), payload);
+            .start_dispatch_route_mount(route, seeds, Some(entity_id), payload);
         self.finish(started)
     }
 
@@ -2585,6 +2587,42 @@ mod tests {
             assert_eq!(refused["rejections"][0]["code"], "client-circuit-state-refused", "{refused}");
         }
         assert_eq!(note_titles(&runtime).len(), 1, "nothing carried was run");
+    }
+
+    /// `dispatching_program` with its traits on the route page `/desk` and a `Seeder` that hears the route mount's `$MOUNT`.
+    fn desk_with_a_mount_listener() -> Arc<Host> {
+        let mut program = serde_json::to_value(dispatching_program()).unwrap();
+        program["orbitals"][0]["traits"].as_array_mut().unwrap().push(serde_json::json!({
+            "name": "Seeder", "linkedEntity": "Note",
+            "listens": [{ "event": "$MOUNT", "triggers": "SEED_PAGE" }],
+            "stateMachine": {
+                "states": [{ "name": "idle", "isInitial": true }],
+                "events": [{ "key": "SEED_PAGE", "name": "Seed page", "payloadSchema": [{ "name": "route", "type": "string", "required": true }] }],
+                "transitions": [{ "from": "idle", "to": "idle", "event": "SEED_PAGE", "effects": [["set", "@entity.got", "@payload.route"]] }]
+            }
+        }));
+        program["orbitals"][0]["pages"] = serde_json::json!([{ "name": "DeskPage", "path": "/desk", "traits": [{ "ref": "Agent" }, { "ref": "Notes" }] }]);
+        let runtime = Host::new(Arc::new(DriverAdapter::memory())).shared();
+        runtime.register_schema(serde_json::from_value(program).unwrap()).unwrap();
+        runtime
+    }
+
+    #[test]
+    fn a_mount_request_naming_its_route_announces_mount_before_its_seeds() {
+        let runtime = desk_with_a_mount_listener();
+        dispatch_request(&runtime, serde_json::json!({ "wire": true, "orbital": "Desk", "event": "INIT", "clientId": "tab-m", "mount": [{ "trait": "Agent", "event": "INIT" }], "route": "/desk" })).unwrap();
+        let _tab = runtime.kernel.enter_session("tab-m");
+        let got = serde_json::to_value(&runtime.kernel.snapshot_trait("Seeder", Some("default")).entity).unwrap()["got"].clone();
+        assert_eq!(got, "/desk", "the $MOUNT listener heard the route (EXEC-SEED-7, twin of the embedded server host)");
+    }
+
+    #[test]
+    fn control_a_mount_request_naming_no_route_announces_nothing() {
+        let runtime = desk_with_a_mount_listener();
+        dispatch_request(&runtime, serde_json::json!({ "wire": true, "orbital": "Desk", "event": "INIT", "clientId": "tab-n", "mount": [{ "trait": "Agent", "event": "INIT" }] })).unwrap();
+        let _tab = runtime.kernel.enter_session("tab-n");
+        let got = serde_json::to_value(&runtime.kernel.snapshot_trait("Seeder", Some("default")).entity).unwrap()["got"].clone();
+        assert!(got.is_null() || got == "", "{got}");
     }
 
     #[test]

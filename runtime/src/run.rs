@@ -11,7 +11,7 @@ pub const RUN_ENTITY: &str = "default";
 pub fn mount_init(host: &Host, side: ProtocolSide) -> Result<(), HostError> {
     let seeds = host.boot_mounts(side);
     if !seeds.is_empty() {
-        host.dispatch_mount(&seeds, RUN_ENTITY, orbital_core::Value::Null)?;
+        host.dispatch_mount(None, &seeds, RUN_ENTITY, orbital_core::Value::Null)?;
     }
     Ok(())
 }
