@@ -245,6 +245,17 @@ impl DocumentMutator<'_> {
             return;
         }
 
+        if *attr == local_name!("placeholder") {
+            if let Some(input_data) = element.text_input_data_mut() {
+                input_data.set_placeholder(
+                    &mut self.doc.font_ctx.lock().unwrap(),
+                    &mut self.doc.layout_ctx,
+                    value,
+                );
+            }
+            return;
+        }
+
         if *attr == local_name!("style") {
             element.flush_style_attribute(&self.doc.guard, &self.doc.url.url_extra_data());
             return;
@@ -297,6 +308,16 @@ impl DocumentMutator<'_> {
         if name.local == local_name!("value") {
             if let Some(input_data) = element.text_input_data_mut() {
                 input_data.set_text(
+                    &mut self.doc.font_ctx.lock().unwrap(),
+                    &mut self.doc.layout_ctx,
+                    "",
+                );
+            }
+        }
+
+        if name.local == local_name!("placeholder") {
+            if let Some(input_data) = element.text_input_data_mut() {
+                input_data.set_placeholder(
                     &mut self.doc.font_ctx.lock().unwrap(),
                     &mut self.doc.layout_ctx,
                     "",
@@ -698,7 +719,11 @@ impl<'doc> DocumentMutator<'doc> {
                 self.doc.net_provider.fetch(
                     self.doc.id(),
                     Request::get(src),
-                    Box::new(ImageHandler::new(target_id, ImageType::Image)),
+                    Box::new(ImageHandler::new(
+                        target_id,
+                        ImageType::Image,
+                        Some(raw_src.to_string()),
+                    )),
                 );
             }
         }

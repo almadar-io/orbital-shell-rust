@@ -3,8 +3,8 @@
 pub use bytes::Bytes;
 pub use http::{self, HeaderMap, Method};
 use serde::{
-    Serialize,
     ser::{SerializeSeq, SerializeTuple},
+    Serialize,
 };
 use std::{ops::Deref, path::PathBuf, sync::Arc};
 pub use url::Url;
@@ -24,6 +24,10 @@ pub trait NetProvider<Data>: Send + Sync + 'static {
 /// the NetCallack with the result.
 pub trait NetHandler<Data>: Send + Sync + 'static {
     fn bytes(self: Box<Self>, doc_id: usize, bytes: Bytes, callback: SharedCallback<Data>);
+
+    fn error_resource(&self) -> Option<Data> {
+        None
+    }
 }
 
 /// A type which accepts the parsed result of a network request and sends it back to the Document

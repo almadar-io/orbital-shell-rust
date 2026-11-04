@@ -14,7 +14,9 @@ pub struct DioxusTarget {
 
 impl DioxusTarget {
     pub fn new() -> Self {
-        Self { registry: default_registry() }
+        Self {
+            registry: default_registry(),
+        }
     }
 }
 

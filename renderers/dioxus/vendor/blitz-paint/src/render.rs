@@ -15,7 +15,7 @@ use blitz_dom::node::{
     ListItemLayout, ListItemLayoutPosition, Marker, NodeData, RasterImageData, TextInputData,
     TextNodeData,
 };
-use blitz_dom::{BaseDocument, ElementData, Node, local_name};
+use blitz_dom::{local_name, BaseDocument, ElementData, Node};
 use blitz_traits::devtools::DevtoolSettings;
 
 use euclid::Transform3D;
@@ -23,12 +23,12 @@ use style::values::computed::BorderCornerRadius;
 use style::{
     dom::TElement,
     properties::{
-        ComputedValues, generated::longhands::visibility::computed_value::T as StyloVisibility,
-        style_structs::Font,
+        generated::longhands::visibility::computed_value::T as StyloVisibility,
+        style_structs::Font, ComputedValues,
     },
     values::{
         computed::{CSSPixelLength, Overflow},
-        specified::{BorderStyle, OutlineStyle, image::ImageRendering},
+        specified::{image::ImageRendering, BorderStyle, OutlineStyle},
     },
 };
 
@@ -266,6 +266,15 @@ impl BlitzDomPainter<'_> {
 
     fn render_node(&self, scene: &mut impl PaintScene, node_id: usize, location: Point) {
         let node = &self.dom.as_ref().tree()[node_id];
+        let location = if node.primary_styles().is_some_and(|style| {
+            style.clone_position()
+                == style::properties::generated::longhands::position::computed_value::T::Fixed
+        }) {
+            let scroll = self.dom.as_ref().viewport_scroll();
+            location + Vec2::new(scroll.x, scroll.y)
+        } else {
+            location
+        };
 
         match &node.data {
             NodeData::Element(_) | NodeData::AnonymousBlock(_) => {
@@ -437,6 +446,18 @@ impl ElementCx<'_> {
     fn draw_text_input_text(&self, scene: &mut impl PaintScene, pos: Point) {
         // Render the text in text inputs
         if let Some(input_data) = self.text_input {
+            if input_data.editor.text() == "" && input_data.placeholder_editor.text() != "" {
+                let clip = self.frame.padding_box_path();
+                maybe_with_layer(scene, true, 0.5, self.transform, &clip, |scene| {
+                    crate::text::stroke_text(
+                        self.scale,
+                        scene,
+                        input_data.placeholder_editor.try_layout().unwrap().lines(),
+                        self.context.dom,
+                        pos,
+                    );
+                });
+            }
             let transform = Affine::translate((pos.x * self.scale, pos.y * self.scale));
 
             if self.node.is_focussed() {

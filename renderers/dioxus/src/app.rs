@@ -13,7 +13,8 @@ use crate::registry::DioxusPatternRegistry;
 use crate::renderer::{DioxusView, EventSink, NavigationSink};
 use dioxus::prelude::*;
 use orbital_core::client::helpers::{resolve_row_set_markers, SlotContent};
-use orbital_core::{Value, ValueMap};
+use orbital_core::runtime::theme::resolve_preset_key;
+use orbital_core::{ThemeMode, ThemePresets, Value, ValueMap};
 use std::cell::RefCell;
 #[cfg(all(feature = "native-http", not(target_arch = "wasm32")))]
 fn spawn_server_leg<T: Send + 'static>(
@@ -283,8 +284,8 @@ std::thread_local! {
     /// on web, where CSS arrives via `<link>` in the preview HTML instead.
     pub static CSS_TEXT: RefCell<Vec<String>> = RefCell::new(Vec::new());
     /// Active design-system theme (`@almadar/ui` `[data-theme="…"]` blocks in
-    /// `almadar-theme.css`). `None` → the `:root:not([data-theme])` fallback
-    /// theme applies, exactly like the React shell. Read by the root `App`
+    /// `almadar-theme.css`). `None` uses the web shell's wireframe-light default.
+    /// Read by the root `App`
     /// component into the `data-theme` attribute.
     pub static THEME: RefCell<Option<String>> = RefCell::new(None);
     #[cfg(all(feature = "native-http", not(target_arch = "wasm32")))]
@@ -445,6 +446,22 @@ fn answer_host_ask(
     remote_followups(version);
 }
 
+fn effective_theme(core: &ClientCore, host_theme: Option<&str>) -> (String, ThemeMode) {
+    if let Some(key) = host_theme {
+        return (
+            key.to_string(),
+            resolve_preset_key(ThemePresets::installed(), key).mode,
+        );
+    }
+    if let Some(theme) = core.resolved_theme() {
+        if core.schema.theme.is_some() {
+            return (theme.key, theme.mode);
+        }
+        return (format!("wireframe-{}", theme.mode.as_str()), theme.mode);
+    }
+    ("wireframe-light".to_string(), ThemeMode::Light)
+}
+
 #[component]
 pub fn App() -> Element {
     let mut version = use_signal(|| 0u32);
@@ -549,6 +566,35 @@ pub fn App() -> Element {
         let next = version.peek().wrapping_add(1);
         version.set(next);
     });
+    let toggle_theme: Callback<()> = use_callback(move |()| {
+        let changed = APP.with(|cell| {
+            let borrow = cell.borrow();
+            let Some(state) = borrow.as_ref() else {
+                return false;
+            };
+            if state.core.client_kernel.is_none() {
+                return false;
+            }
+            let host_theme = THEME.with(|theme| theme.borrow().clone());
+            let (_, current_mode) = effective_theme(&state.core, host_theme.as_deref());
+            let next_mode = match current_mode {
+                ThemeMode::Light => ThemeMode::Dark,
+                ThemeMode::Dark => ThemeMode::Light,
+            };
+            state.core.set_theme_mode(next_mode);
+            if let Some(key) = host_theme {
+                let base = resolve_preset_key(ThemePresets::installed(), &key).base;
+                THEME.with(|theme| {
+                    *theme.borrow_mut() = Some(format!("{base}-{}", next_mode.as_str()));
+                });
+            }
+            true
+        });
+        if changed {
+            let next = version.peek().wrapping_add(1);
+            version.set(next);
+        }
+    });
     // One sink per source trait, made once: a callback made per render lives as long as this root scope.
     let bound = use_hook(|| {
         std::rc::Rc::new(RefCell::new(std::collections::HashMap::<
@@ -556,14 +602,14 @@ pub fn App() -> Element {
             EventSink,
         >::new()))
     });
-    let sink_for = move |source: Option<String>| -> EventSink {
+    let source_sink = use_callback(move |source: Option<String>| -> EventSink {
         *bound.borrow_mut().entry(source.clone()).or_insert_with(|| {
             Callback::new(move |(event, payload): (String, Value)| {
                 routed.call((event, source.clone(), payload))
             })
         })
-    };
-    let sink = sink_for(None);
+    });
+    let sink = source_sink.call(None);
 
     APP.with(|cell| {
         let borrow = cell.borrow();
@@ -587,6 +633,12 @@ pub fn App() -> Element {
         slot_names.dedup();
 
         let trait_content = painted_trait_content_at(core, now);
+        let host_theme = THEME.with(|theme| theme.borrow().clone());
+        let (theme, theme_mode) = effective_theme(core, host_theme.as_deref());
+        #[cfg(all(feature = "native", not(target_arch = "wasm32")))]
+        let reduced_motion = crate::native::reduced_motion();
+        #[cfg(not(all(feature = "native", not(target_arch = "wasm32"))))]
+        let reduced_motion = false;
         let view = DioxusView {
             trait_name: &core.current_trait_name,
             orbital_name: &orbital,
@@ -595,22 +647,21 @@ pub fn App() -> Element {
             trait_content: &trait_content,
             source_trait: None,
             sink: Some(sink),
+            source_sink,
             navigate: Some(navigate),
             dock: None,
             viewport_width,
             canvas_theme: core.canvas_theme(),
+            theme_mode: Some(theme_mode),
+            toggle_theme: core.client_kernel.as_ref().map(|_| toggle_theme),
         };
 
         let css_texts = CSS_TEXT.with(|c| c.borrow().clone());
-        // Empty string = no theme: `:root:not([data-theme])` still matches the
-        // html element (the attr lives on this div), so the fallback theme's
-        // variables inherit down — same default as the React shell.
-        let theme = THEME.with(|t| t.borrow().clone()).unwrap_or_default();
         rsx! {
             for (i, css) in css_texts.iter().enumerate() {
                 document::Style { key: "almadar-css-{i}", href: "almadar-css-{i}", "{css}" }
             }
-            div { class: "almadar-orbital-dioxus", "data-state": "{core.current_state}", "data-theme": "{theme}",
+            div { class: "almadar-orbital-dioxus p-4", "data-state": "{core.current_state}", "data-theme": "{theme}", "data-reduced-motion": "{reduced_motion}",
                 onmousedown: move |_| {
                     #[cfg(all(feature = "native-audio", not(target_arch = "wasm32")))]
                     crate::audio::user_gesture();
@@ -622,7 +673,7 @@ pub fn App() -> Element {
                 for slot_name in slot_names.iter() {
                     div { key: "{slot_name}", class: "almadar-slot", "data-slot": "{slot_name}",
                         for sc in painted_slot_contents_at(core, slot_name, now).iter() {
-                            {registry.render_spec(&sc.props, sc.entity.as_ref(), &view.for_source(sc.source_trait.clone(), sink_for(sc.source_trait.clone())))}
+                            {registry.render_spec(&sc.props, sc.entity.as_ref(), &view.for_source(sc.source_trait.clone(), source_sink.call(sc.source_trait.clone())))}
                         }
                     }
                 }

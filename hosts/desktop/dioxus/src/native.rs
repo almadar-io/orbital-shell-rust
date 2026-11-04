@@ -13,8 +13,28 @@
 
 use crate::app::{App, CSS_TEXT};
 use crate::shell;
+use std::sync::atomic::{AtomicBool, Ordering};
 #[cfg(feature = "native-http")]
 use std::sync::Arc;
+
+static REDUCED_MOTION: AtomicBool = AtomicBool::new(false);
+static MOTION_CHANGED: AtomicBool = AtomicBool::new(false);
+
+pub fn reduced_motion() -> bool {
+    REDUCED_MOTION.load(Ordering::Relaxed)
+}
+
+pub fn set_reduced_motion(reduced: bool) {
+    if REDUCED_MOTION.swap(reduced, Ordering::Relaxed) != reduced {
+        MOTION_CHANGED.store(true, Ordering::Relaxed);
+        dioxus_native::wake_layout();
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn system_reduced_motion() -> bool {
+    objc2_app_kit::NSWorkspace::sharedWorkspace().accessibilityDisplayShouldReduceMotion()
+}
 
 #[cfg(target_os = "android")]
 pub fn set_android_app(app: android_activity::AndroidApp) {
@@ -39,8 +59,14 @@ pub fn start(schema_json: &str, css_texts: Vec<String>, title: &str) -> Result<(
 
 /// Mount the same client circuit with a server bridge supplied by the host.
 #[cfg(feature = "native-http")]
-pub fn start_server(schema_json: &str, server_url: &str, css_texts: Vec<String>, title: &str) -> Result<(), String> {
-    let schema = orbital_core::schema::parse_schema(schema_json).map_err(|e| format!("parse schema: {e}"))?;
+pub fn start_server(
+    schema_json: &str,
+    server_url: &str,
+    css_texts: Vec<String>,
+    title: &str,
+) -> Result<(), String> {
+    let schema = orbital_core::schema::parse_schema(schema_json)
+        .map_err(|e| format!("parse schema: {e}"))?;
     let bridge = Arc::new(orbital_core::client::SyncServerBridge::new(server_url));
     let (orbitals, traits) = shell::mount_remote(schema, bridge)?;
     tracing::info!(target: shell::NS, orbitals, traits, "native server mount");
@@ -52,16 +78,26 @@ pub fn start_server(schema_json: &str, server_url: &str, css_texts: Vec<String>,
 pub fn open_window(css_texts: Vec<String>, title: &str) {
     tracing::info!(target: shell::NS, css_sheets = css_texts.len(), "native window");
     CSS_TEXT.with(|c| *c.borrow_mut() = css_texts);
+    #[cfg(target_os = "macos")]
+    set_reduced_motion(system_reduced_motion());
 
     let attrs = dioxus_native::WindowAttributes::default().with_title(title.to_string());
     let cfg = dioxus_native::Config::new().with_window_attributes(attrs);
     dioxus_native::set_layout_hook(Some(crate::video_overlay::sync_layout));
+    dioxus_native::set_visibility_hook(Some(crate::visibility::sync_layout));
     // Game tick driver: the frame hook (vendored dioxus-native patch,
     // dioxus_application.rs) runs the kernel's tick clock through ClientCore on the vsync
     // cadence so `set`-effect loops advance without waiting on a user event.
     dioxus_native::set_frame_hook(Some(Box::new(|| {
+        #[cfg(target_os = "macos")]
+        set_reduced_motion(system_reduced_motion());
+        if MOTION_CHANGED.swap(false, Ordering::Relaxed) {
+            crate::app::poke_rerender();
+        }
         #[cfg(feature = "native-http")]
-        if crate::app::drive_remote_frame() { return; }
+        if crate::app::drive_remote_frame() {
+            return;
+        }
         if shell::drive_ticks() {
             crate::app::poke_rerender();
         }
@@ -69,6 +105,7 @@ pub fn open_window(css_texts: Vec<String>, title: &str) {
     dioxus_native::launch_cfg(App, vec![], vec![Box::new(cfg)]);
     dioxus_native::set_frame_hook(None);
     dioxus_native::set_layout_hook(None);
+    dioxus_native::set_visibility_hook(None);
 }
 
 /// Drive one event from outside a render (used by the `--events` CLI flag and

@@ -25,8 +25,8 @@ pub use dioxus_native_dom::*;
 pub use anyrender_vello::{CustomPaintCtx, CustomPaintSource, DeviceHandle, TextureHandle};
 use assets::DioxusNativeNetProvider;
 pub use dioxus_application::{
-    set_frame_hook, set_layout_hook, wake_layout, DioxusNativeApplication, DioxusNativeEvent,
-    NativeViewport,
+    set_frame_hook, set_layout_hook, set_visibility_hook, wake_layout, DioxusNativeApplication,
+    DioxusNativeEvent, NativeViewport,
 };
 pub use dioxus_renderer::{DioxusNativeWindowRenderer, Features, Limits};
 
@@ -99,12 +99,12 @@ pub fn launch_cfg_with_props<P: Clone + 'static, M: 'static>(
     let event_loop = create_default_event_loop::<BlitzShellEvent>();
 
     // Turn on the runtime and enter it
-    #[cfg(feature = "net")]
+    #[cfg(feature = "time")]
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
         .unwrap();
-    #[cfg(feature = "net")]
+    #[cfg(feature = "time")]
     let _guard = rt.enter();
 
     // Setup hot-reloading if enabled.

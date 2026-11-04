@@ -32,6 +32,577 @@ fn dark_pixels(path: &std::path::Path) -> usize {
         .count()
 }
 
+fn red_pixels(path: &std::path::Path) -> usize {
+    let decoder = png::Decoder::new(std::fs::File::open(path).unwrap());
+    let mut reader = decoder.read_info().unwrap();
+    let mut buf = vec![0; reader.output_buffer_size()];
+    let info = reader.next_frame(&mut buf).unwrap();
+    buf[..info.buffer_size()]
+        .chunks_exact(4)
+        .filter(|px| px[0] > 180 && px[1] < 90 && px[2] < 90 && px[3] > 0)
+        .count()
+}
+
+fn blue_pixels(path: &std::path::Path) -> usize {
+    let decoder = png::Decoder::new(std::fs::File::open(path).unwrap());
+    let mut reader = decoder.read_info().unwrap();
+    let mut buf = vec![0; reader.output_buffer_size()];
+    let info = reader.next_frame(&mut buf).unwrap();
+    buf[..info.buffer_size()]
+        .chunks_exact(4)
+        .filter(|px| px[2] > 150 && px[0] < 100 && px[1] < 100 && px[3] > 0)
+        .count()
+}
+
+fn capture_rgba(path: &std::path::Path) -> Vec<u8> {
+    let decoder = png::Decoder::new(std::fs::File::open(path).unwrap());
+    let mut reader = decoder.read_info().unwrap();
+    let mut buf = vec![0; reader.output_buffer_size()];
+    let info = reader.next_frame(&mut buf).unwrap();
+    assert_eq!(info.color_type, png::ColorType::Rgba);
+    buf.truncate(info.buffer_size());
+    buf
+}
+
+#[test]
+fn controlled_fields_keep_late_echo_out_of_blitz_and_paint_external_clear() {
+    use anyrender::ImageRenderer;
+    use blitz_dom::{Document as _, DocumentConfig};
+    use blitz_paint::paint_scene;
+    use blitz_traits::events::{BlitzImeEvent, UiEvent};
+    use blitz_traits::shell::{ColorScheme, Viewport};
+    use dioxus::prelude::*;
+    use dioxus_native::DioxusDocument;
+    use orbital_client_dioxus::{registry::default_registry, DioxusView};
+    use std::cell::RefCell;
+
+    thread_local! {
+        static INITIAL: RefCell<orbital_core::Value> = const { RefCell::new(orbital_core::Value::Null) };
+        static CURRENT: RefCell<Option<Signal<orbital_core::Value>>> = const { RefCell::new(None) };
+    }
+
+    fn app() -> Element {
+        let props = use_signal(|| INITIAL.with(|initial| initial.borrow().clone()));
+        CURRENT.with(|current| *current.borrow_mut() = Some(props));
+        let registry = use_hook(default_registry);
+        let entities = std::collections::HashMap::new();
+        let trait_content = orbital_core::ValueMap::new();
+        let sink = Callback::new(|_: (String, orbital_core::Value)| {});
+        let view = DioxusView {
+            trait_name: "Field",
+            orbital_name: "Main",
+            current_state: "ready",
+            entities: &entities,
+            trait_content: &trait_content,
+            source_trait: None,
+            sink: Some(sink),
+            source_sink: Callback::new(move |_: Option<String>| sink),
+            navigate: None,
+            dock: None,
+            viewport_width: None,
+            canvas_theme: None,
+            theme_mode: None,
+            toggle_theme: None,
+        };
+        let current = props.read().clone();
+        let rendered = registry.render_spec(&current, None, &view);
+        rendered
+    }
+
+    fn authored_value(value: &str) {
+        CURRENT.with(|current| {
+            let mut props = current.borrow().expect("mounted field signal");
+            let mut next = props.peek().clone();
+            next.as_object_mut().expect("field props").insert(
+                "value".into(),
+                orbital_core::Value::String(value.to_owned().into()),
+            );
+            props.set(next);
+        });
+    }
+
+    fn editor_text(doc: &DioxusDocument, selector: &str) -> String {
+        let id = doc
+            .query_selector(selector)
+            .unwrap()
+            .expect("mounted field");
+        doc.get_node(id)
+            .and_then(|node| node.element_data())
+            .and_then(|element| element.text_input_data())
+            .expect("Blitz text editor")
+            .editor
+            .text()
+            .to_string()
+    }
+
+    fn gpu_frame(doc: &mut DioxusDocument) -> Vec<u8> {
+        doc.resolve(0.0);
+        let mut renderer = anyrender_vello::VelloImageRenderer::new(400, 160);
+        let mut pixels = vec![0; 400 * 160 * 4];
+        renderer.render(
+            |painter| paint_scene(painter, doc, 1.0, 400, 160),
+            &mut pixels,
+        );
+        pixels
+    }
+
+    fn settle(doc: &mut DioxusDocument) {
+        for _ in 0..8 {
+            if !doc.poll(None) {
+                break;
+            }
+        }
+    }
+
+    for (pattern, selector) in [("input", "input#field"), ("textarea", "textarea#field")] {
+        INITIAL.with(|initial| {
+            *initial.borrow_mut() = serde_json::from_value(serde_json::json!({
+                "type": pattern, "id": "field", "label": "Task", "value": "", "onChange": "EDIT"
+            }))
+            .unwrap();
+        });
+        let mut doc = DioxusDocument::new(
+            dioxus_core::VirtualDom::new(app),
+            DocumentConfig {
+                viewport: Some(Viewport::new(400, 160, 1.0, ColorScheme::Light)),
+                font_ctx: Some(orbital_client_dioxus::offscreen::embedded_font_context()),
+                ..Default::default()
+            },
+        );
+        for stylesheet in orbital_client_dioxus::styles::stylesheets() {
+            doc.add_user_agent_stylesheet(&stylesheet);
+        }
+        doc.initial_build();
+        settle(&mut doc);
+        doc.resolve(0.0);
+        let id = doc.query_selector(selector).unwrap().expect("field node");
+        assert!(doc.set_focus_to(id));
+        for draft in ["A", "AB"] {
+            doc.handle_ui_event(UiEvent::Ime(BlitzImeEvent::TextState {
+                text: draft.to_string(),
+                selection: (draft.len(), draft.len()),
+                compose_region: None,
+            }));
+            settle(&mut doc);
+        }
+        assert_eq!(editor_text(&doc, selector), "AB", "{pattern} local draft");
+        let typed = gpu_frame(&mut doc);
+        authored_value("A");
+        settle(&mut doc);
+        assert_eq!(editor_text(&doc, selector), "AB", "{pattern} delayed echo");
+        authored_value("AB");
+        settle(&mut doc);
+        assert_eq!(editor_text(&doc, selector), "AB", "{pattern} latest echo");
+        authored_value("");
+        settle(&mut doc);
+        assert_eq!(editor_text(&doc, selector), "", "{pattern} external clear");
+        let cleared = gpu_frame(&mut doc);
+        assert_ne!(
+            typed, cleared,
+            "{pattern} external clear did not change GPU frame"
+        );
+    }
+
+    INITIAL.with(|initial| {
+        *initial.borrow_mut() = serde_json::from_value(serde_json::json!({
+            "type": "select", "id": "field", "label": "Task", "value": "A",
+            "options": [{"value": "A", "label": "A"}, {"value": "B", "label": "B"}],
+            "clearable": true, "onChange": "EDIT"
+        }))
+        .unwrap();
+    });
+    let mut doc = DioxusDocument::new(
+        dioxus_core::VirtualDom::new(app),
+        DocumentConfig {
+            viewport: Some(Viewport::new(400, 160, 1.0, ColorScheme::Light)),
+            font_ctx: Some(orbital_client_dioxus::offscreen::embedded_font_context()),
+            ..Default::default()
+        },
+    );
+    for stylesheet in orbital_client_dioxus::styles::stylesheets() {
+        doc.add_user_agent_stylesheet(&stylesheet);
+    }
+    doc.initial_build();
+    settle(&mut doc);
+    doc.resolve(0.0);
+    let trigger_text = |doc: &DioxusDocument| {
+        let trigger = doc
+            .query_selector("button[aria-haspopup='listbox']")
+            .unwrap()
+            .expect("Select trigger");
+        doc.get_node(trigger).unwrap().text_content()
+    };
+    let initial_trigger = trigger_text(&doc);
+    assert!(
+        initial_trigger.contains('A'),
+        "selected trigger={initial_trigger:?}, buttons={:?}",
+        doc.query_selector_all("button")
+            .unwrap()
+            .into_iter()
+            .map(|id| doc.get_node(id).unwrap().text_content())
+            .collect::<Vec<_>>()
+    );
+    let clear = doc
+        .query_selector_all("button")
+        .unwrap()
+        .into_iter()
+        .find(|id| {
+            doc.get_node(*id)
+                .is_some_and(|node| node.text_content() == "Clear")
+        })
+        .expect("Select clear button");
+    let click = doc
+        .get_node(clear)
+        .unwrap()
+        .synthetic_click_event_data(dioxus_html::Modifiers::empty());
+    doc.handle_ui_event(UiEvent::MouseMove(click.clone()));
+    doc.handle_ui_event(UiEvent::MouseDown(click.clone()));
+    doc.handle_ui_event(UiEvent::MouseUp(click));
+    settle(&mut doc);
+    let after_clear = trigger_text(&doc);
+    assert!(
+        after_clear.contains("Select..."),
+        "Select after clear={after_clear:?}, buttons={:?}",
+        doc.query_selector_all("button")
+            .unwrap()
+            .into_iter()
+            .map(|id| doc.get_node(id).unwrap().text_content())
+            .collect::<Vec<_>>()
+    );
+    authored_value("");
+    settle(&mut doc);
+    assert!(
+        trigger_text(&doc).contains("Select..."),
+        "Select clear echo"
+    );
+    authored_value("B");
+    settle(&mut doc);
+    assert!(trigger_text(&doc).contains('B'), "Select external value");
+    let selected = gpu_frame(&mut doc);
+    authored_value("");
+    settle(&mut doc);
+    assert!(
+        trigger_text(&doc).contains("Select..."),
+        "Select external clear"
+    );
+    let cleared = gpu_frame(&mut doc);
+    assert_ne!(
+        selected, cleared,
+        "Select external clear did not change GPU frame"
+    );
+}
+
+#[test]
+fn geometric_pattern_modes_paint_through_native_gpu_at_two_viewports() {
+    let dir = std::env::temp_dir().join(format!("dioxus-geometric-{}", std::process::id()));
+    let mut background_counts = Vec::new();
+    let mut frame_counts = Vec::new();
+    orbital_client_dioxus::app::CSS_TEXT
+        .with(|css| *css.borrow_mut() = orbital_client_dioxus::styles::stylesheets());
+    for (width, height) in [(160_u32, 120_u32), (320, 200)] {
+        for mode in ["background", "left", "right", "dual", "around", "frame"] {
+            let path = dir.join(format!("{mode}-{width}x{height}.png"));
+            let children = if mode == "frame" {
+                serde_json::json!([{
+                    "type": "box",
+                    "style": { "backgroundColor": "#0000ff", "height": "24px" },
+                    "children": [{ "type": "typography", "content": "FRAME CHILD" }]
+                }])
+            } else {
+                serde_json::json!([])
+            };
+            let geometric = serde_json::json!({
+                "type": "geometric-pattern",
+                "variant": "rosette-filled",
+                "mode": mode,
+                "opacity": 1,
+                "color": "#ff0000",
+                "scale": 0.5,
+                "strokeWidth": 3,
+                "children": children
+            });
+            mount_core(&program(serde_json::json!({
+                "type": "box",
+                "style": {
+                    "position": "relative",
+                    "width": "100%",
+                    "height": format!("{}px", height - 32)
+                },
+                "children": [geometric]
+            })))
+            .unwrap();
+            capture_gpu_png(&path, width, height).unwrap();
+            let pixels = capture_rgba(&path);
+            let count = |x0: u32, x1: u32, color: &str| -> usize {
+                (0..height)
+                    .flat_map(|y| (x0..x1).map(move |x| (y, x)))
+                    .filter(|(y, x)| {
+                        let i = ((*y * width + *x) * 4) as usize;
+                        let p = &pixels[i..i + 4];
+                        match color {
+                            "red" => p[0] > 180 && p[1] < 110 && p[2] < 110,
+                            "blue" => p[2] > 160 && p[0] < 110 && p[1] < 110,
+                            _ => unreachable!(),
+                        }
+                    })
+                    .count()
+            };
+            let left = count(0, width / 4, "red");
+            let middle = count(width * 3 / 8, width * 5 / 8, "red");
+            let right = count(width * 3 / 4, width, "red");
+            match mode {
+                "background" => {
+                    assert!(
+                        left > 20 && right > 20,
+                        "background did not tile at {width}x{height}: {left}/{right}"
+                    );
+                    background_counts.push(left + middle + right);
+                }
+                "left" => assert!(
+                    left > right * 3 + 20,
+                    "left mask failed at {width}x{height}: {left}/{right}"
+                ),
+                "right" => assert!(
+                    right > left * 3 + 20,
+                    "right mask failed at {width}x{height}: {left}/{right}"
+                ),
+                "dual" => assert!(
+                    left + right > middle * 2 + 20,
+                    "dual mask failed at {width}x{height}: {left}/{middle}/{right}"
+                ),
+                "around" => assert!(
+                    left + right > middle * 2 + 20,
+                    "around mask failed at {width}x{height}: {left}/{middle}/{right}"
+                ),
+                "frame" => {
+                    let blue = count(0, width, "blue");
+                    assert!(blue > 20, "frame child missing at {width}x{height}");
+                    let red_rows = (0..height)
+                        .filter(|y| {
+                            (0..width).any(|x| {
+                                let i = ((*y * width + x) * 4) as usize;
+                                pixels[i] > 180 && pixels[i + 1] < 110 && pixels[i + 2] < 110
+                            })
+                        })
+                        .collect::<Vec<_>>();
+                    let blue_rows = (0..height)
+                        .filter(|y| {
+                            (0..width).any(|x| {
+                                let i = ((*y * width + x) * 4) as usize;
+                                pixels[i + 2] > 160 && pixels[i] < 110 && pixels[i + 1] < 110
+                            })
+                        })
+                        .collect::<Vec<_>>();
+                    assert!(
+                        red_rows.first() < blue_rows.first() && red_rows.last() > blue_rows.last(),
+                        "frame strips did not surround child at {width}x{height}"
+                    );
+                    frame_counts.push(left + middle + right);
+                }
+                _ => unreachable!(),
+            }
+        }
+    }
+    assert!(
+        background_counts[1] > background_counts[0] * 2,
+        "background did not grow with viewport: {background_counts:?}"
+    );
+    assert!(
+        frame_counts[1] > frame_counts[0],
+        "frame strips did not grow with viewport width: {frame_counts:?}"
+    );
+    std::fs::remove_dir_all(dir).ok();
+}
+
+#[test]
+fn hidden_flex_sibling_and_empty_dioxus_slots_do_not_widen_buttons() {
+    use blitz_dom::DocumentConfig;
+    use blitz_traits::shell::{ColorScheme, Viewport};
+    use dioxus::prelude::*;
+    use dioxus_native::DioxusDocument;
+
+    fn app() -> Element {
+        let empty = false;
+        rsx! {
+            div { class: "flex flex-col",
+                div { class: "flex",
+                    button { id: "direct-use", class: "inline-flex items-center justify-center gap-2 h-button-sm px-3 text-sm", "Use" }
+                }
+                div { class: "flex gap-2", id: "plain-row",
+                    button { id: "plain-use", class: "inline-flex items-center justify-center gap-2 h-button-sm px-3 text-sm",
+                        span { class: "inline-flex flex-1 min-w-0 items-center gap-2", span { "Use" } }
+                    }
+                    button { id: "plain-details", class: "inline-flex items-center justify-center gap-2 h-button-sm px-3 text-sm", "Details" }
+                }
+                div { class: "flex gap-2", id: "conditional-row",
+                    button { id: "conditional-use", class: "inline-flex items-center justify-center gap-2 h-button-sm px-3 text-sm",
+                        if empty { span { "busy" } }
+                        span { class: "inline-flex flex-1 min-w-0 items-center gap-2",
+                            if empty { span { "left" } }
+                            span { "Use" }
+                            if empty { span { "right" } }
+                        }
+                    }
+                    div { id: "hidden-switch", class: "inline-flex hidden", "hidden switch" }
+                    button { id: "conditional-details", class: "inline-flex items-center justify-center gap-2 h-button-sm px-3 text-sm", "Details" }
+                }
+            }
+        }
+    }
+
+    let mut doc = DioxusDocument::new(
+        dioxus_core::VirtualDom::new(app),
+        DocumentConfig {
+            viewport: Some(Viewport::new(300, 100, 1.0, ColorScheme::Light)),
+            font_ctx: Some(orbital_client_dioxus::offscreen::embedded_font_context()),
+            ..Default::default()
+        },
+    );
+    doc.initial_build();
+    doc.create_head_element(
+        "style",
+        &[],
+        &Some(include_str!("../assets/css/web-client.css").into()),
+    );
+    doc.resolve(0.0);
+    let layout = |selector| {
+        let id = doc.query_selector(selector).unwrap().unwrap();
+        doc.get_node(id).unwrap().final_layout
+    };
+    let plain_use = layout("#plain-use");
+    let direct_use = layout("#direct-use");
+    let conditional_use = layout("#conditional-use");
+    let plain_details = layout("#plain-details");
+    let conditional_details = layout("#conditional-details");
+    let hidden_switch = layout("#hidden-switch");
+    assert!(
+        (direct_use.size.width - plain_use.size.width).abs() < 1.0,
+        "nested content inflated button: direct={} nested={}",
+        direct_use.size.width,
+        plain_use.size.width
+    );
+    assert!(
+        (plain_use.size.width - conditional_use.size.width).abs() < 1.0,
+        "empty Dioxus slots inflated button: plain={} conditional={}",
+        plain_use.size.width,
+        conditional_use.size.width
+    );
+    assert!(
+        hidden_switch.size.width < 1.0,
+        "hidden switch retained width {}",
+        hidden_switch.size.width
+    );
+    assert!(
+        (plain_details.location.x - conditional_details.location.x).abs() < 1.0,
+        "second button shifted: plain={} conditional={}",
+        plain_details.location.x,
+        conditional_details.location.x
+    );
+}
+
+#[test]
+fn failed_avatar_image_request_paints_initials_after_onerror() {
+    use anyrender::ImageRenderer;
+    use blitz_dom::{net::Resource, Document as _, DocumentConfig};
+    use blitz_paint::paint_scene;
+    use blitz_traits::{
+        net::{BoxedHandler, NetProvider, Request},
+        shell::{ColorScheme, Viewport},
+    };
+    use dioxus_core::{provide_context, ScopeId, VirtualDom};
+    use dioxus_native::DioxusDocument;
+    use orbital_client_dioxus::offscreen::HeadSink;
+    use std::{
+        cell::RefCell,
+        collections::VecDeque,
+        rc::Rc,
+        sync::{Arc, Mutex},
+    };
+
+    struct FailingImageProvider(Arc<Mutex<Vec<(usize, Resource)>>>);
+
+    impl NetProvider<Resource> for FailingImageProvider {
+        fn fetch(&self, doc_id: usize, _request: Request, handler: BoxedHandler<Resource>) {
+            if let Some(error) = handler.error_resource() {
+                self.0.lock().unwrap().push((doc_id, error));
+            }
+        }
+    }
+
+    orbital_client_dioxus::app::CSS_TEXT
+        .with(|css| *css.borrow_mut() = orbital_client_dioxus::styles::stylesheets());
+    mount_core(&program(serde_json::json!({
+        "type": "avatar",
+        "src": "missing-avatar.png",
+        "initials": "ZZ",
+        "size": "xl"
+    })))
+    .unwrap();
+
+    let pending = Arc::new(Mutex::new(Vec::new()));
+    let ops = Rc::new(RefCell::new(VecDeque::new()));
+    let vdom = VirtualDom::new(orbital_client_dioxus::app::App);
+    vdom.in_scope(ScopeId::ROOT, || {
+        provide_context(Rc::new(HeadSink { ops: ops.clone() }) as Rc<dyn dioxus_document::Document>);
+    });
+    let mut doc = DioxusDocument::new(
+        vdom,
+        DocumentConfig {
+            viewport: Some(Viewport::new(120, 120, 1.0, ColorScheme::Light)),
+            font_ctx: Some(orbital_client_dioxus::offscreen::embedded_font_context()),
+            net_provider: Some(Arc::new(FailingImageProvider(pending.clone()))),
+            ..Default::default()
+        },
+    );
+    doc.initial_build();
+    for _ in 0..8 {
+        let mut changed = false;
+        while let Some(op) = ops.borrow_mut().pop_front() {
+            doc.create_head_element(&op.name, &op.attributes, &op.contents);
+            changed = true;
+        }
+        changed |= doc.poll(None);
+        if !changed {
+            break;
+        }
+    }
+    doc.resolve(0.0);
+    assert!(doc.query_selector("img").unwrap().is_some());
+
+    let mut renderer = anyrender_vello_cpu::VelloCpuImageRenderer::new(120, 120);
+    let mut before = vec![0u8; 120 * 120 * 4];
+    renderer.render(
+        |painter| paint_scene(painter, &doc, 1.0, 120, 120),
+        &mut before,
+    );
+
+    let failures = std::mem::take(&mut *pending.lock().unwrap());
+    assert_eq!(failures.len(), 1, "Avatar must request its image once");
+    for (doc_id, resource) in failures {
+        assert_eq!(doc_id, doc.id());
+        assert!(matches!(&resource, Resource::ImageError(_, src) if src == "missing-avatar.png"));
+        doc.load_resource(resource);
+    }
+    assert!(
+        doc.poll(None),
+        "image error should schedule the Avatar fallback"
+    );
+    doc.resolve(0.0);
+    assert!(doc.query_selector("img").unwrap().is_none());
+    let root = doc.root_node().children[0];
+    assert!(doc.get_node(root).unwrap().text_content().contains("ZZ"));
+
+    let mut after = vec![0u8; 120 * 120 * 4];
+    renderer.render(
+        |painter| paint_scene(painter, &doc, 1.0, 120, 120),
+        &mut after,
+    );
+    assert_ne!(
+        before, after,
+        "initials fallback must change the painted frame"
+    );
+}
+
 #[test]
 fn pointer_events_none_overlay_passes_touch_to_checkbox_button() {
     use blitz_dom::DocumentConfig;
@@ -67,82 +638,131 @@ fn pointer_events_none_overlay_passes_touch_to_checkbox_button() {
 }
 
 #[test]
-fn activity_rail_folder_icon_uses_a_bundled_glyph_and_paints_pixels() {
-    use anyrender::ImageRenderer;
-    use blitz_dom::{Document as _, DocumentConfig};
-    use blitz_paint::paint_scene;
-    use blitz_traits::shell::{ColorScheme, Viewport};
-    use dioxus::prelude::*;
-    use dioxus_native::DioxusDocument;
-    use fontique::{Blob, QueryStatus};
-    use std::sync::Arc;
-
-    fn icon_app() -> Element {
-        let glyph = orbital_core::client::helpers::icon_name_to_glyph("folder");
-        rsx! {
-            div { style: "width:80px;height:64px;background:#ffffff",
-                span { class: "almadar-activity-rail__icon", style: "font-size:32px;color:#000000", "{glyph}" }
-            }
-        }
-    }
-
-    fn blank_app() -> Element {
-        rsx! { div { style: "width:80px;height:64px;background:#ffffff" } }
-    }
-
-    let glyph = orbital_core::client::helpers::icon_name_to_glyph("folder");
-    let icon_char = glyph.chars().next().expect("folder glyph");
-    assert_eq!(glyph.chars().count(), 1);
-    let bundled_font = include_bytes!("../vendor/blitz-dom/assets/NotoSansSymbols2-Regular.ttf");
-    let mut font_ctx = parley::FontContext::default();
-    font_ctx
-        .collection
-        .register_fonts(Blob::new(Arc::new(bundled_font.as_slice()) as _), None);
-    let mut query = font_ctx.collection.query(&mut font_ctx.source_cache);
-    query.set_families(["Noto Sans Symbols 2"]);
-    let mut covered = false;
-    query.matches_with(|font| {
-        covered = font
-            .charmap()
-            .and_then(|map| map.map(icon_char as u32))
-            .is_some();
-        QueryStatus::Stop
-    });
-    assert!(covered, "bundled symbol font lacks the shared folder glyph");
-
-    fn painted_pixels(app: fn() -> Element) -> usize {
-        let mut doc = DioxusDocument::new(
-            dioxus_core::VirtualDom::new(app),
-            DocumentConfig {
-                viewport: Some(Viewport::new(80, 64, 1.0, ColorScheme::Light)),
-                font_ctx: Some(orbital_client_dioxus::offscreen::embedded_font_context()),
-                ..Default::default()
-            },
-        );
-        doc.initial_build();
-        doc.create_head_element(
-            "style",
-            &[],
-            &Some(include_str!("../assets/css/almadar.css").into()),
-        );
-        doc.resolve(0.0);
-        let mut renderer = anyrender_vello::VelloImageRenderer::new(80, 64);
-        let mut pixels = vec![0u8; 80 * 64 * 4];
-        renderer.render(
-            |painter| paint_scene(painter, &doc, 1.0, 80, 64),
-            &mut pixels,
-        );
-        pixels
-            .chunks_exact(4)
-            .filter(|pixel| pixel[3] > 0 && pixel[0] < 128 && pixel[1] < 128 && pixel[2] < 128)
-            .count()
-    }
-
-    let icon_pixels = painted_pixels(icon_app);
-    let blank_pixels = painted_pixels(blank_app);
+fn native_icon_uses_exact_lucide_geometry_color_and_stroke_width() {
+    let source = include_str!("../assets/LUCIDE-SOURCE");
+    assert!(source.contains("lucide-static 0.570.0"));
     assert!(
-        icon_pixels > blank_pixels + 10,
-        "folder glyph painted {icon_pixels} dark pixels; blank painted {blank_pixels}"
+        source.contains("sha256 ff46553f4bc1d2575aa3c1806a14427a9cbdcdb92df7e85c30b2f3cb178f749c")
+    );
+    let nodes: serde_json::Value =
+        serde_json::from_str(include_str!("../assets/lucide-nodes.json")).unwrap();
+    let aliases: serde_json::Value =
+        serde_json::from_str(include_str!("../assets/lucide-aliases.json")).unwrap();
+    assert!(nodes["folder"]
+        .as_array()
+        .is_some_and(|shapes| !shapes.is_empty()));
+    assert_eq!(aliases["close"], "x");
+    assert_eq!(aliases["loader"], "loader-circle");
+
+    orbital_client_dioxus::app::CSS_TEXT
+        .with(|css| *css.borrow_mut() = orbital_client_dioxus::styles::stylesheets());
+    let dir = std::env::temp_dir().join(format!("dioxus-lucide-{}", std::process::id()));
+    let red = dir.join("red.png");
+    let thick = dir.join("thick.png");
+    let blue = dir.join("blue.png");
+    let blank = dir.join("blank.png");
+    for (path, color, width) in [
+        (&red, "#dd0000", 2),
+        (&thick, "#dd0000", 4),
+        (&blue, "#0000dd", 2),
+    ] {
+        mount_core(&program(serde_json::json!({
+            "type": "icon", "name": "folder", "size": "xl", "strokeWidth": width,
+            "style": { "color": color },
+        })))
+        .unwrap();
+        capture_gpu_png(path, 100, 100).unwrap();
+    }
+    mount_core(&program(serde_json::json!(null))).unwrap();
+    capture_gpu_png(&blank, 100, 100).unwrap();
+    let red_count = red_pixels(&red);
+    let thick_count = red_pixels(&thick);
+    let blue_count = blue_pixels(&blue);
+    let blank_count = red_pixels(&blank) + blue_pixels(&blank);
+    std::fs::remove_dir_all(&dir).ok();
+    assert!(
+        red_count > blank_count + 10,
+        "red Lucide icon painted {red_count} pixels; blank painted {blank_count}"
+    );
+    assert!(
+        blue_count > blank_count + 10,
+        "blue Lucide icon painted {blue_count} pixels; blank painted {blank_count}"
+    );
+    assert!(
+        thick_count > red_count + 10,
+        "strokeWidth=4 painted {thick_count} pixels; strokeWidth=2 painted {red_count}"
+    );
+}
+
+#[test]
+fn native_icon_inherits_theme_stroke_width_when_unset() {
+    let mut css = orbital_client_dioxus::styles::stylesheets();
+    css.push(
+        "[data-theme=stroke-thin]{--icon-family:lucide;--icon-stroke-width:1}\
+         [data-theme=stroke-thick]{--icon-family:lucide;--icon-stroke-width:4}"
+            .to_string(),
+    );
+    orbital_client_dioxus::app::CSS_TEXT.with(|current| *current.borrow_mut() = css);
+    let dir = std::env::temp_dir().join(format!("dioxus-icon-theme-stroke-{}", std::process::id()));
+    let thin = dir.join("thin.png");
+    let thick = dir.join("thick.png");
+    for (theme, path) in [("stroke-thin", &thin), ("stroke-thick", &thick)] {
+        orbital_client_dioxus::app::THEME
+            .with(|current| *current.borrow_mut() = Some(theme.to_string()));
+        mount_core(&program(serde_json::json!({
+            "type": "icon", "name": "folder", "size": "xl", "style": { "color": "#dd0000" },
+        })))
+        .unwrap();
+        capture_gpu_png(path, 100, 100).unwrap();
+    }
+    orbital_client_dioxus::app::THEME.with(|current| *current.borrow_mut() = None);
+    let thin_pixels = red_pixels(&thin);
+    let thick_pixels = red_pixels(&thick);
+    std::fs::remove_dir_all(&dir).ok();
+    assert!(
+        thin_pixels > 10,
+        "thin theme painted {thin_pixels} red pixels"
+    );
+    assert!(
+        thick_pixels > thin_pixels + 10,
+        "theme stroke width 4 painted {thick_pixels} pixels; width 1 painted {thin_pixels}"
+    );
+}
+
+#[test]
+fn native_icon_ignores_stroke_token_from_inactive_theme_family() {
+    let mut css = orbital_client_dioxus::styles::stylesheets();
+    css.push(
+        "[data-theme=phosphor-thin]{--icon-family:phosphor-outline;--icon-stroke-width:1}\
+         [data-theme=phosphor-thick]{--icon-family:phosphor-outline;--icon-stroke-width:4}\
+         [data-theme=lucide-thick]{--icon-family:lucide;--icon-stroke-width:4}"
+            .to_string(),
+    );
+    orbital_client_dioxus::app::CSS_TEXT.with(|current| *current.borrow_mut() = css);
+    let dir =
+        std::env::temp_dir().join(format!("dioxus-icon-family-stroke-{}", std::process::id()));
+    let mut counts = Vec::new();
+    for theme in ["phosphor-thin", "phosphor-thick", "lucide-thick"] {
+        let path = dir.join(format!("{theme}.png"));
+        orbital_client_dioxus::app::THEME
+            .with(|current| *current.borrow_mut() = Some(theme.to_string()));
+        mount_core(&program(serde_json::json!({
+            "type": "icon", "name": "folder", "size": "xl", "style": { "color": "#dd0000" },
+        })))
+        .unwrap();
+        capture_gpu_png(&path, 100, 100).unwrap();
+        counts.push(red_pixels(&path));
+    }
+    orbital_client_dioxus::app::THEME.with(|current| *current.borrow_mut() = None);
+    std::fs::remove_dir_all(&dir).ok();
+    assert!(counts[0] > 10, "inactive-family fallback painted no icon");
+    assert_eq!(
+        counts[0], counts[1],
+        "inactive-family token changed Lucide fallback stroke"
+    );
+    assert!(
+        counts[2] > counts[1] + 10,
+        "active Lucide family did not use its stroke token: {counts:?}"
     );
 }
 
@@ -185,6 +805,37 @@ fn gpu_paints_the_same_slot_with_visible_text() {
     assert!(
         without < with_text / 10,
         "control: blank page painted {without}"
+    );
+}
+
+#[test]
+fn gpu_paints_svg_ring_stroke_pixels() {
+    let dir = std::env::temp_dir().join(format!("dioxus-svg-gpu-capture-{}", std::process::id()));
+    mount_core(&program(serde_json::json!({
+        "type": "svg-ring",
+        "cx": 50,
+        "cy": 50,
+        "r": 36,
+        "strokeWidth": 6,
+        "color": "#ff0000",
+        "width": 100,
+        "height": 100
+    })))
+    .unwrap();
+    let ring = dir.join("ring.png");
+    capture_gpu_png(&ring, 400, 200).unwrap();
+    mount_core(&program(serde_json::json!(null))).unwrap();
+    let blank = dir.join("blank.png");
+    capture_gpu_png(&blank, 400, 200).unwrap();
+    let (painted, control) = (red_pixels(&ring), red_pixels(&blank));
+    std::fs::remove_dir_all(&dir).ok();
+    assert!(
+        painted > 100,
+        "SVG ring GPU frame painted {painted} red pixels"
+    );
+    assert!(
+        control < painted / 10,
+        "blank GPU frame painted {control} red pixels"
     );
 }
 
@@ -241,7 +892,7 @@ fn pattern_tile_canvas_mapper_paints_headless_gpu_pixels() {
 #[test]
 fn positioned_drawer_paints_its_semantic_children_above_the_backdrop() {
     use anyrender::ImageRenderer;
-    use blitz_dom::{Document as _, DocumentConfig};
+    use blitz_dom::DocumentConfig;
     use blitz_paint::paint_scene;
     use blitz_traits::shell::{ColorScheme, Viewport};
     use dioxus::prelude::*;
@@ -300,6 +951,109 @@ fn positioned_drawer_paints_its_semantic_children_above_the_backdrop() {
     assert!(
         dark > 100,
         "drawer semantic text failed to paint: {dark} dark pixels"
+    );
+}
+
+#[test]
+fn drawer_backdrop_uses_containing_block_only_when_contained() {
+    use anyrender::ImageRenderer;
+    use blitz_dom::DocumentConfig;
+    use blitz_paint::paint_scene;
+    use blitz_traits::shell::{ColorScheme, Viewport};
+    use dioxus::prelude::*;
+    use dioxus_native::DioxusDocument;
+
+    fn app() -> Element {
+        rsx! {
+            div { style: "position:relative;left:40px;top:30px;width:200px;height:160px;overflow:hidden",
+                div { id: "contained-backdrop", class: "fixed inset-0 z-40 almadar-drawer-overlay-contained", style: "background:#ff0000" }
+                div { id: "viewport-backdrop", class: "fixed inset-0 z-40 almadar-drawer-overlay-viewport", style: "background:#000000",
+                    div { id: "nested-fixed", class: "fixed", style: "top:0;right:0;width:20px;height:20px;z-index:70;background:#0000ff" }
+                }
+            }
+            div { style: "height:1000px" }
+        }
+    }
+
+    let mut doc = DioxusDocument::new(
+        dioxus_core::VirtualDom::new(app),
+        DocumentConfig {
+            viewport: Some(Viewport::new(500, 400, 1.0, ColorScheme::Light)),
+            ..Default::default()
+        },
+    );
+    for stylesheet in orbital_client_dioxus::styles::stylesheets() {
+        doc.add_user_agent_stylesheet(&stylesheet);
+    }
+    doc.initial_build();
+    doc.resolve(0.0);
+    let layout = |selector| {
+        let id = doc.query_selector(selector).unwrap().unwrap();
+        doc.get_node(id).unwrap().final_layout
+    };
+    let contained = layout("#contained-backdrop");
+    let viewport = layout("#viewport-backdrop");
+    assert!(
+        (contained.size.width - 200.0).abs() < 1.0,
+        "contained width: {}",
+        contained.size.width
+    );
+    assert!(
+        (contained.size.height - 160.0).abs() < 1.0,
+        "contained height: {}",
+        contained.size.height
+    );
+    assert!(
+        (viewport.size.width - 500.0).abs() < 1.0,
+        "viewport width: {}",
+        viewport.size.width
+    );
+    assert!(
+        (viewport.size.height - 400.0).abs() < 1.0,
+        "viewport height: {}",
+        viewport.size.height
+    );
+    assert!(
+        viewport.location.x.abs() < 1.0,
+        "viewport x: {}",
+        viewport.location.x
+    );
+    assert!(
+        viewport.location.y.abs() < 1.0,
+        "viewport y: {}",
+        viewport.location.y
+    );
+    let viewport_id = doc.query_selector("#viewport-backdrop").unwrap().unwrap();
+    assert_eq!(doc.hit(450.0, 300.0).unwrap().node_id, viewport_id);
+    let mut renderer = anyrender_vello_cpu::VelloCpuImageRenderer::new(500, 400);
+    let mut pixels = vec![0u8; 500 * 400 * 4];
+    renderer.render(
+        |painter| paint_scene(painter, &doc, 1.0, 500, 400),
+        &mut pixels,
+    );
+    let outside_parent = &pixels[(300 * 500 + 450) * 4..(300 * 500 + 451) * 4];
+    assert!(
+        outside_parent[0] < 32 && outside_parent[1] < 32 && outside_parent[2] < 32,
+        "viewport backdrop was clipped by its ancestor: {outside_parent:?}"
+    );
+    let nested_id = doc.query_selector("#nested-fixed").unwrap().unwrap();
+    assert_eq!(doc.hit(490.0, 10.0).unwrap().node_id, nested_id);
+    doc.set_viewport_scroll(blitz_dom::Point { x: 0.0, y: 200.0 });
+    assert_eq!(doc.hit(450.0, 500.0).unwrap().node_id, viewport_id);
+    assert_eq!(doc.hit(490.0, 210.0).unwrap().node_id, nested_id);
+    renderer.render(
+        |painter| paint_scene(painter, &doc, 1.0, 500, 400),
+        &mut pixels,
+    );
+    let scrolled_backdrop = &pixels[(300 * 500 + 450) * 4..(300 * 500 + 451) * 4];
+    assert!(
+        scrolled_backdrop[0] < 32 && scrolled_backdrop[1] < 32 && scrolled_backdrop[2] < 32,
+        "viewport backdrop moved during scroll: {scrolled_backdrop:?}"
+    );
+    let scrolled_nested = &pixels[(10 * 500 + 490) * 4..(10 * 500 + 491) * 4];
+    assert!(
+        scrolled_nested[0] < 32 && scrolled_nested[1] < 32 && scrolled_nested[2] > 200,
+        "nested fixed child moved or clipped during scroll: {scrolled_nested:?}"
     );
 }
 
@@ -408,6 +1162,43 @@ fn native_css_keyframes_change_computed_opacity_over_time() {
     assert!(beginning < 0.1, "initial opacity: {beginning}");
     assert!(middle > 0.35 && middle < 0.65, "midpoint opacity: {middle}");
     assert!(end > 0.9, "final opacity: {end}");
+}
+
+#[test]
+fn native_reduced_motion_root_collapses_html_keyframes() {
+    use blitz_dom::DocumentConfig;
+    use blitz_traits::shell::{ColorScheme, Viewport};
+    use dioxus::prelude::*;
+    use dioxus_native::DioxusDocument;
+
+    fn app() -> Element {
+        rsx! { div { "data-reduced-motion": "true", div { class: "animated", "Animated" } } }
+    }
+
+    let mut doc = DioxusDocument::new(
+        dioxus_core::VirtualDom::new(app),
+        DocumentConfig {
+            viewport: Some(Viewport::new(200, 100, 1.0, ColorScheme::Light)),
+            ..Default::default()
+        },
+    );
+    doc.add_user_agent_stylesheet(include_str!("../assets/css/almadar.css"));
+    doc.add_user_agent_stylesheet(
+        ".animated { animation: entry-opacity 1s linear both; } \
+         @keyframes entry-opacity { from { opacity: 0; } to { opacity: 1; } }",
+    );
+    doc.initial_build();
+    doc.resolve(0.0);
+    doc.resolve(0.5);
+    let node_id = doc.query_selector(".animated").unwrap().unwrap();
+    let opacity = doc
+        .get_node(node_id)
+        .unwrap()
+        .primary_styles()
+        .unwrap()
+        .get_effects()
+        .opacity;
+    assert!(opacity > 0.9, "reduced-motion opacity: {opacity}");
 }
 
 #[test]

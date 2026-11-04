@@ -114,7 +114,7 @@ mod desktop {
             *c.borrow_mut() = if no_css {
                 Vec::new()
             } else {
-                orbital_client_dioxus::styles::stylesheets().into_iter().skip(1).collect()
+                orbital_client_dioxus::styles::stylesheets()
             }
         });
 

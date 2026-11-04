@@ -49,10 +49,15 @@ impl NativeViewport {
 static FRAME_HOOK: RwLock<Option<Box<dyn FnMut() + Send + Sync>>> = RwLock::new(None);
 type LayoutHook = fn(&winit::window::Window, &[(usize, [f32; 4])]);
 static LAYOUT_HOOK: RwLock<Option<LayoutHook>> = RwLock::new(None);
+static VISIBILITY_HOOK: RwLock<Option<LayoutHook>> = RwLock::new(None);
 static LAYOUT_WAKE: RwLock<Option<EventLoopProxy<BlitzShellEvent>>> = RwLock::new(None);
 
 pub fn set_layout_hook(hook: Option<LayoutHook>) {
     *LAYOUT_HOOK.write().expect("layout hook poisoned") = hook;
+}
+
+pub fn set_visibility_hook(hook: Option<LayoutHook>) {
+    *VISIBILITY_HOOK.write().expect("visibility hook poisoned") = hook;
 }
 
 pub fn wake_layout() {
@@ -231,8 +236,11 @@ impl ApplicationHandler<BlitzShellEvent> for DioxusNativeApplication {
                 .in_scope(ScopeId::ROOT, move || provide_context(history_provider));
 
             // Add renderer
-            doc.vdom
-                .in_scope(ScopeId::ROOT, move || provide_context(renderer));
+            let paint_sources = renderer.paint_source_registry();
+            doc.vdom.in_scope(ScopeId::ROOT, move || {
+                provide_context(paint_sources);
+                provide_context(renderer);
+            });
 
             // Queue rebuild
             doc.initial_build();
@@ -281,35 +289,46 @@ impl ApplicationHandler<BlitzShellEvent> for DioxusNativeApplication {
         }
         self.inner.window_event(event_loop, window_id, event);
         if redraw {
-            if let Some(hook) = *LAYOUT_HOOK.read().expect("layout hook poisoned") {
+            let video_hook = *LAYOUT_HOOK.read().expect("layout hook poisoned");
+            let visibility_hook = *VISIBILITY_HOOK.read().expect("visibility hook poisoned");
+            if video_hook.is_some() || visibility_hook.is_some() {
                 if let Some(window) = self.inner.windows.get_mut(&window_id) {
                     let doc = window.downcast_doc_mut::<DioxusDocument>();
                     let scale = doc.inner.viewport().scale();
-                    let overlays: Vec<_> = doc
-                        .inner
-                        .tree()
-                        .iter()
-                        .filter_map(|(_, node)| {
-                            let id = node
-                                .attrs()?
-                                .iter()
-                                .find(|attr| attr.name.local.as_ref() == "data-orbital-video")?
-                                .value
-                                .parse::<usize>()
-                                .ok()?;
+                    let mut overlays = Vec::new();
+                    let mut observed = Vec::new();
+                    for (_, node) in doc.inner.tree().iter() {
+                        let Some(attrs) = node.attrs() else { continue };
+                        let video_id = attrs
+                            .iter()
+                            .find(|attr| attr.name.local.as_ref() == "data-orbital-video")
+                            .and_then(|attr| attr.value.parse::<usize>().ok());
+                        let visibility_id = attrs
+                            .iter()
+                            .find(|attr| attr.name.local.as_ref() == "data-orbital-visibility")
+                            .and_then(|attr| attr.value.parse::<usize>().ok());
+                        if video_id.is_some() || visibility_id.is_some() {
                             let position = node.absolute_position(0.0, 0.0);
-                            Some((
-                                id,
-                                [
-                                    position.x * scale,
-                                    position.y * scale,
-                                    node.final_layout.size.width * scale,
-                                    node.final_layout.size.height * scale,
-                                ],
-                            ))
-                        })
-                        .collect();
-                    hook(&window.window, &overlays);
+                            let bounds = [
+                                position.x * scale,
+                                position.y * scale,
+                                node.final_layout.size.width * scale,
+                                node.final_layout.size.height * scale,
+                            ];
+                            if let Some(id) = video_id {
+                                overlays.push((id, bounds));
+                            }
+                            if let Some(id) = visibility_id {
+                                observed.push((id, bounds));
+                            }
+                        }
+                    }
+                    if let Some(hook) = video_hook {
+                        hook(&window.window, &overlays);
+                    }
+                    if let Some(hook) = visibility_hook {
+                        hook(&window.window, &observed);
+                    }
                 }
             }
         }

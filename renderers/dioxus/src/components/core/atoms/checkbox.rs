@@ -1,33 +1,32 @@
-use dioxus::prelude::*;
-use orbital_core::Value;
-use orbital_core::client::helpers::*;
+use crate::registry::{shared_root_attrs, DioxusPatternRegistry};
 use crate::renderer::{DioxusPatternRenderer, DioxusView};
-use crate::registry::DioxusPatternRegistry;
+use dioxus::prelude::*;
+use orbital_core::client::helpers::*;
+use orbital_core::Value;
 
 pub struct CheckboxRenderer;
 
 impl CheckboxRenderer {
     const NAME: &str = "checkbox";
-}
 
-impl DioxusPatternRenderer for CheckboxRenderer {
-    fn pattern_name(&self) -> &str {
-        Self::NAME
-    }
-
-    fn render(
+    pub(crate) fn render_with_change(
         &self,
         props: &Value,
-        _entity: Option<&Value>,
         view: &DioxusView<'_>,
-        _registry: &DioxusPatternRegistry,
+        on_change: Option<Callback<bool>>,
     ) -> Element {
-        let class = merge_class_name("flex items-center", props);
+        let class = merge_class_name("flex flex-col", props);
         let label = get_string_or(props, "label", "");
-        let checked = get_bool_or(props, "checked", false);
+        let accessible_label = get_string(props, "aria-label").unwrap_or_else(|| label.clone());
+        let controlled = get_bool(props, "checked");
+        let checked = controlled.unwrap_or_else(|| get_bool_or(props, "defaultChecked", false));
+        let error = get_string_or(props, "error", "");
         let action = get_string(props, "onChange");
         let sink = view.sink;
         let emit_change = move |next_checked: bool| {
+            if let Some(on_change) = on_change {
+                on_change.call(next_checked);
+            }
             if let (Some(sink), Some(action)) = (sink, &action) {
                 let mut payload = orbital_core::ValueMap::new();
                 payload.insert("checked".into(), Value::Bool(next_checked));
@@ -44,10 +43,13 @@ impl DioxusPatternRenderer for CheckboxRenderer {
         rsx! {
             div {
                 class: "{class}",
+                ..shared_root_attrs(props),
+                div { class: "flex items-center",
                 dioxus_primitives::checkbox::Checkbox {
                     class: "peer h-4 w-4 shrink-0 flex items-center justify-center border-[length:var(--border-width)] border-border bg-card focus:ring-ring focus:ring-offset-0 disabled:opacity-50 disabled:cursor-not-allowed data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground",
-                    checked: Some(state),
-                    aria_label: "{label}",
+                    checked: controlled.map(|_| state),
+                    default_checked: state,
+                    aria_label: "{accessible_label}",
                     on_checked_change: move |state: dioxus_primitives::checkbox::CheckboxState| {
                         emit_change(bool::from(state));
                     },
@@ -65,7 +67,27 @@ impl DioxusPatternRenderer for CheckboxRenderer {
                         "{label}"
                     }
                 }
+                }
+                if !error.is_empty() {
+                    span { class: "mt-1 text-xs text-error", role: "alert", "{error}" }
+                }
             }
         }
+    }
+}
+
+impl DioxusPatternRenderer for CheckboxRenderer {
+    fn pattern_name(&self) -> &str {
+        Self::NAME
+    }
+
+    fn render(
+        &self,
+        props: &Value,
+        _entity: Option<&Value>,
+        view: &DioxusView<'_>,
+        _registry: &DioxusPatternRegistry,
+    ) -> Element {
+        self.render_with_change(props, view, None)
     }
 }

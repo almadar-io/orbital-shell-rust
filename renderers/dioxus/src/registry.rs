@@ -29,6 +29,7 @@ pub(crate) fn shared_root_attrs_with_defaults(
     };
     let mut attrs = Vec::new();
     for name in [
+        "id",
         "aria-label",
         "aria-labelledby",
         "aria-describedby",
@@ -43,7 +44,14 @@ pub(crate) fn shared_root_attrs_with_defaults(
             attrs.push(Attribute::new(name, value.to_string(), None, false));
         }
     }
-    for name in ["aria-expanded", "aria-selected", "aria-hidden", "aria-busy"] {
+    for name in [
+        "aria-expanded",
+        "aria-selected",
+        "aria-hidden",
+        "aria-busy",
+        "aria-pressed",
+        "aria-disabled",
+    ] {
         if let Some(Value::Bool(value)) = field(name) {
             attrs.push(Attribute::new(name, value.to_string(), None, false));
         }
@@ -78,10 +86,8 @@ pub(crate) fn entry_props(spec: &Value) -> Option<Value> {
         }
         class.push_str("almadar-enter-");
         class.push_str(animation);
-        if let Some(Value::Number(delay)) = fields.get("enterDelay") {
-            if delay.fract() == 0.0 && (1.0..=8.0).contains(delay) {
-                class.push_str(&format!(" almadar-enter-delay-{}", *delay as u8));
-            }
+        if let Some(delay @ 1..=8) = fields.get("enterDelay").and_then(Value::as_int) {
+            class.push_str(&format!(" almadar-enter-delay-{delay}"));
         }
         props.insert("className".into(), Value::String(class.into()));
     }
@@ -102,10 +108,15 @@ pub const STUBBED_PATTERNS: &[&str] = &[
     "action-palette",
     "action-tile",
     "activity-rail",
+    "animated-graphic",
     "avl-transition-detail",
+    "box",
+    "breadcrumb",
     "choice-button",
     "control-button",
     "control-grid",
+    "data-grid",
+    "data-list",
     "dialogue-bubble",
     "draw-fx-layer",
     "draw-group",
@@ -117,16 +128,32 @@ pub const STUBBED_PATTERNS: &[&str] = &[
     "draw-sprite-layer",
     "draw-text",
     "draw-text-layer",
+    "empty-state",
+    "filter-group",
+    "form-actions",
     "game-audio-cue",
     "game-audio-toggle",
     "game-menu",
     "game-shell",
     "health-bar",
+    "icon",
+    "input-group",
+    "law-reference-tooltip",
+    "loading-state",
     "machine-panel",
+    "menu",
+    "modal",
+    "navigation",
+    "pagination",
     "pattern-tile",
     "score-display",
+    "search-input",
     "sequence-bar",
     "stat-badge",
+    "svg-connection",
+    "svg-flow",
+    "svg-node",
+    "svg-pulse",
     "timer-display",
     "trait-slot",
     "video-embed",
@@ -220,6 +247,15 @@ impl DioxusPatternRegistry {
         Arc::make_mut(&mut self.renderers).insert(name, Arc::from(renderer));
     }
 
+    pub fn register_unique(&mut self, renderer: Box<dyn DioxusPatternRenderer>) {
+        let name = renderer.pattern_name().to_string();
+        assert!(
+            !self.renderers.contains_key(&name),
+            "duplicate Dioxus pattern renderer: {name}"
+        );
+        self.register(renderer);
+    }
+
     /// Registered paint paths, sorted; this includes incomplete research bodies.
     pub fn coverage(&self) -> Vec<&str> {
         let mut names: Vec<&str> = self.renderers.keys().map(String::as_str).collect();
@@ -308,7 +344,15 @@ pub fn default_registry() -> DioxusPatternRegistry {
     crate::components::core::register::register_dioxus(&mut registry);
     crate::components::game::register::register_dioxus(&mut registry);
     #[cfg(all(feature = "native", not(target_arch = "wasm32")))]
-    crate::game::register_overrides(&mut registry);
+    {
+        crate::game::register_overrides(&mut registry);
+        registry.register(Box::new(
+            crate::components::core::atoms::atlas_image::AtlasImageRenderer,
+        ));
+        registry.register(Box::new(
+            crate::components::core::atoms::atlas_panel::AtlasPanelRenderer,
+        ));
+    }
     #[cfg(all(feature = "research-video", not(target_arch = "wasm32")))]
     registry.register(Box::new(
         crate::components::core::atoms::video_embed::VideoEmbedRenderer,
@@ -348,7 +392,9 @@ pub fn default_registry() -> DioxusPatternRegistry {
 
 #[cfg(test)]
 mod tests {
-    use super::{entry_props, shared_root_attrs, shared_root_attrs_with_defaults};
+    use super::{
+        entry_props, shared_root_attrs, shared_root_attrs_with_defaults, DioxusPatternRegistry,
+    };
     use dioxus::core::AttributeValue;
     use orbital_core::Value;
 
@@ -383,7 +429,7 @@ mod tests {
     #[test]
     fn shared_root_attrs_preserve_declared_accessibility_values() {
         let props = serde_json::from_str(
-            r#"{"aria-label":"Start","aria-expanded":false,"aria-busy":true,"role":"button","lang":"ar","dir":"rtl","tabIndex":-1}"#,
+            r#"{"id":"start-control","aria-label":"Start","aria-expanded":false,"aria-busy":true,"role":"button","lang":"ar","dir":"rtl","tabIndex":-1}"#,
         )
         .unwrap();
         let attrs = shared_root_attrs(&props);
@@ -401,6 +447,7 @@ mod tests {
         assert_eq!(
             values,
             vec![
+                ("id", "start-control".into()),
                 ("aria-label", "Start".into()),
                 ("role", "button".into()),
                 ("lang", "ar".into()),
@@ -425,6 +472,41 @@ mod tests {
             .collect();
         assert_eq!(pressed.len(), 1);
         assert!(matches!(&pressed[0].value, AttributeValue::Text(value) if value == "mixed"));
+    }
+
+    #[test]
+    fn unproven_core_contracts_are_partial_coverage() {
+        let registry = super::default_registry();
+        for name in [
+            "animated-graphic",
+            "box",
+            "data-list",
+            "icon",
+            "input-group",
+            "law-reference-tooltip",
+            "modal",
+            "search-input",
+            "svg-flow",
+        ] {
+            assert!(registry.supports(name), "{name} has a research body");
+            assert!(registry.is_partial(name), "{name} is not contract-complete");
+            assert!(
+                !registry.is_complete(name),
+                "{name} is excluded from production coverage"
+            );
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "duplicate Dioxus pattern renderer: animated-counter")]
+    fn duplicate_pattern_renderer_is_rejected() {
+        let mut registry = DioxusPatternRegistry::new();
+        registry.register_unique(Box::new(
+            crate::components::core::molecules::animated_counter::AnimatedCounterRenderer,
+        ));
+        registry.register_unique(Box::new(
+            crate::components::core::molecules::animated_counter::AnimatedCounterRenderer,
+        ));
     }
 
     #[cfg(all(feature = "research-audio", feature = "native-audio"))]

@@ -300,7 +300,11 @@ impl BaseDocument {
                             self.net_provider.fetch(
                                 doc_id,
                                 Request::get((**new_url).clone()),
-                                Box::new(ImageHandler::new(node_id, ImageType::Background(idx))),
+                                Box::new(ImageHandler::new(
+                                    node_id,
+                                    ImageType::Background(idx),
+                                    None,
+                                )),
                             );
 
                             let bg_image_data = BackgroundImageData::new(new_url.clone());

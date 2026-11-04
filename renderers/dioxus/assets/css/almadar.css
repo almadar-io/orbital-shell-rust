@@ -42,7 +42,17 @@
   font-size: 14px;
   line-height: 1.5;
 }
+[data-reduced-motion="true"],
+[data-reduced-motion="true"] * {
+  --motion-enable: off;
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+}
 .almadar-slot { display: block; }
+.almadar-drawer-overlay-contained.almadar-drawer-overlay-contained { position: absolute; z-index: 50; }
+.almadar-drawer-overlay-viewport.almadar-drawer-overlay-viewport { position: fixed; z-index: 60; }
+.almadar-orbital-dioxus .line-clamp-2 { height: calc(var(--leading-base, 24px) * 2); overflow: hidden; }
 .almadar-fallback {
   font-family: var(--almadar-mono);
   font-size: 12px;
@@ -81,6 +91,30 @@
 /* animated counter */
 .almadar-animated-counter__value { font-size: 28px; font-weight: 700; color: var(--almadar-fg); }
 .almadar-animated-counter__label { display: block; color: var(--almadar-muted); font-size: 13px; }
+
+.almadar-animated-graphic svg :is(path, line, polyline, polygon, circle, ellipse, rect) {
+  stroke: var(--almadar-graphic-stroke);
+}
+.almadar-animated-graphic[data-orbital-animation="fill"] svg :is(path, circle, ellipse, rect, polygon) {
+  fill: var(--almadar-graphic-fill);
+}
+@keyframes almadar-graphic-pulse {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.04); opacity: 0.85; }
+}
+.almadar-animated-graphic[data-orbital-animation="pulse"][data-orbital-animate="true"] svg {
+  animation: almadar-graphic-pulse var(--almadar-graphic-duration) ease-in-out var(--almadar-graphic-delay) infinite;
+}
+.almadar-animated-graphic[data-orbital-animation="morph"] svg :is(path, circle, ellipse, rect, polygon) {
+  transform: scale(0);
+  transform-origin: center;
+  opacity: 0;
+  transition: transform var(--almadar-graphic-duration) var(--almadar-graphic-easing) var(--almadar-graphic-delay), opacity var(--almadar-graphic-duration) var(--almadar-graphic-easing) var(--almadar-graphic-delay);
+}
+.almadar-animated-graphic[data-orbital-animation="morph"][data-orbital-animate="true"] svg :is(path, circle, ellipse, rect, polygon) {
+  transform: scale(1);
+  opacity: 1;
+}
 
 /* Tier S — structural */
 .almadar-icon { display: inline-block; line-height: 1; }

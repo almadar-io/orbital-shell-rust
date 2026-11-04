@@ -585,11 +585,54 @@ impl Node {
     }
 
     pub fn write_outer_html(&self, writer: &mut String) {
+        fn computed_stroke_width(value: &str, style: &ComputedValues) -> Option<String> {
+            let inner = value.trim().strip_prefix("var(")?.strip_suffix(')')?;
+            let (name, fallback) = inner.split_once(',')?;
+            let name = name.trim().strip_prefix("--")?;
+            let family_unsupported = if name == "icon-stroke-width" {
+                let family = style
+                    .custom_properties()
+                    .inherited
+                    .get(&Atom::from("icon-family"))
+                    .or_else(|| {
+                        style
+                            .custom_properties()
+                            .non_inherited
+                            .get(&Atom::from("icon-family"))
+                    })
+                    .map(|value| value.to_variable_value().css);
+                family.as_deref().is_some_and(|family| {
+                    let family = family.trim().trim_matches(|ch| ch == '\'' || ch == '"');
+                    !family.is_empty() && family != "lucide"
+                })
+            } else {
+                false
+            };
+            let key = Atom::from(name);
+            let token = if family_unsupported {
+                None
+            } else {
+                style
+                    .custom_properties()
+                    .inherited
+                    .get(&key)
+                    .or_else(|| style.custom_properties().non_inherited.get(&key))
+                    .map(|value| value.to_variable_value().css)
+            }
+            .unwrap_or_else(|| fallback.trim().to_string());
+            let width: f64 = token.trim().parse().ok()?;
+            (width.is_finite() && width > 0.0).then(|| width.to_string())
+        }
+
         let has_children = !self.children.is_empty();
         let current_color = self
             .primary_styles()
             .map(|style| style.clone_color())
             .map(|color| color.to_css_string());
+        let stroke_width = self.primary_styles().and_then(|style| {
+            let value = self.attr(local_name!("stroke-width"))?;
+            computed_stroke_width(value, &style)
+        });
 
         match &self.data {
             NodeData::Document => {}
@@ -607,11 +650,16 @@ impl Node {
                     writer.push(' ');
                     writer.push_str(&attr.name.local);
                     writer.push_str("=\"");
-                    #[allow(clippy::unnecessary_unwrap)] // Convert to if-let chain once stabilised
-                    if current_color.is_some() && attr.value.contains("currentColor") {
-                        let value = attr
-                            .value
-                            .replace("currentColor", current_color.as_ref().unwrap());
+                    if let Some(width) = stroke_width
+                        .as_ref()
+                        .filter(|_| attr.name.local == local_name!("stroke-width"))
+                    {
+                        encode_quoted_attribute_to_string(width, writer);
+                    } else if let Some(color) = current_color
+                        .as_ref()
+                        .filter(|_| attr.value.contains("currentColor"))
+                    {
+                        let value = attr.value.replace("currentColor", color);
                         encode_quoted_attribute_to_string(&value, writer);
                     } else {
                         encode_quoted_attribute_to_string(&attr.value, writer);
@@ -714,6 +762,16 @@ impl Node {
     /// TODO: z-index
     /// (If multiple children are positioned at the position then a random one will be recursed into)
     pub fn hit(&self, x: f32, y: f32) -> Option<HitResult> {
+        self.hit_with_viewport_scroll(x, y, 0.0, 0.0)
+    }
+
+    pub(crate) fn hit_with_viewport_scroll(
+        &self,
+        x: f32,
+        y: f32,
+        viewport_scroll_x: f32,
+        viewport_scroll_y: f32,
+    ) -> Option<HitResult> {
         use style::computed_values::pointer_events::T as PointerEvents;
 
         let pointer_events_none = self
@@ -753,7 +811,18 @@ impl Node {
             .iter()
             .flatten()
             .rev()
-            .find_map(|&i| self.with(i).hit(x, y))
+            .find_map(|&i| {
+                let child = self.with(i);
+                let fixed = child
+                    .primary_styles()
+                    .is_some_and(|style| style.clone_position() == Position::Fixed);
+                child.hit_with_viewport_scroll(
+                    x - if fixed { viewport_scroll_x } else { 0.0 },
+                    y - if fixed { viewport_scroll_y } else { 0.0 },
+                    viewport_scroll_x,
+                    viewport_scroll_y,
+                )
+            })
             .or_else(|| {
                 if self.flags.is_inline_root() {
                     let element_data = &self.element_data().unwrap();

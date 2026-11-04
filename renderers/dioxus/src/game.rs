@@ -17,6 +17,7 @@
 use crate::helpers::{format_value, get_entity_field, get_hud_stats, humanize_field_name};
 use crate::registry::DioxusPatternRegistry;
 use crate::renderer::{DioxusPatternRenderer, DioxusView};
+use crate::styles::style_with_props;
 use anyrender_vello::wgpu;
 use anyrender_vello::{CustomPaintCtx, CustomPaintSource, DeviceHandle, TextureHandle};
 use dioxus::prelude::*;
@@ -201,6 +202,7 @@ struct SceneCanvasProps {
     fill_parent: bool,
     a11y: SceneA11y,
     class_name: String,
+    inline_style: String,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -286,9 +288,12 @@ fn SceneCanvas(props: SceneCanvasProps) -> Element {
         size
     };
     let style = if props.fill_parent {
-        Some("display:block;width:100%;height:100%")
+        format!(
+            "display:block;width:100%;height:100%;{}",
+            props.inline_style
+        )
     } else {
-        None
+        props.inline_style.clone()
     };
     let sink = props.sink;
     let class_name = props.class_name.clone();
@@ -341,6 +346,49 @@ pub struct SceneCanvasRenderer {
     name: &'static str,
 }
 
+pub(crate) fn atlas_image(props: &Value, view: &DioxusView<'_>) -> Element {
+    let node = scene_node("atlas-image", props, view.canvas_theme.as_ref());
+    let (class_name, a11y) = scene_presentation(props);
+    let fill_parent = props
+        .as_object()
+        .and_then(|fields| fields.get("fill"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let inline_style = style_with_props("", props);
+    rsx! { SceneCanvas { node, sink: None, fill_parent, a11y, class_name, inline_style } }
+}
+
+pub(crate) fn atlas_panel(props: &Value, view: &DioxusView<'_>, fill_parent: bool) -> Element {
+    let mut node = scene_node("atlas-panel", props, view.canvas_theme.as_ref());
+    if let Some(fields) = node.as_object_mut() {
+        fields.remove("children");
+    }
+    let (class_name, mut a11y) = scene_presentation(props);
+    if fill_parent {
+        a11y.hidden = Some("true".to_string());
+    }
+    let inline_style = if fill_parent {
+        String::new()
+    } else {
+        style_with_props("", props)
+    };
+    rsx! { SceneCanvas { node, sink: None, fill_parent, a11y, class_name, inline_style } }
+}
+
+pub(crate) fn geometric_pattern_scene(props: &Value, view: &DioxusView<'_>) -> Element {
+    let node = scene_node("geometric-pattern-scene", props, view.canvas_theme.as_ref());
+    let mut a11y = SceneA11y::default();
+    a11y.hidden = Some("true".to_string());
+    rsx! { SceneCanvas {
+        node,
+        sink: None,
+        fill_parent: true,
+        a11y,
+        class_name: "almadar-game-canvas",
+        inline_style: String::new(),
+    } }
+}
+
 impl DioxusPatternRenderer for SceneCanvasRenderer {
     fn pattern_name(&self) -> &str {
         self.name
@@ -355,14 +403,15 @@ impl DioxusPatternRenderer for SceneCanvasRenderer {
     ) -> Element {
         let node = scene_node(self.name, props, view.canvas_theme.as_ref());
         let (class_name, a11y) = scene_presentation(props);
-        rsx! { SceneCanvas { node, sink: view.sink, fill_parent: false, a11y, class_name } }
+        let inline_style = style_with_props("", props);
+        rsx! { SceneCanvas { node, sink: view.sink, fill_parent: false, a11y, class_name, inline_style } }
     }
 }
 
 pub(crate) fn fill_parent_atlas_panel(asset: &Value, mode: &str, view: &DioxusView<'_>) -> Element {
     let props = serde_json::json!({ "asset": asset, "mode": mode });
-    let node = scene::host_node("atlas-panel", props, view.canvas_theme.as_ref());
-    rsx! { SceneCanvas { node, sink: None, fill_parent: true, a11y: SceneA11y::default(), class_name: "almadar-game-canvas".to_string() } }
+    let props = serde_json::from_value::<Value>(props).expect("atlas panel props");
+    atlas_panel(&props, view, true)
 }
 
 /// Renderer for the `game-hud` pattern — stats/items/elements resolved against

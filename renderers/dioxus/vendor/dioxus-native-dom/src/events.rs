@@ -9,9 +9,10 @@ use dioxus_html::{
     },
     AnimationData, CancelData, ClipboardData, CompositionData, DataTransfer, DragData, FocusData,
     FormData, FormValue, HasDataTransferData, HasDragData, HasFileData, HasFocusData, HasFormData,
-    HasKeyboardData, HasMouseData, HtmlEventConverter, ImageData, KeyboardData, MediaData,
-    MountedData, MouseData, NativeDataTransfer, PlatformEventData, PointerData, ResizeData,
-    ScrollData, SelectionData, ToggleData, TouchData, TransitionData, VisibleData, WheelData,
+    HasImageData, HasKeyboardData, HasMouseData, HtmlEventConverter, ImageData, KeyboardData,
+    MediaData, MountedData, MouseData, NativeDataTransfer, PlatformEventData, PointerData,
+    ResizeData, ScrollData, SelectionData, ToggleData, TouchData, TransitionData, VisibleData,
+    WheelData,
 };
 use keyboard_types::{Code, Key, Location, Modifiers};
 use std::any::Any;
@@ -59,8 +60,8 @@ impl HtmlEventConverter for NativeConverter {
         event.downcast::<NativeDragData>().unwrap().clone().into()
     }
 
-    fn convert_image_data(&self, _event: &PlatformEventData) -> ImageData {
-        unimplemented!("todo: convert_image_data in dioxus-native. requires support in blitz")
+    fn convert_image_data(&self, event: &PlatformEventData) -> ImageData {
+        event.downcast::<NativeImageData>().unwrap().clone().into()
     }
 
     fn convert_media_data(&self, _event: &PlatformEventData) -> MediaData {
@@ -105,6 +106,34 @@ impl HtmlEventConverter for NativeConverter {
 
     fn convert_visible_data(&self, _event: &PlatformEventData) -> VisibleData {
         unimplemented!("todo: convert_visible_data in dioxus-native. requires support in blitz")
+    }
+}
+
+#[derive(Clone)]
+pub struct NativeImageData {
+    pub load_error: bool,
+}
+
+impl HasImageData for NativeImageData {
+    fn load_error(&self) -> bool {
+        self.load_error
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
+
+#[cfg(test)]
+mod image_event_tests {
+    use super::*;
+
+    #[test]
+    fn native_image_error_reaches_dioxus_image_data() {
+        let failed = PlatformEventData::new(Box::new(NativeImageData { load_error: true }));
+        let loaded = PlatformEventData::new(Box::new(NativeImageData { load_error: false }));
+        assert!(NativeConverter {}.convert_image_data(&failed).load_error());
+        assert!(!NativeConverter {}.convert_image_data(&loaded).load_error());
     }
 }
 

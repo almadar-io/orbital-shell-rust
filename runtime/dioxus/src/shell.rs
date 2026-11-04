@@ -70,20 +70,30 @@ fn seed_singletons(
 /// `(orbital_count, trait_count)` for the caller's log line. Backend-neutral:
 /// no DOM, no window.
 pub fn mount_core(schema_json: &str) -> Result<(usize, usize), String> {
-    let schema = orbital_core::schema::parse_schema(schema_json).map_err(|e| format!("parse schema: {e}"))?;
+    let schema = orbital_core::schema::parse_schema(schema_json)
+        .map_err(|e| format!("parse schema: {e}"))?;
     let server = KernelBridge::new(schema.clone()).map_err(|e| format!("server bridge: {e}"))?;
-    seed_singletons(&|entity, rows| server.seed(entity, rows).map_err(|e| e.to_string()), &schema)
-        .map_err(|e| format!("seed server: {e}"))?;
+    seed_singletons(
+        &|entity, rows| server.seed(entity, rows).map_err(|e| e.to_string()),
+        &schema,
+    )
+    .map_err(|e| format!("seed server: {e}"))?;
     Ok(mount_circuit(client_circuit(schema, Arc::new(server))?))
 }
 
 /// [`mount_core`] over a caller's bridge (a live server, or a seeded kernel): the circuit is a client-role kernel
 /// whose server legs go to `bridge`, so its ticks run through the kernel's frame loop.
-pub fn mount(schema: OrbitalSchema, bridge: Arc<dyn ServerBridge>) -> Result<(usize, usize), String> {
+pub fn mount(
+    schema: OrbitalSchema,
+    bridge: Arc<dyn ServerBridge>,
+) -> Result<(usize, usize), String> {
     Ok(mount_circuit(client_circuit(schema, bridge)?))
 }
 
-fn client_circuit(schema: OrbitalSchema, bridge: Arc<dyn ServerBridge>) -> Result<ClientCore, String> {
+fn client_circuit(
+    schema: OrbitalSchema,
+    bridge: Arc<dyn ServerBridge>,
+) -> Result<ClientCore, String> {
     let kernel = ClientKernel::new(schema.clone(), Some(bridge)).map_err(|e| e.to_string())?;
     seed_singletons(&|entity, rows| kernel.seed(entity, rows), &schema)
         .map_err(|e| format!("seed client: {e}"))?;
@@ -93,12 +103,21 @@ fn client_circuit(schema: OrbitalSchema, bridge: Arc<dyn ServerBridge>) -> Resul
 /// Install a server-backed circuit before its first INIT. The native root starts
 /// that mount after opening the window so HTTP cannot hold the first frame.
 #[cfg(all(feature = "native-http", not(target_arch = "wasm32")))]
-pub fn mount_remote(schema: OrbitalSchema, bridge: Arc<dyn ServerBridge>) -> Result<(usize, usize), String> {
+pub fn mount_remote(
+    schema: OrbitalSchema,
+    bridge: Arc<dyn ServerBridge>,
+) -> Result<(usize, usize), String> {
     let core = client_circuit(schema, bridge)?;
     let trait_count = core.schema.orbitals.iter().map(|o| o.traits.len()).sum();
     let orbital_count = core.schema.orbitals.len();
     let registry = crate::registry::default_registry();
-    APP.with(|cell| *cell.borrow_mut() = Some(AppState { core, registry, remote: true }));
+    APP.with(|cell| {
+        *cell.borrow_mut() = Some(AppState {
+            core,
+            registry,
+            remote: true,
+        })
+    });
     Ok((orbital_count, trait_count))
 }
 
@@ -225,7 +244,12 @@ pub fn orb_resolve(path: &std::path::Path) -> Result<String, String> {
         .output()
         .map_err(|e| format!("{orb} resolve {}: {e}", path.display()))?;
     if !out.status.success() {
-        return Err(format!("{orb} resolve {} exited {}: {}", path.display(), out.status, String::from_utf8_lossy(&out.stderr)));
+        return Err(format!(
+            "{orb} resolve {} exited {}: {}",
+            path.display(),
+            out.status,
+            String::from_utf8_lossy(&out.stderr)
+        ));
     }
     String::from_utf8(out.stdout).map_err(|e| format!("{orb} resolve printed non-UTF-8: {e}"))
 }

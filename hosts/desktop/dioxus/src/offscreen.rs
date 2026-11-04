@@ -24,10 +24,18 @@ impl dioxus_document::Document for HeadSink {
         dioxus_document::NoOpDocument.eval(js)
     }
 
-    fn create_head_element(&self, name: &str, attributes: &[(&str, String)], contents: Option<String>) {
+    fn create_head_element(
+        &self,
+        name: &str,
+        attributes: &[(&str, String)],
+        contents: Option<String>,
+    ) {
         self.ops.borrow_mut().push_back(HeadOp {
             name: name.to_string(),
-            attributes: attributes.iter().map(|(k, v)| (k.to_string(), v.clone())).collect(),
+            attributes: attributes
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.clone()))
+                .collect(),
             contents,
         });
     }
@@ -36,7 +44,8 @@ impl dioxus_document::Document for HeadSink {
 /// Inter (OFL) — the sans typeface for `ui-sans-serif`/`sans-serif`.
 const INTER_TTF: &[u8] = include_bytes!("../../../../renderers/dioxus/assets/fonts/Inter.ttf");
 /// Roboto Mono (OFL) — the mono typeface for `ui-monospace`/`monospace`.
-const ROBOTO_MONO_TTF: &[u8] = include_bytes!("../../../../renderers/dioxus/assets/fonts/RobotoMono.ttf");
+const ROBOTO_MONO_TTF: &[u8] =
+    include_bytes!("../../../../renderers/dioxus/assets/fonts/RobotoMono.ttf");
 
 /// The Parley font context with the embedded typefaces, every CSS generic
 /// family almadar.css resolves to mapped onto them (`--almadar-font:
@@ -83,18 +92,44 @@ pub fn capture_gpu_png(path: &std::path::Path, width: u32, height: u32) -> Resul
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn capture_with<R: anyrender::ImageRenderer>(path: &std::path::Path, width: u32, height: u32) -> Result<(), String> {
+trait OffscreenPaintRegistry: anyrender::ImageRenderer {
+    fn paint_source_registry(&self) -> anyrender_vello::PaintSourceRegistry;
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl OffscreenPaintRegistry for anyrender_vello::VelloImageRenderer {
+    fn paint_source_registry(&self) -> anyrender_vello::PaintSourceRegistry {
+        anyrender_vello::VelloImageRenderer::paint_source_registry(self)
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl OffscreenPaintRegistry for anyrender_vello_cpu::VelloCpuImageRenderer {
+    fn paint_source_registry(&self) -> anyrender_vello::PaintSourceRegistry {
+        anyrender_vello::PaintSourceRegistry::default()
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn capture_with<R: OffscreenPaintRegistry>(
+    path: &std::path::Path,
+    width: u32,
+    height: u32,
+) -> Result<(), String> {
     use blitz_dom::{Document as _, DocumentConfig};
     use blitz_paint::paint_scene;
     use blitz_traits::shell::{ColorScheme, Viewport};
     use dioxus_core::{provide_context, ScopeId, VirtualDom};
     use dioxus_native::DioxusDocument;
 
+    let mut renderer = R::new(width, height);
+    let paint_sources = renderer.paint_source_registry();
     let ops: Rc<RefCell<VecDeque<HeadOp>>> = Rc::new(RefCell::new(VecDeque::new()));
     let vdom = VirtualDom::new(crate::app::App);
     let sink = HeadSink { ops: ops.clone() };
     vdom.in_scope(ScopeId::ROOT, || {
         provide_context(Rc::new(sink) as Rc<dyn dioxus_document::Document>);
+        provide_context(paint_sources);
     });
     let mut doc = DioxusDocument::new(
         vdom,
@@ -118,10 +153,11 @@ fn capture_with<R: anyrender::ImageRenderer>(path: &std::path::Path, width: u32,
         }
     }
     doc.resolve(0.0);
-
-    let mut renderer = R::new(width, height);
     let mut buffer = vec![255u8; width as usize * height as usize * 4];
-    renderer.render(|painter| paint_scene(painter, &doc, 1.0, width, height), &mut buffer);
+    renderer.render(
+        |painter| paint_scene(painter, &doc, 1.0, width, height),
+        &mut buffer,
+    );
     // The rasterizer leaves unpainted pixels transparent (premultiplied); composite onto white.
     for px in buffer.chunks_exact_mut(4) {
         let blank = 255 - px[3];

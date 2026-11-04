@@ -1,3 +1,1 @@
 //! game organisms renderers.
-
-

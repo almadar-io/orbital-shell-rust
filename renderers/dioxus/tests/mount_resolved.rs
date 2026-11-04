@@ -76,10 +76,15 @@ fn skeleton_tree_app() -> dioxus::prelude::Element {
         trait_content: &trait_content,
         source_trait: None,
         sink: None,
+        source_sink: dioxus::prelude::Callback::new(|_: Option<String>| {
+            dioxus::prelude::Callback::new(|_: (String, orbital_core::Value)| {})
+        }),
         navigate: None,
         dock: None,
         viewport_width: None,
         canvas_theme: None,
+        theme_mode: None,
+        toggle_theme: None,
     };
     default_registry().render_spec(&spec, None, &view)
 }
@@ -96,6 +101,538 @@ fn skeleton_tree_paints_the_authored_stack_shape() {
     assert!(initial.edits.iter().any(|edit| matches!(edit,
         Mutation::SetAttribute { name: "data-skeleton", value: AttributeValue::Text(value), .. } if value == "tree"
     )));
+}
+
+#[cfg(feature = "native")]
+static GRID_SELECTION_EVENTS: std::sync::Mutex<Vec<(String, serde_json::Value)>> =
+    std::sync::Mutex::new(Vec::new());
+
+#[cfg(feature = "native")]
+fn selectable_grid_app() -> dioxus::prelude::Element {
+    use dioxus::prelude::*;
+    use orbital_client_dioxus::{registry::default_registry, DioxusView};
+
+    let props: orbital_core::Value = serde_json::from_value(serde_json::json!({
+        "type": "data-grid",
+        "rows": [
+            {"id": "todo-1", "title": "Alpha"},
+            {"id": "todo-2", "title": "Beta"}
+        ],
+        "fields": [{"name": "title", "variant": "h3"}],
+        "selectable": true,
+        "selectionEvent": "SELECT_TODOS"
+    }))
+    .unwrap();
+    let entities = std::collections::HashMap::new();
+    let trait_content = orbital_core::ValueMap::new();
+    let sink = Callback::new(|(event, payload): (String, orbital_core::Value)| {
+        GRID_SELECTION_EVENTS
+            .lock()
+            .unwrap()
+            .push((event, serde_json::to_value(payload).unwrap()));
+    });
+    let view = DioxusView {
+        trait_name: "TodoView",
+        orbital_name: "Main",
+        current_state: "ready",
+        entities: &entities,
+        trait_content: &trait_content,
+        source_trait: None,
+        sink: Some(sink),
+        source_sink: Callback::new(move |_: Option<String>| sink),
+        navigate: None,
+        dock: None,
+        viewport_width: None,
+        canvas_theme: None,
+        theme_mode: None,
+        toggle_theme: None,
+    };
+    default_registry().render_spec(&props, None, &view)
+}
+
+#[cfg(feature = "native")]
+#[test]
+fn data_grid_selection_toggles_locally_and_emits_only_declared_payload() {
+    let _converter_guard = EVENT_CONVERTER_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    use blitz_dom::Document as _;
+    use dioxus::prelude::*;
+    use dioxus_core::ElementId;
+    use dioxus_native::{DioxusDocument, DocumentConfig};
+    use std::{any::Any, rc::Rc};
+
+    GRID_SELECTION_EVENTS.lock().unwrap().clear();
+    let mut doc = DioxusDocument::new(
+        VirtualDom::new(selectable_grid_app),
+        DocumentConfig::default(),
+    );
+    doc.initial_build();
+    doc.poll(None);
+    assert_eq!(
+        doc.query_selector_all("[data-entity-row]").unwrap().len(),
+        2
+    );
+    let checkbox = doc
+        .query_selector("button[role='checkbox'][aria-label='Select Alpha']")
+        .unwrap()
+        .expect("first row checkbox");
+    let dioxus_id = doc
+        .get_node(checkbox)
+        .and_then(|node| node.element_data())
+        .and_then(|element| {
+            element
+                .attrs
+                .iter()
+                .find(|attr| *attr.name.local == *"data-dioxus-id")
+        })
+        .and_then(|attr| attr.value.parse::<usize>().ok())
+        .map(ElementId)
+        .expect("checkbox Dioxus event target");
+    let mouse = Rc::new(PlatformEventData::new(Box::<
+        dioxus_html::SerializedMouseData,
+    >::default())) as Rc<dyn Any>;
+    set_event_converter(Box::new(dioxus_html::SerializedHtmlEventConverter));
+    doc.vdom
+        .runtime()
+        .handle_event("click", Event::new(mouse, true), dioxus_id);
+    doc.poll(None);
+
+    assert_eq!(
+        *GRID_SELECTION_EVENTS.lock().unwrap(),
+        vec![(
+            "SELECT_TODOS".to_string(),
+            serde_json::json!({"selectedIds": ["todo-1"]})
+        )]
+    );
+    assert!(doc
+        .query_selector("[data-entity-id='todo-1'][aria-current='true']")
+        .unwrap()
+        .is_some());
+    assert_eq!(
+        doc.query_selector_all("[data-entity-row]").unwrap().len(),
+        2
+    );
+    assert!(doc
+        .query_selector("[data-entity-id='todo-2']")
+        .unwrap()
+        .is_some());
+}
+
+#[cfg(feature = "native")]
+static ROW_ROUTE_SPEC: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
+#[cfg(feature = "native")]
+static ROW_ROUTE_NAVIGATIONS: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+#[cfg(feature = "native")]
+static ROW_ROUTE_EVENTS: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+#[cfg(feature = "native")]
+fn row_route_app() -> dioxus::prelude::Element {
+    use dioxus::prelude::*;
+    use orbital_client_dioxus::{registry::default_registry, DioxusView};
+
+    let props: orbital_core::Value = serde_json::from_str(&ROW_ROUTE_SPEC.lock().unwrap()).unwrap();
+    let entities = std::collections::HashMap::new();
+    let trait_content = orbital_core::ValueMap::new();
+    let sink = Callback::new(|(event, _): (String, orbital_core::Value)| {
+        ROW_ROUTE_EVENTS.lock().unwrap().push(event);
+    });
+    let navigate = Callback::new(|route: String| {
+        ROW_ROUTE_NAVIGATIONS.lock().unwrap().push(route);
+    });
+    let view = DioxusView {
+        trait_name: "RowRoutes",
+        orbital_name: "Main",
+        current_state: "ready",
+        entities: &entities,
+        trait_content: &trait_content,
+        source_trait: None,
+        sink: Some(sink),
+        source_sink: Callback::new(move |_: Option<String>| sink),
+        navigate: Some(navigate),
+        dock: None,
+        viewport_width: None,
+        canvas_theme: None,
+        theme_mode: None,
+        toggle_theme: None,
+    };
+    default_registry().render_spec(&props, None, &view)
+}
+
+#[cfg(feature = "native")]
+#[test]
+fn row_route_actions_navigate_without_emitting_for_grid_and_list() {
+    use blitz_dom::{Document as _, DocumentConfig};
+    use dioxus::prelude::*;
+    use dioxus_core::ElementId;
+    use dioxus_native::DioxusDocument;
+    use std::{any::Any, rc::Rc};
+
+    let _guard = EVENT_CONVERTER_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    for (pattern, destination, expected) in [
+        ("data-grid", serde_json::json!("/tasks"), "/tasks"),
+        (
+            "data-grid",
+            serde_json::json!(["fn", "row", ["str/concat", "/tasks/", "@row.id"]]),
+            "/tasks/todo-1",
+        ),
+        (
+            "data-list",
+            serde_json::json!(["fn", "row", ["str/concat", "/tasks/", "@row.id"]]),
+            "/tasks/todo-1",
+        ),
+    ] {
+        *ROW_ROUTE_SPEC.lock().unwrap() = serde_json::json!({
+            "type": pattern,
+            "rows": [{"id": "todo-1", "title": "Milk"}],
+            "fields": [{"name": "title", "variant": "h3"}],
+            "itemActions": [{
+                "label": "Open", "variant": "primary", "navigatesTo": destination,
+                "event": "SHOULD_NOT_EMIT"
+            }]
+        })
+        .to_string();
+        ROW_ROUTE_NAVIGATIONS.lock().unwrap().clear();
+        ROW_ROUTE_EVENTS.lock().unwrap().clear();
+        let mut doc =
+            DioxusDocument::new(VirtualDom::new(row_route_app), DocumentConfig::default());
+        doc.initial_build();
+        doc.poll(None);
+        let anchor = doc
+            .query_selector(&format!("a[href='{expected}']"))
+            .unwrap()
+            .expect("resolved row route anchor");
+        let id = doc
+            .get_node(anchor)
+            .and_then(|node| node.element_data())
+            .and_then(|element| {
+                element
+                    .attrs
+                    .iter()
+                    .find(|attr| *attr.name.local == *"data-dioxus-id")
+            })
+            .and_then(|attr| attr.value.parse::<usize>().ok())
+            .map(ElementId)
+            .expect("route action event target");
+        set_event_converter(Box::new(dioxus_html::SerializedHtmlEventConverter));
+        let click = Rc::new(PlatformEventData::new(Box::<
+            dioxus_html::SerializedMouseData,
+        >::default())) as Rc<dyn Any>;
+        doc.vdom
+            .runtime()
+            .handle_event("click", Event::new(click, true), id);
+        doc.poll(None);
+        assert_eq!(
+            *ROW_ROUTE_NAVIGATIONS.lock().unwrap(),
+            vec![expected.to_string()]
+        );
+        assert!(
+            ROW_ROUTE_EVENTS.lock().unwrap().is_empty(),
+            "navigating action also emitted"
+        );
+    }
+}
+
+#[cfg(feature = "native")]
+static WIZARD_EVENTS: std::sync::Mutex<Vec<(String, serde_json::Value)>> =
+    std::sync::Mutex::new(Vec::new());
+
+#[cfg(feature = "native")]
+fn wizard_callback_app() -> dioxus::prelude::Element {
+    use dioxus::prelude::*;
+    use orbital_client_dioxus::{registry::default_registry, DioxusView};
+
+    let props: orbital_core::Value = serde_json::from_value(serde_json::json!({
+        "type": "wizard-container",
+        "steps": [{"id": "one", "title": "One"}, {"id": "two", "title": "Two"}],
+        "showProgress": false,
+        "nextEvent": "NEXT",
+        "completeEvent": "COMPLETE",
+        "onStepChange": "STEP_CHANGED",
+        "onComplete": "DONE"
+    }))
+    .unwrap();
+    let entities = std::collections::HashMap::new();
+    let trait_content = orbital_core::ValueMap::new();
+    let sink = Callback::new(|(event, payload): (String, orbital_core::Value)| {
+        WIZARD_EVENTS
+            .lock()
+            .unwrap()
+            .push((event, serde_json::to_value(payload).unwrap()));
+    });
+    let view = DioxusView {
+        trait_name: "Wizard",
+        orbital_name: "Main",
+        current_state: "ready",
+        entities: &entities,
+        trait_content: &trait_content,
+        source_trait: None,
+        sink: Some(sink),
+        source_sink: Callback::new(move |_: Option<String>| sink),
+        navigate: None,
+        dock: None,
+        viewport_width: None,
+        canvas_theme: None,
+        theme_mode: None,
+        toggle_theme: None,
+    };
+    default_registry().render_spec(&props, None, &view)
+}
+
+#[cfg(feature = "native")]
+#[test]
+fn wizard_callback_names_use_the_shared_serialized_event_contract() {
+    let _converter_guard = EVENT_CONVERTER_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    use blitz_dom::Document as _;
+    use dioxus::prelude::*;
+    use dioxus_core::ElementId;
+    use dioxus_native::{DioxusDocument, DocumentConfig};
+    use std::{any::Any, rc::Rc};
+
+    WIZARD_EVENTS.lock().unwrap().clear();
+    let mut doc = DioxusDocument::new(
+        VirtualDom::new(wizard_callback_app),
+        DocumentConfig::default(),
+    );
+    doc.initial_build();
+    doc.poll(None);
+    let click_last_button = |doc: &mut DioxusDocument| {
+        let button = *doc
+            .query_selector_all("button")
+            .unwrap()
+            .last()
+            .expect("wizard button");
+        let dioxus_id = doc
+            .get_node(button)
+            .and_then(|node| node.element_data())
+            .and_then(|element| {
+                element
+                    .attrs
+                    .iter()
+                    .find(|attr| *attr.name.local == *"data-dioxus-id")
+            })
+            .and_then(|attr| attr.value.parse::<usize>().ok())
+            .map(ElementId)
+            .expect("wizard button event target");
+        let mouse = Rc::new(PlatformEventData::new(Box::<
+            dioxus_html::SerializedMouseData,
+        >::default())) as Rc<dyn Any>;
+        set_event_converter(Box::new(dioxus_html::SerializedHtmlEventConverter));
+        doc.vdom
+            .runtime()
+            .handle_event("click", Event::new(mouse, true), dioxus_id);
+        doc.poll(None);
+    };
+
+    click_last_button(&mut doc);
+    click_last_button(&mut doc);
+    assert_eq!(
+        *WIZARD_EVENTS.lock().unwrap(),
+        vec![
+            ("NEXT".into(), serde_json::json!({"step": 1})),
+            ("STEP_CHANGED".into(), serde_json::json!({"stepIndex": 1})),
+            ("COMPLETE".into(), serde_json::json!({"step": 1})),
+            ("DONE".into(), serde_json::Value::Null),
+        ]
+    );
+}
+
+#[cfg(feature = "native")]
+static ATOM_CALLBACK_PATTERN: std::sync::Mutex<&str> = std::sync::Mutex::new("");
+#[cfg(feature = "native")]
+static ATOM_CALLBACK_EVENTS: std::sync::Mutex<Vec<(String, serde_json::Value)>> =
+    std::sync::Mutex::new(Vec::new());
+
+#[cfg(feature = "native")]
+fn callback_atom_app() -> dioxus::prelude::Element {
+    use dioxus::prelude::*;
+    use orbital_client_dioxus::{registry::default_registry, DioxusView};
+
+    let props: orbital_core::Value =
+        serde_json::from_str(*ATOM_CALLBACK_PATTERN.lock().unwrap()).unwrap();
+    let entities = std::collections::HashMap::new();
+    let trait_content = orbital_core::ValueMap::new();
+    let sink = Callback::new(|(event, payload): (String, orbital_core::Value)| {
+        ATOM_CALLBACK_EVENTS
+            .lock()
+            .unwrap()
+            .push((event, serde_json::to_value(payload).unwrap()));
+    });
+    let view = DioxusView {
+        trait_name: "Atom",
+        orbital_name: "Main",
+        current_state: "ready",
+        entities: &entities,
+        trait_content: &trait_content,
+        source_trait: None,
+        sink: Some(sink),
+        source_sink: Callback::new(move |_: Option<String>| sink),
+        navigate: None,
+        dock: None,
+        viewport_width: None,
+        canvas_theme: None,
+        theme_mode: None,
+        toggle_theme: None,
+    };
+    default_registry().render_spec(&props, None, &view)
+}
+
+#[cfg(feature = "native")]
+#[test]
+fn flip_and_badge_callbacks_emit_their_declared_empty_events() {
+    let _converter_guard = EVENT_CONVERTER_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    use blitz_dom::Document as _;
+    use dioxus::prelude::*;
+    use dioxus_core::ElementId;
+    use dioxus_native::{DioxusDocument, DocumentConfig};
+    use std::{any::Any, rc::Rc};
+
+    let click = |pattern: &'static str, selector: &str| {
+        *ATOM_CALLBACK_PATTERN.lock().unwrap() = pattern;
+        ATOM_CALLBACK_EVENTS.lock().unwrap().clear();
+        let mut doc = DioxusDocument::new(
+            VirtualDom::new(callback_atom_app),
+            DocumentConfig::default(),
+        );
+        doc.initial_build();
+        doc.poll(None);
+        let target = doc
+            .query_selector(selector)
+            .unwrap()
+            .expect("interactive atom");
+        let dioxus_id = doc
+            .get_node(target)
+            .and_then(|node| node.element_data())
+            .and_then(|element| {
+                element
+                    .attrs
+                    .iter()
+                    .find(|attr| *attr.name.local == *"data-dioxus-id")
+            })
+            .and_then(|attr| attr.value.parse::<usize>().ok())
+            .map(ElementId)
+            .expect("atom click target");
+        let mouse = Rc::new(PlatformEventData::new(Box::<
+            dioxus_html::SerializedMouseData,
+        >::default())) as Rc<dyn Any>;
+        set_event_converter(Box::new(dioxus_html::SerializedHtmlEventConverter));
+        doc.vdom
+            .runtime()
+            .handle_event("click", Event::new(mouse, true), dioxus_id);
+        doc.poll(None);
+        ATOM_CALLBACK_EVENTS.lock().unwrap().clone()
+    };
+    assert_eq!(
+        click(
+            r#"{"type":"flip-container","flipped":false,"onClick":"FLIP","children":[]}"#,
+            "[role='button']"
+        ),
+        vec![("FLIP".into(), serde_json::Value::Null)]
+    );
+    assert_eq!(
+        click(
+            r#"{"type":"badge","label":"Todo","onRemove":"REMOVE","removeLabel":"Remove Todo"}"#,
+            "button[aria-label='Remove Todo']"
+        ),
+        vec![("REMOVE".into(), serde_json::Value::Null)]
+    );
+}
+
+#[cfg(feature = "native")]
+thread_local! {
+    static PRESENCE_SHOW: std::cell::RefCell<Option<dioxus::prelude::Signal<bool>>> = const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(feature = "native")]
+fn presence_callback_app() -> dioxus::prelude::Element {
+    use dioxus::prelude::*;
+    use orbital_client_dioxus::{registry::default_registry, DioxusView};
+
+    let show = use_signal(|| true);
+    PRESENCE_SHOW.with(|slot| *slot.borrow_mut() = Some(show));
+    let props: orbital_core::Value = serde_json::from_value(serde_json::json!({
+        "type": "presence",
+        "show": show(),
+        "animate": false,
+        "onExited": "EXIT",
+        "children": [{"type": "typography", "content": "Present"}]
+    }))
+    .unwrap();
+    let entities = std::collections::HashMap::new();
+    let trait_content = orbital_core::ValueMap::new();
+    let sink = Callback::new(|(event, payload): (String, orbital_core::Value)| {
+        ATOM_CALLBACK_EVENTS
+            .lock()
+            .unwrap()
+            .push((event, serde_json::to_value(payload).unwrap()));
+    });
+    let view = DioxusView {
+        trait_name: "Presence",
+        orbital_name: "Main",
+        current_state: "ready",
+        entities: &entities,
+        trait_content: &trait_content,
+        source_trait: None,
+        sink: Some(sink),
+        source_sink: Callback::new(move |_: Option<String>| sink),
+        navigate: None,
+        dock: None,
+        viewport_width: None,
+        canvas_theme: None,
+        theme_mode: None,
+        toggle_theme: None,
+    };
+    default_registry().render_spec(&props, None, &view)
+}
+
+#[cfg(feature = "native")]
+#[test]
+fn presence_and_typewriter_completion_emit_declared_empty_events() {
+    let _converter_guard = EVENT_CONVERTER_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    use blitz_dom::Document as _;
+    use dioxus::prelude::*;
+    use dioxus_native::{DioxusDocument, DocumentConfig};
+
+    ATOM_CALLBACK_EVENTS.lock().unwrap().clear();
+    let mut presence = DioxusDocument::new(
+        VirtualDom::new(presence_callback_app),
+        DocumentConfig::default(),
+    );
+    presence.initial_build();
+    presence.poll(None);
+    assert!(ATOM_CALLBACK_EVENTS.lock().unwrap().is_empty());
+    PRESENCE_SHOW.with(|slot| {
+        let mut show = (*slot.borrow()).expect("presence signal");
+        show.set(false);
+    });
+    presence.poll(None);
+    presence.poll(None);
+    assert_eq!(
+        *ATOM_CALLBACK_EVENTS.lock().unwrap(),
+        vec![("EXIT".into(), serde_json::Value::Null)]
+    );
+
+    *ATOM_CALLBACK_PATTERN.lock().unwrap() =
+        r#"{"type":"typewriter-text","text":"A","speed":0,"onComplete":"TYPE_DONE"}"#;
+    ATOM_CALLBACK_EVENTS.lock().unwrap().clear();
+    let mut typewriter = DioxusDocument::new(
+        VirtualDom::new(callback_atom_app),
+        DocumentConfig::default(),
+    );
+    typewriter.initial_build();
+    typewriter.poll(None);
+    assert_eq!(
+        *ATOM_CALLBACK_EVENTS.lock().unwrap(),
+        vec![("TYPE_DONE".into(), serde_json::Value::Null)]
+    );
 }
 
 #[cfg(feature = "native")]
@@ -127,10 +664,13 @@ fn control_app() -> dioxus::prelude::Element {
         trait_content: &trait_content,
         source_trait: None,
         sink: Some(sink),
+        source_sink: Callback::new(move |_: Option<String>| sink),
         navigate: None,
         dock: None,
         viewport_width: None,
         canvas_theme: None,
+        theme_mode: None,
+        toggle_theme: None,
     };
     registry.render_spec(&props, None, &view)
 }
@@ -171,10 +711,13 @@ fn flow_app() -> dioxus::prelude::Element {
         trait_content: &trait_content,
         source_trait: None,
         sink: Some(sink),
+        source_sink: Callback::new(move |_: Option<String>| sink),
         navigate: None,
         dock: None,
         viewport_width: None,
         canvas_theme: None,
+        theme_mode: None,
+        toggle_theme: None,
     };
     registry.render_spec(&props, None, &view)
 }
@@ -182,6 +725,9 @@ fn flow_app() -> dioxus::prelude::Element {
 #[cfg(feature = "native")]
 #[test]
 fn flow_canvas_selects_a_core_grouped_unit() {
+    let _converter_guard = EVENT_CONVERTER_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
     use dioxus::prelude::*;
     use dioxus_core::{Mutation, Mutations};
     use std::{any::Any, rc::Rc};
@@ -288,10 +834,15 @@ fn machine_panel_app() -> dioxus::prelude::Element {
         trait_content: &trait_content,
         source_trait: None,
         sink: None,
+        source_sink: dioxus::prelude::Callback::new(|_: Option<String>| {
+            dioxus::prelude::Callback::new(|_: (String, orbital_core::Value)| {})
+        }),
         navigate: None,
         dock: None,
         viewport_width: None,
         canvas_theme: None,
+        theme_mode: None,
+        toggle_theme: None,
     };
     registry.render_spec(&props, None, &view)
 }
@@ -299,6 +850,9 @@ fn machine_panel_app() -> dioxus::prelude::Element {
 #[cfg(feature = "native")]
 #[test]
 fn machine_panel_follows_latest_then_pins_a_group_for_replay() {
+    let _converter_guard = EVENT_CONVERTER_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
     use dioxus::prelude::*;
     use dioxus_core::{AttributeValue, Mutation, Mutations};
     use std::{any::Any, rc::Rc};
@@ -397,10 +951,13 @@ fn transition_detail_app() -> dioxus::prelude::Element {
         trait_content: &trait_content,
         source_trait: None,
         sink: Some(sink),
+        source_sink: Callback::new(move |_: Option<String>| sink),
         navigate: None,
         dock: None,
         viewport_width: None,
         canvas_theme: None,
+        theme_mode: None,
+        toggle_theme: None,
     };
     registry.render_spec(&props, None, &view)
 }
@@ -408,6 +965,9 @@ fn transition_detail_app() -> dioxus::prelude::Element {
 #[cfg(feature = "native")]
 #[test]
 fn transition_detail_step_sends_a_declared_request() {
+    let _converter_guard = EVENT_CONVERTER_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
     use dioxus::prelude::*;
     use dioxus_core::{Mutation, Mutations};
     use std::{any::Any, rc::Rc};
@@ -442,6 +1002,9 @@ fn transition_detail_step_sends_a_declared_request() {
 #[cfg(feature = "native")]
 #[test]
 fn atomic_controls_emit_the_declared_event_payloads() {
+    let _converter_guard = EVENT_CONVERTER_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
     use dioxus::prelude::*;
     use dioxus_core::{Mutation, Mutations};
     use std::{any::Any, rc::Rc};
@@ -484,13 +1047,36 @@ fn atomic_controls_emit_the_declared_event_payloads() {
     ))) as Rc<dyn Any>;
     assert_eq!(
         dispatch(
-            r#"{"type":"input","label":"New task","action":"DRAFT_CHANGED"}"#,
+            r#"{"type":"input","label":"New task","onChange":"DRAFT_CHANGED"}"#,
             "input",
             form
         ),
         vec![(
             "DRAFT_CHANGED".to_string(),
             r#"{"value":"Buy milk"}"#.to_string()
+        )]
+    );
+    let enter = || {
+        Rc::new(PlatformEventData::new(Box::new(
+            dioxus_html::SerializedKeyboardData::new(
+                dioxus_html::Key::Enter,
+                dioxus_html::Code::Enter,
+                dioxus_html::Location::Standard,
+                false,
+                dioxus_html::Modifiers::empty(),
+                false,
+            ),
+        ))) as Rc<dyn Any>
+    };
+    assert_eq!(
+        dispatch(
+            r#"{"type":"input","label":"New task","value":"Buy milk","action":"SUBMIT_TASK"}"#,
+            "keydown",
+            enter(),
+        ),
+        vec![(
+            "SUBMIT_TASK".to_string(),
+            r#"{"value":"Buy milk"}"#.to_string(),
         )]
     );
     assert_eq!(
@@ -537,7 +1123,7 @@ fn atomic_controls_emit_the_declared_event_payloads() {
         dioxus_html::SerializedFormData::new("Ignored".to_string(), vec![]),
     ))) as Rc<dyn Any>;
     assert!(dispatch(
-        r#"{"type":"input","label":"New task","action":"DRAFT_CHANGED","disabled":true}"#,
+        r#"{"type":"input","label":"New task","onChange":"DRAFT_CHANGED","disabled":true}"#,
         "input",
         disabled_form
     )
@@ -547,9 +1133,20 @@ fn atomic_controls_emit_the_declared_event_payloads() {
     ))) as Rc<dyn Any>;
     assert_eq!(
         dispatch(
-            r#"{"type":"input","label":"Estimate","inputType":"number","action":"ESTIMATE_CHANGED"}"#,
+            r#"{"type":"input","label":"Estimate","inputType":"number","onChange":"ESTIMATE_TYPED"}"#,
             "input",
             number_form
+        ),
+        vec![(
+            "ESTIMATE_TYPED".to_string(),
+            r#"{"value":"42"}"#.to_string()
+        )]
+    );
+    assert_eq!(
+        dispatch(
+            r#"{"type":"input","label":"Estimate","inputType":"number","value":"42","action":"ESTIMATE_CHANGED"}"#,
+            "keydown",
+            enter(),
         ),
         vec![(
             "ESTIMATE_CHANGED".to_string(),
@@ -568,7 +1165,7 @@ static NEW_CONTROL_NAVIGATIONS: std::sync::Mutex<Vec<String>> = std::sync::Mutex
 #[cfg(feature = "native")]
 static NEW_CONTROL_VIEWPORT_WIDTH: std::sync::Mutex<Option<f64>> = std::sync::Mutex::new(None);
 #[cfg(feature = "native")]
-static NEW_CONTROL_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+static EVENT_CONVERTER_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 #[cfg(feature = "native")]
 fn new_control_app() -> dioxus::prelude::Element {
@@ -615,10 +1212,13 @@ fn new_control_app() -> dioxus::prelude::Element {
         trait_content: &trait_content,
         source_trait: None,
         sink: Some(sink),
+        source_sink: Callback::new(move |_: Option<String>| sink),
         navigate: Some(navigate),
         dock: None,
         viewport_width,
         canvas_theme: None,
+        theme_mode: None,
+        toggle_theme: None,
     };
     registry.render_spec(&props, None, &view)
 }
@@ -692,7 +1292,9 @@ fn authored_aria_pressed_overrides_game_atom_defaults() {
     use dioxus::prelude::*;
     use dioxus_core::{AttributeValue, Mutation, Mutations};
 
-    let _guard = NEW_CONTROL_TEST_LOCK.lock().unwrap();
+    let _guard = EVENT_CONVERTER_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
     for pattern in [
         r#"{"type":"choice-button","text":"Choice","selected":true,"aria-pressed":"mixed"}"#,
         r#"{"type":"game-audio-toggle","muted":true,"soundOnLabel":"Sound on","mutedLabel":"Muted","aria-pressed":"mixed"}"#,
@@ -723,7 +1325,9 @@ fn action_tile_renders_authored_drag_and_category_presentation() {
     use dioxus::prelude::*;
     use dioxus_core::{AttributeValue, Mutation, Mutations};
 
-    let _guard = NEW_CONTROL_TEST_LOCK.lock().unwrap();
+    let _guard = EVENT_CONVERTER_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
     for (disabled, draggable, color) in [
         (false, true, "background:#112233"),
         (true, false, "background:var(--almadar-bg)"),
@@ -753,7 +1357,9 @@ fn game_shell_and_action_tile_keep_authored_accessibility_attrs() {
     use dioxus::prelude::*;
     use dioxus_core::{AttributeValue, Mutation, Mutations};
 
-    let _guard = NEW_CONTROL_TEST_LOCK.lock().unwrap();
+    let _guard = EVENT_CONVERTER_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
     for (pattern, label, role) in [
         (
             r#"{"type":"game-shell","appName":"Snake","showTopBar":false,"aria-label":"Game surface","role":"application","lang":"ar","dir":"rtl","tabIndex":0}"#,
@@ -797,7 +1403,9 @@ fn game_shell_null_slots_do_not_create_empty_overlays() {
     use dioxus::prelude::*;
     use dioxus_core::{AttributeValue, Mutation, Mutations};
 
-    let _guard = NEW_CONTROL_TEST_LOCK.lock().unwrap();
+    let _guard = EVENT_CONVERTER_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
     *NEW_CONTROL_PATTERN.lock().unwrap() = r#"{"type":"game-shell","showTopBar":false,"hud":null,"controls":null,"addons":null,"overlay":null,"data-theme":""}"#;
     let mut dom = VirtualDom::new(new_control_app);
     let mut mutations = Mutations::default();
@@ -834,7 +1442,9 @@ fn compact_activity_rail_opens_its_authored_panel_after_selection() {
     use dioxus_core::{Mutation, Mutations};
     use std::{any::Any, rc::Rc};
 
-    let _guard = NEW_CONTROL_TEST_LOCK.lock().unwrap();
+    let _guard = EVENT_CONVERTER_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
     set_event_converter(Box::new(dioxus_html::SerializedHtmlEventConverter));
     *NEW_CONTROL_PATTERN.lock().unwrap() = r#"{"type":"dock-layout","compact":true,"rail":{"type":"activity-rail","items":[{"id":"assets","label":"Assets","icon":"folder","opensPanel":true}],"onChange":"PICK","onSelect":"CALLBACK"},"sidebar":{"type":"typography","content":"Asset panel"},"main":{"type":"typography","content":"Main"}}"#;
     NEW_CONTROL_EVENTS.lock().unwrap().clear();
@@ -890,7 +1500,9 @@ fn compact_activity_rail_closes_menu_for_an_item_without_a_panel() {
     use dioxus_core::{Mutation, Mutations};
     use std::{any::Any, rc::Rc};
 
-    let _guard = NEW_CONTROL_TEST_LOCK.lock().unwrap();
+    let _guard = EVENT_CONVERTER_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
     set_event_converter(Box::new(dioxus_html::SerializedHtmlEventConverter));
     *NEW_CONTROL_PATTERN.lock().unwrap() = r#"{"type":"dock-layout","compact":true,"rail":{"type":"activity-rail","items":[{"id":"dialog","label":"Dialog","icon":"circle","opensPanel":false}],"onChange":"PICK"},"sidebar":{"type":"typography","content":"Panel must stay closed"},"main":{"type":"typography","content":"Main"}}"#;
     NEW_CONTROL_EVENTS.lock().unwrap().clear();
@@ -945,7 +1557,9 @@ fn compact_dock_drawer_closes_when_viewport_becomes_desktop_width() {
     use dioxus_core::{Mutation, Mutations, ScopeId};
     use std::{any::Any, rc::Rc};
 
-    let _guard = NEW_CONTROL_TEST_LOCK.lock().unwrap();
+    let _guard = EVENT_CONVERTER_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
     set_event_converter(Box::new(dioxus_html::SerializedHtmlEventConverter));
     *NEW_CONTROL_VIEWPORT_WIDTH.lock().unwrap() = Some(800.0);
     *NEW_CONTROL_PATTERN.lock().unwrap() = r#"{"type":"dock-layout","rail":{"type":"activity-rail","items":[{"id":"assets","label":"Assets","icon":"folder"}],"onChange":"PICK"},"main":{"type":"typography","content":"Main"}}"#;
@@ -1004,7 +1618,9 @@ fn compact_dock_drawer_closes_when_viewport_becomes_desktop_width() {
 #[cfg(feature = "native")]
 #[test]
 fn new_atomic_controls_emit_only_declared_events() {
-    let _guard = NEW_CONTROL_TEST_LOCK.lock().unwrap();
+    let _guard = EVENT_CONVERTER_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
     assert_eq!(
         new_control_events(
             r#"{"type":"choice-button","text":"Open","action":"CHOOSE","payload":{"nextId":"scene-2"},"onClick":"CALLBACK"}"#,
@@ -1056,7 +1672,9 @@ fn new_atomic_controls_emit_only_declared_events() {
 #[cfg(feature = "native")]
 #[test]
 fn game_audio_toggle_emits_authored_next_state_only() {
-    let _guard = NEW_CONTROL_TEST_LOCK.lock().unwrap();
+    let _guard = EVENT_CONVERTER_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
     assert_eq!(
         new_control_events(
             r#"{"type":"game-audio-toggle","muted":false,"soundOnLabel":"Sound on","toggleEvent":"TOGGLE"}"#,
@@ -1081,7 +1699,9 @@ fn game_audio_toggle_emits_authored_next_state_only() {
 #[cfg(feature = "native")]
 #[test]
 fn control_grid_reuses_button_press_and_release_with_typed_payloads() {
-    let _guard = NEW_CONTROL_TEST_LOCK.lock().unwrap();
+    let _guard = EVENT_CONVERTER_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
     assert_eq!(
         new_control_events(
             r#"{"type":"control-grid","kind":"actions","visibility":"always","buttons":[{"id":"jump","label":"Jump"}],"actionEvent":"ACTION","onAction":"CALLBACK"}"#,
@@ -1127,7 +1747,9 @@ fn control_grid_reuses_button_press_and_release_with_typed_payloads() {
 #[cfg(feature = "native")]
 #[test]
 fn game_menu_dispatches_option_event_callback_and_kernel_navigation() {
-    let _guard = NEW_CONTROL_TEST_LOCK.lock().unwrap();
+    let _guard = EVENT_CONVERTER_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
     NEW_CONTROL_NAVIGATIONS.lock().unwrap().clear();
     let option = serde_json::json!({
         "id": "play",
@@ -1172,7 +1794,9 @@ fn game_menu_dispatches_option_event_callback_and_kernel_navigation() {
 #[cfg(feature = "native")]
 #[test]
 fn trait_slot_and_sequence_bar_dispatch_distinct_authored_click_callbacks() {
-    let _guard = NEW_CONTROL_TEST_LOCK.lock().unwrap();
+    let _guard = EVENT_CONVERTER_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
     assert_eq!(
         new_control_click_at(
             r#"{"type":"trait-slot","slotNumber":2,"emptyLabel":"Empty","clickEvent":"CLICK","onClick":"CALLBACK"}"#,
@@ -1215,10 +1839,15 @@ fn drag_slot_app() -> dioxus::prelude::Element {
         trait_content: &trait_content,
         source_trait: None,
         sink: None,
+        source_sink: dioxus::prelude::Callback::new(|_: Option<String>| {
+            dioxus::prelude::Callback::new(|_: (String, orbital_core::Value)| {})
+        }),
         navigate: None,
         dock: None,
         viewport_width: None,
         canvas_theme: None,
+        theme_mode: None,
+        toggle_theme: None,
     };
     registry.render_spec(&props, None, &view)
 }
@@ -1226,6 +1855,9 @@ fn drag_slot_app() -> dioxus::prelude::Element {
 #[cfg(all(feature = "native", feature = "research-drag"))]
 #[test]
 fn trait_slot_empty_remove_event_does_not_add_a_remove_control() {
+    let _converter_guard = EVENT_CONVERTER_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
     use dioxus::prelude::*;
     use dioxus_core::{Mutation, Mutations};
 

@@ -1,8 +1,11 @@
 //! Integration between Dioxus and Blitz
-use crate::events::{BlitzKeyboardData, NativeClickData, NativeConverter, NativeFormData};
+use crate::events::{
+    BlitzKeyboardData, NativeClickData, NativeConverter, NativeFormData, NativeImageData,
+};
 use crate::mutation_writer::{DioxusState, MutationWriter};
 use crate::qual_name;
 use crate::NodeId;
+use blitz_dom::net::Resource;
 use blitz_dom::{
     Attribute, BaseDocument, Document, DocumentConfig, EventDriver, EventHandler, Node, DEFAULT_CSS,
 };
@@ -28,6 +31,19 @@ fn get_dioxus_id(node: &Node) -> Option<ElementId> {
         .find(|attr| *attr.name.local == *"data-dioxus-id")
         .and_then(|attr| attr.value.parse::<usize>().ok())
         .map(ElementId)
+}
+
+fn image_error_target(node: &Node, requested_src: &str) -> Option<ElementId> {
+    let current_src = node
+        .element_data()?
+        .attrs
+        .iter()
+        .find(|attr| *attr.name.local == *"src")?
+        .value
+        .as_str();
+    (current_src == requested_src)
+        .then(|| get_dioxus_id(node))
+        .flatten()
 }
 
 /// Integrates [`BaseDocument`] from  [`blitz-dom`](blitz_dom)  with [`VirtualDom`] from [`dioxus-core`](dioxus_core)
@@ -172,6 +188,22 @@ impl DioxusDocument {
 
 // Implement DocumentLike and required traits for DioxusDocument
 impl Document for DioxusDocument {
+    fn load_resource(&mut self, resource: Resource) {
+        if let Resource::ImageError(node_id, src) = &resource {
+            let target = self
+                .inner
+                .get_node(*node_id)
+                .and_then(|node| image_error_target(node, src));
+            if let Some(id) = target {
+                let data = wrap_event_data(NativeImageData { load_error: true });
+                self.vdom
+                    .runtime()
+                    .handle_event("error", Event::new(data, false), id);
+            }
+        }
+        self.inner.load_resource(resource);
+    }
+
     fn id(&self) -> usize {
         self.inner.id()
     }
@@ -206,6 +238,32 @@ impl Document for DioxusDocument {
         };
         let mut driver = EventDriver::new(self.inner.mutate(), handler);
         driver.handle_ui_event(event);
+    }
+}
+
+#[cfg(test)]
+mod image_error_tests {
+    use super::*;
+
+    #[test]
+    fn stale_image_failure_does_not_target_replaced_src() {
+        let mut doc = BaseDocument::new(DocumentConfig::default());
+        let node_id = doc.mutate().create_element(
+            qual_name("img", None),
+            vec![
+                Attribute {
+                    name: qual_name("src", None),
+                    value: "current.png".into(),
+                },
+                Attribute {
+                    name: qual_name("data-dioxus-id", None),
+                    value: "9".into(),
+                },
+            ],
+        );
+        let node = doc.get_node(node_id).unwrap();
+        assert_eq!(image_error_target(node, "current.png"), Some(ElementId(9)));
+        assert_eq!(image_error_target(node, "old.png"), None);
     }
 }
 

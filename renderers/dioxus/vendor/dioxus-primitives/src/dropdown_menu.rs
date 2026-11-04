@@ -4,7 +4,7 @@ use std::rc::Rc;
 
 use crate::{
     collection::{collection_item, use_collection_provider, use_item, CollectionState},
-    merge_attributes, use_animated_open, use_controlled, use_id_or, use_unique_id,
+    merge_attributes, use_animated_open_with, use_controlled, use_id_or, use_unique_id,
 };
 use dioxus::prelude::*;
 use dioxus_attributes::attributes;
@@ -278,6 +278,9 @@ pub fn DropdownMenuTrigger(props: DropdownMenuTriggerProps) -> Element {
 pub struct DropdownMenuContentProps {
     /// The ID of the dropdown menu content element. If not provided, a unique ID will be generated.
     pub id: ReadSignal<Option<String>>,
+    /// Close without waiting for a CSS animation; use only for menus without an exit animation.
+    #[props(default)]
+    pub instant_close: bool,
     /// Additional attributes to apply to the dropdown menu content element.
     #[props(extends = GlobalAttributes)]
     pub attributes: Vec<Attribute>,
@@ -336,7 +339,7 @@ pub fn DropdownMenuContent(props: DropdownMenuContentProps) -> Element {
 
     let unique_id = use_unique_id();
     let id = use_id_or(unique_id, props.id);
-    let render = use_animated_open(id, ctx.open);
+    let render = use_animated_open_with(id, ctx.open, props.instant_close);
 
     rsx! {
         if render() {

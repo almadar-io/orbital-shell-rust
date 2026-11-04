@@ -1,56 +1,44 @@
-use std::future::Future;
-use std::pin::Pin;
-use std::task::{Context, Poll};
 use std::time::Duration;
+use web_time::Instant;
 
-pub struct Delay(Duration, bool);
+const FRAME_INTERVAL: Duration = Duration::from_millis(16);
 
-impl Delay {
-    pub fn new(duration: Duration) -> Self {
-        Self(duration, false)
+pub async fn animate(duration: Duration, mut frame: impl FnMut(f64) -> bool) {
+    if duration.is_zero() {
+        frame(1.0);
+        return;
+    }
+    let started = Instant::now();
+    loop {
+        let progress = (started.elapsed().as_secs_f64() / duration.as_secs_f64()).min(1.0);
+        if !frame(progress) || progress >= 1.0 {
+            break;
+        }
+        Delay::new(FRAME_INTERVAL).await;
     }
 }
 
-impl Future for Delay {
-    type Output = ();
+pub fn ease_out_cubic(progress: f64) -> f64 {
+    1.0 - (1.0 - progress.clamp(0.0, 1.0)).powi(3)
+}
 
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {
-        if self.1 {
-            return Poll::Ready(());
-        }
-        self.1 = true;
-        let waker = cx.waker().clone();
-        let duration = self.0;
-        std::thread::spawn(move || {
-            std::thread::sleep(duration);
-            waker.wake();
-        });
-        Poll::Pending
+pub struct Delay;
+
+impl Delay {
+    pub async fn new(duration: Duration) {
+        dioxus_sdk_time::sleep(duration).await;
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::{mpsc, Arc};
-    use std::task::{Wake, Waker};
-
-    struct TestWake(mpsc::Sender<()>);
-
-    impl Wake for TestWake {
-        fn wake(self: Arc<Self>) {
-            self.0.send(()).unwrap();
-        }
-    }
 
     #[test]
-    fn delay_wakes_once_after_its_clock_interval() {
-        let (sender, receiver) = mpsc::channel();
-        let waker = Waker::from(Arc::new(TestWake(sender)));
-        let mut context = Context::from_waker(&waker);
-        let mut delay = Box::pin(Delay::new(Duration::from_millis(2)));
-        assert!(matches!(delay.as_mut().poll(&mut context), Poll::Pending));
-        receiver.recv_timeout(Duration::from_secs(1)).unwrap();
-        assert!(matches!(delay.as_mut().poll(&mut context), Poll::Ready(())));
+    fn ease_out_cubic_is_bounded_and_monotonic() {
+        assert_eq!(ease_out_cubic(0.0), 0.0);
+        assert_eq!(ease_out_cubic(1.0), 1.0);
+        assert!(ease_out_cubic(0.5) > 0.5);
+        assert!(ease_out_cubic(0.25) < ease_out_cubic(0.5));
     }
 }

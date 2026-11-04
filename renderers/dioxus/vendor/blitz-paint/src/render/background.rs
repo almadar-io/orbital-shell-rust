@@ -1,4 +1,4 @@
-use super::{ElementCx, to_image_quality, to_peniko_image};
+use super::{to_image_quality, to_peniko_image, ElementCx};
 use crate::color::{Color, ToColorColor};
 use crate::gradient::to_peniko_gradient;
 use crate::layers::maybe_with_layer;

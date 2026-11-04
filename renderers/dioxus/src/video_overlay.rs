@@ -773,6 +773,9 @@ mod tests {
     #[cfg(all(feature = "native", not(target_arch = "wasm32")))]
     #[test]
     fn video_anchor_has_a_nonzero_native_layout_box() {
+        let _converter_guard = crate::EVENT_CONVERTER_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
         use blitz_dom::{Document as _, DocumentConfig};
         use blitz_traits::shell::{ColorScheme, Viewport};
         use dioxus_native::DioxusDocument;
@@ -837,6 +840,9 @@ mod tests {
     ))]
     #[test]
     fn video_anchor_id_survives_inserting_an_authored_hud_slot() {
+        let _converter_guard = crate::EVENT_CONVERTER_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
         use blitz_dom::{Document as _, DocumentConfig};
         use blitz_traits::shell::{ColorScheme, Viewport};
         use dioxus_native::DioxusDocument;

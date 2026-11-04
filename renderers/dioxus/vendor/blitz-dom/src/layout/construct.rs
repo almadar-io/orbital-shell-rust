@@ -53,7 +53,12 @@ fn push_children_and_pseudos(layout_children: &mut Vec<usize>, node: &Node) {
     if let Some(before) = node.before {
         layout_children.push(before);
     }
-    layout_children.extend_from_slice(&node.children);
+    layout_children.extend(
+        node.children
+            .iter()
+            .copied()
+            .filter(|child_id| node.tree()[*child_id].data.kind() != NodeKind::Comment),
+    );
     if let Some(after) = node.after {
         layout_children.push(after);
     }
@@ -509,7 +514,6 @@ fn collect_complex_layout_children(
                 if block_is_only_whitespace(doc, anon_id) {
                     layout_children.pop();
                     doc.nodes.remove(anon_id);
-                    *anonymous_block_id = None;
                 }
             }
 
@@ -541,7 +545,7 @@ fn create_text_editor(doc: &mut BaseDocument, input_element_id: usize, is_multil
         let mut text_input_data = TextInputData::new(is_multiline);
         let editor = &mut text_input_data.editor;
 
-        editor.set_text(element.attr(local_name!("value")).unwrap_or(" "));
+        editor.set_text(element.attr(local_name!("value")).unwrap_or(""));
         editor.set_scale(doc.viewport.scale_f64() as f32);
         editor.set_width(None);
 
@@ -551,6 +555,16 @@ fn create_text_editor(doc: &mut BaseDocument, input_element_id: usize, is_multil
         styles.insert(StyleProperty::Brush(parley_style.brush));
 
         editor.refresh_layout(&mut doc.font_ctx.lock().unwrap(), &mut doc.layout_ctx);
+
+        let placeholder = &mut text_input_data.placeholder_editor;
+        placeholder.set_text(element.attr(local_name!("placeholder")).unwrap_or(""));
+        placeholder.set_scale(doc.viewport.scale_f64() as f32);
+        placeholder.set_width(None);
+        let styles = placeholder.edit_styles();
+        styles.insert(StyleProperty::FontSize(parley_style.font_size));
+        styles.insert(StyleProperty::LineHeight(parley_style.line_height));
+        styles.insert(StyleProperty::Brush(parley_style.brush));
+        placeholder.refresh_layout(&mut doc.font_ctx.lock().unwrap(), &mut doc.layout_ctx);
 
         element.special_data = SpecialElementData::TextInput(text_input_data);
     }
