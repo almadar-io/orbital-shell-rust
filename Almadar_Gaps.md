@@ -7,7 +7,9 @@ Every open gap this repo owns lives here. This file is the source of truth; the 
 - **Codes:** new gaps use this repo's prefix `G-ORBITAL-SHELL-RUST-`. Take the "Next code" below, then bump it in the same edit. Codes are never reused or renamed.
 - **Close by deleting.** Remove the entry in the same commit as the fix.
 
-Next code: `G-ORBITAL-SHELL-RUST-005`
+Next code: `G-ORBITAL-SHELL-RUST-006`
+
+- **G-ORBITAL-SHELL-RUST-005** — The dioxus and TUI dock-layout renderers still read `secondarySidebarWidth` as pixels (default 280) while the contract is now a 0-100 SplitPane ratio (default 25) beside `secondarySidebarMinSize` and `onSecondarySidebarWidthChange` (web, SwiftUI and Compose carry it since 2026-11-04), so a native-GPU or terminal host draws std-workspace-layout's right dock at 25-55 px. renderers/dioxus + renderers/tui `dock_layout.rs` [mechanical] — deferred by the owner 2026-11-04; rung: (3) the verifiers (no cross-host dock-layout fixture compares widths). Root cause: one-off.
 
 - **G-ORBITAL-SHELL-RUST-004** [mechanical] — The Dioxus and TUI `dashboard-layout` renderers (`renderers/dioxus/src/components/core/templates/dashboard_layout.rs`, `renderers/tui/src/components/core/templates/dashboard_layout.rs`) never draw the pattern's two node slots, `headerActions` (top bar, before the theme toggle) and `sidebarContent` (between the nav links and the footer); web, iOS and Android draw both. Symptom: an app composing std-app-layout with `headerTrait` (the Rust tutorials' theme picker, 2026-11-02) or `sidebarTrait` loses that control on these hosts. Reproduction: grep either file for headerActions/sidebarContent (no match). Prevention rung: (3) the verifiers, std verify through the Rust host on an app that sets both knobs. Root cause: H4.
 
