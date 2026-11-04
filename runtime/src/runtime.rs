@@ -1386,10 +1386,8 @@ impl Host {
         entity_id: &str,
         payload: Value,
     ) -> Result<Vec<(String, ProcessEventResult)>, HostError> {
-        let started = self
-            .kernel
-            .start_dispatch_route_mount(route, seeds, Some(entity_id), payload);
-        self.finish(started)
+        self.kernel
+            .run_route_mount(route, seeds, Some(entity_id), payload, |started| self.finish(started))
     }
 
     /// The keyed calls whose completion is still wanted: open streams (a listener, a watch) and deferred answers.
@@ -2614,6 +2612,75 @@ mod tests {
         let _tab = runtime.kernel.enter_session("tab-m");
         let got = serde_json::to_value(&runtime.kernel.snapshot_trait("Seeder", Some("default")).entity).unwrap()["got"].clone();
         assert_eq!(got, "/desk", "the $MOUNT listener heard the route (EXEC-SEED-7, twin of the embedded server host)");
+    }
+
+    /// A `Seeder` whose `$MOUNT` listener writes a `Card` through a keyed self `program/dispatch` (a deferred ask whose
+    /// work is a dispatch of its own), and a `/shelf` page whose `Shelf` lists the cards on `INIT`.
+    fn shelf_seeded_by_a_deferred_write() -> Arc<Host> {
+        let runtime = Host::new(Arc::new(DriverAdapter::memory())).shared();
+        let machine = |events: serde_json::Value, transitions: serde_json::Value| {
+            serde_json::json!({ "states": [{ "name": "idle", "isInitial": true }], "events": events, "transitions": transitions })
+        };
+        let program = serde_json::json!({
+            "name": "Shelf",
+            "typeContractVersion": 1,
+            "orbitals": [{
+                "name": "Shelf",
+                "entity": { "name": "Card", "persistence": "persistent", "fields": [{ "name": "id", "type": "string" }, { "name": "label", "type": "string" }] },
+                "traits": [{
+                    "name": "Seeder", "linkedEntity": "Card",
+                    "listens": [{ "event": "$MOUNT", "triggers": "SEED_PAGE" }],
+                    "stateMachine": machine(
+                        serde_json::json!([{ "key": "SEED_PAGE", "name": "Seed page" }, { "key": "SEEDED", "name": "Seeded" }]),
+                        serde_json::json!([
+                            { "from": "idle", "to": "idle", "event": "SEED_PAGE", "effects": [["program/dispatch", "Shelf.Writer.WRITE", {},
+                                { "orbital": "Shelf", "targetTrait": "Writer", "event": "WRITE", "wire": true },
+                                { "key": "seed-write", "emit": { "success": "SEEDED", "failure": "SEEDED" } }]] },
+                            { "from": "idle", "to": "idle", "event": "SEEDED", "effects": [] }]))
+                }, {
+                    "name": "Writer", "linkedEntity": "Card",
+                    "stateMachine": machine(
+                        serde_json::json!([{ "key": "WRITE", "name": "Write" }]),
+                        serde_json::json!([{ "from": "idle", "to": "idle", "event": "WRITE", "effects": [["persist", "create", "Card", { "id": "c1", "label": "seeded" }]] }]))
+                }, {
+                    "name": "Shelf", "linkedEntity": "Card",
+                    "stateMachine": machine(
+                        serde_json::json!([{ "key": "INIT", "name": "Init" }, { "key": "L", "name": "Listed" }]),
+                        serde_json::json!([
+                            { "from": "idle", "to": "idle", "event": "INIT", "effects": [["fetch", "Card", { "emit": { "success": "L" } }]] },
+                            { "from": "idle", "to": "idle", "event": "L", "effects": [] }]))
+                }],
+                "pages": [{ "name": "ShelfPage", "path": "/shelf", "traits": [{ "ref": "Shelf" }] }]
+            }]
+        });
+        runtime.register_schema(serde_json::from_value(program).unwrap()).unwrap();
+        runtime
+    }
+
+    /// The mount's answer, on a thread the test abandons after 20 s so a barrier that never settles fails instead of hanging.
+    fn mounted_cards(runtime: &Arc<Host>, request: serde_json::Value) -> Vec<String> {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let host = Arc::clone(runtime);
+        std::thread::spawn(move || {
+            let _ = tx.send(dispatch_request(&host, request));
+        });
+        let answer = rx.recv_timeout(std::time::Duration::from_secs(20)).expect("the mount settles").unwrap();
+        let rows = answer["data"]["Card"].as_array().cloned().unwrap_or_default();
+        rows.iter().filter_map(|r| r["id"].as_str().map(str::to_string)).collect()
+    }
+
+    #[test]
+    fn a_route_mount_runs_its_seeds_after_the_deferred_asks_its_mount_listener_made() {
+        let runtime = shelf_seeded_by_a_deferred_write();
+        let cards = mounted_cards(&runtime, serde_json::json!({ "wire": true, "orbital": "Shelf", "event": "INIT", "clientId": "tab-s", "mount": [{ "trait": "Shelf", "event": "INIT" }], "route": "/shelf" }));
+        assert_eq!(cards, ["c1"], "the page's INIT fetch sees the row the $MOUNT listener's deferred dispatch wrote (EXEC-SEED-7)");
+    }
+
+    #[test]
+    fn control_a_route_less_mount_lists_before_any_seed() {
+        let runtime = shelf_seeded_by_a_deferred_write();
+        let cards = mounted_cards(&runtime, serde_json::json!({ "wire": true, "orbital": "Shelf", "event": "INIT", "clientId": "tab-t", "mount": [{ "trait": "Shelf", "event": "INIT" }] }));
+        assert!(cards.is_empty(), "no route, no $MOUNT, nothing seeded: {cards:?}");
     }
 
     #[test]
