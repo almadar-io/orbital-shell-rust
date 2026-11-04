@@ -230,6 +230,41 @@ impl orbital_core::effects::executor::SubstrateHandler for SelfSubstrate {
     }
 }
 
+/// Hosts every guest this host's kernel opens as a host of its own over in-memory rows (EXEC-CONC-7), so a guest's self
+/// `program/dispatch`, keyed asks and route mounts are answered as a served program's are, under the grants it was passed.
+struct HostGuests;
+
+impl orbital_core::runtime::kernel::guest_hosting::GuestHosting for HostGuests {
+    fn open(&self) -> Arc<dyn orbital_core::runtime::kernel::guest_hosting::GuestHost> {
+        Arc::new(GuestOf(Host::new(Arc::new(super::store::DriverAdapter::memory())).shared()))
+    }
+}
+
+struct GuestOf(Arc<Host>);
+
+impl orbital_core::runtime::kernel::guest_hosting::GuestHost for GuestOf {
+    fn kernel(&self) -> Arc<RuntimeKernel> {
+        Arc::clone(&self.0.kernel)
+    }
+
+    fn register(&self, schema: orbital_core::OrbitalSchema) -> Result<(), String> {
+        self.0.register_schema(schema).map_err(|e| e.to_string())
+    }
+
+    fn mount(&self, route: Option<&str>, seeds: &[orbital_core::effects::MountSeed]) -> Result<DispatchOutcomes, String> {
+        let host = &self.0;
+        host.kernel
+            .run_route_mount(route, seeds, None, Value::Null, |started| host.finish(started))
+            .map_err(|e| e.to_string())
+    }
+
+    fn dispatch(&self, trait_name: &str, event: &str, payload: Value) -> Result<DispatchOutcomes, String> {
+        let host = &self.0;
+        host.finish(host.kernel.start_dispatch(trait_name, None, event, payload, None, None))
+            .map_err(|e| e.to_string())
+    }
+}
+
 impl Default for HostConfig {
     fn default() -> Self {
         Self {
@@ -594,6 +629,7 @@ impl Host {
             kernel_config,
         ));
         kernel.set_stateful(true);
+        kernel.set_guest_hosting(Arc::new(HostGuests));
         let (live_tx, _) = broadcast::channel(LIVE_BROADCAST_CAPACITY);
         let rows = persistence.durable().then(|| {
             Arc::new(orbital_core::runtime::credential_store::StoreCredentialRows(persistence.clone()))
@@ -2618,10 +2654,16 @@ mod tests {
     /// work is a dispatch of its own), and a `/shelf` page whose `Shelf` lists the cards on `INIT`.
     fn shelf_seeded_by_a_deferred_write() -> Arc<Host> {
         let runtime = Host::new(Arc::new(DriverAdapter::memory())).shared();
+        runtime.register_schema(serde_json::from_value(shelf_program(true)).unwrap()).unwrap();
+        runtime
+    }
+
+    /// The `Shelf` program; `listening` decides whether its `Seeder` hears `$MOUNT`. `Shelf` emits the cards it listed as `SEEN`.
+    fn shelf_program(listening: bool) -> serde_json::Value {
         let machine = |events: serde_json::Value, transitions: serde_json::Value| {
             serde_json::json!({ "states": [{ "name": "idle", "isInitial": true }], "events": events, "transitions": transitions })
         };
-        let program = serde_json::json!({
+        serde_json::json!({
             "name": "Shelf",
             "typeContractVersion": 1,
             "orbitals": [{
@@ -2629,7 +2671,7 @@ mod tests {
                 "entity": { "name": "Card", "persistence": "persistent", "fields": [{ "name": "id", "type": "string" }, { "name": "label", "type": "string" }] },
                 "traits": [{
                     "name": "Seeder", "linkedEntity": "Card",
-                    "listens": [{ "event": "$MOUNT", "triggers": "SEED_PAGE" }],
+                    "listens": if listening { serde_json::json!([{ "event": "$MOUNT", "triggers": "SEED_PAGE" }]) } else { serde_json::json!([]) },
                     "stateMachine": machine(
                         serde_json::json!([{ "key": "SEED_PAGE", "name": "Seed page" }, { "key": "SEEDED", "name": "Seeded" }]),
                         serde_json::json!([
@@ -2644,17 +2686,75 @@ mod tests {
                         serde_json::json!([{ "from": "idle", "to": "idle", "event": "WRITE", "effects": [["persist", "create", "Card", { "id": "c1", "label": "seeded" }]] }]))
                 }, {
                     "name": "Shelf", "linkedEntity": "Card",
+                    "emits": [{ "event": "SEEN" }],
                     "stateMachine": machine(
                         serde_json::json!([{ "key": "INIT", "name": "Init" }, { "key": "L", "name": "Listed" }]),
                         serde_json::json!([
                             { "from": "idle", "to": "idle", "event": "INIT", "effects": [["fetch", "Card", { "emit": { "success": "L" } }]] },
-                            { "from": "idle", "to": "idle", "event": "L", "effects": [] }]))
+                            { "from": "idle", "to": "idle", "event": "L", "effects": [["emit", "SEEN", { "listed": "@payload" }]] }]))
                 }],
                 "pages": [{ "name": "ShelfPage", "path": "/shelf", "traits": [{ "ref": "Shelf" }] }]
             }]
+        })
+    }
+
+    /// The `Shelf` program opened as a guest at `/shelf` by an `Opener` program served here; the open's answer as text.
+    fn guest_shelf_open_answer(listening: bool) -> String {
+        let runtime = Host::new(Arc::new(DriverAdapter::memory())).shared();
+        let opener: orbital_core::OrbitalSchema = serde_json::from_value(serde_json::json!({
+            "name": "Opener",
+            "typeContractVersion": 1,
+            "orbitals": [{
+                "name": "Opener",
+                "entity": { "name": "Box", "persistence": "runtime", "fields": [{ "name": "id", "type": "string" }, { "name": "answer", "type": "string" }] },
+                "traits": [{
+                    "name": "Opener", "linkedEntity": "Box",
+                    "stateMachine": {
+                        "states": [{ "name": "idle", "isInitial": true }],
+                        "events": [{ "key": "OPEN", "name": "Open", "payloadSchema": [{ "name": "program", "type": "object", "required": true }] },
+                            { "key": "OPENED", "name": "Opened" }, { "key": "FAILED", "name": "Failed" }],
+                        "transitions": [
+                            { "from": "idle", "to": "idle", "event": "OPEN", "effects": [["program/open", "@payload.program", { "route": "/shelf" }, { "emit": { "success": "OPENED", "failure": "FAILED" } }]] },
+                            { "from": "idle", "to": "idle", "event": "OPENED", "effects": [["set", "@entity.answer", ["json/stringify", "@payload"]]] },
+                            { "from": "idle", "to": "idle", "event": "FAILED", "effects": [["set", "@entity.answer", ["str/concat", "failed: ", ["json/stringify", "@payload"]]]] }]
+                    }
+                }]
+            }]
+        }))
+        .unwrap();
+        runtime.register_schema(opener).unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let host = Arc::clone(&runtime);
+        std::thread::spawn(move || {
+            let args: Vec<Value> = [
+                serde_json::json!("Opener.Opener.OPEN"),
+                serde_json::json!({ "program": shelf_program(listening) }),
+                serde_json::json!({ "wire": true, "orbital": "Opener", "targetTrait": "Opener", "event": "OPEN", "clientId": "tab-g" }),
+            ]
+            .iter()
+            .map(|a| serde_json::from_value(a.clone()).unwrap())
+            .collect();
+            let answered = orbital_core::effects::executor::SubstrateHandler::run(host.substrate.as_ref(), "program/dispatch", &args)
+                .map_err(|f| f.message)
+                .map(|_| {
+                    let _tab = host.kernel.enter_session("tab-g");
+                    serde_json::to_value(&host.kernel.snapshot_trait("Opener", Some("default")).entity).unwrap()["answer"].to_string()
+                });
+            let _ = tx.send(answered);
         });
-        runtime.register_schema(serde_json::from_value(program).unwrap()).unwrap();
-        runtime
+        rx.recv_timeout(std::time::Duration::from_secs(20)).expect("the open settles").unwrap()
+    }
+
+    #[test]
+    fn a_hosted_guest_mounts_its_page_after_the_deferred_write_its_mount_listener_made() {
+        let answer = guest_shelf_open_answer(true);
+        assert!(answer.contains("SEEN") && answer.contains("c1"), "the guest page listed the row its $MOUNT listener's self program/dispatch wrote (EXEC-CONC-7, EXEC-SEED-7): {answer}");
+    }
+
+    #[test]
+    fn control_a_hosted_guest_with_no_mount_listener_lists_nothing() {
+        let answer = guest_shelf_open_answer(false);
+        assert!(answer.contains("SEEN") && !answer.contains("c1"), "the guest page mounted and listed nothing: {answer}");
     }
 
     /// The mount's answer, on a thread the test abandons after 20 s so a barrier that never settles fails instead of hanging.
