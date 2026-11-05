@@ -32,6 +32,10 @@ impl PatternRenderer for WizardContainerRenderer {
         use ratatui::widgets::{Block, Borders, Paragraph};
         let steps = get_array(props, "steps");
         let current = get_number_or(props, "currentStep", 0.0) as usize;
-        frame.render_widget(Paragraph::new(format!("Step {} of {}", current + 1, steps.len().max(1))).block(Block::default().borders(Borders::ALL).title("Wizard")), area);
+        frame.render_widget(
+            Paragraph::new(format!("Step {} of {}", current + 1, steps.len().max(1)))
+                .block(Block::default().borders(Borders::ALL).title("Wizard")),
+            area,
+        );
     }
 }

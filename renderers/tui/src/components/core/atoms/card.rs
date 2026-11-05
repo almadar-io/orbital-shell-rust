@@ -38,6 +38,9 @@ impl PatternRenderer for CardRenderer {
         } else {
             Block::default().title(title).borders(Borders::ALL)
         };
-        frame.render_widget(Paragraph::new(Line::from("Card content")).block(block), area);
+        frame.render_widget(
+            Paragraph::new(Line::from("Card content")).block(block),
+            area,
+        );
     }
 }

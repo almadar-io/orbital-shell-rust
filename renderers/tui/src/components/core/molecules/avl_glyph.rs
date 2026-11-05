@@ -32,7 +32,22 @@ impl PatternRenderer for AvlGlyphRenderer {
         use ratatui::widgets::Paragraph;
         let kind = get_string_or(props, "kind", "state");
         let label = get_string_or(props, "label", "");
-        let glyph = match kind.as_str() { "state" => "( )", "guard" => "<>", "event" => "~", "transition" | "binding" => "->", "entity" | "orbital" | "application" => "(o)", "trait" => "( ~ )", _ => "*" };
-        frame.render_widget(Paragraph::new(format!("{} {}", glyph, if label.is_empty() { kind } else { label })), area);
+        let glyph = match kind.as_str() {
+            "state" => "( )",
+            "guard" => "<>",
+            "event" => "~",
+            "transition" | "binding" => "->",
+            "entity" | "orbital" | "application" => "(o)",
+            "trait" => "( ~ )",
+            _ => "*",
+        };
+        frame.render_widget(
+            Paragraph::new(format!(
+                "{} {}",
+                glyph,
+                if label.is_empty() { kind } else { label }
+            )),
+            area,
+        );
     }
 }

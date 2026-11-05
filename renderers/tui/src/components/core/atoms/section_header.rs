@@ -34,7 +34,10 @@ impl PatternRenderer for SectionHeaderRenderer {
         use ratatui::widgets::Paragraph;
         let title = get_string_or(props, "title", "");
         let subtitle = get_string(props, "subtitle");
-        let mut lines = vec![Line::from(Span::styled(title, Style::default().add_modifier(Modifier::BOLD)))];
+        let mut lines = vec![Line::from(Span::styled(
+            title,
+            Style::default().add_modifier(Modifier::BOLD),
+        ))];
         if let Some(sub) = subtitle {
             lines.push(Line::from(sub));
         }

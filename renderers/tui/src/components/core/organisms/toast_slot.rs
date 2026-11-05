@@ -31,7 +31,15 @@ impl PatternRenderer for ToastSlotRenderer {
     ) {
         use ratatui::text::Line;
         use ratatui::widgets::Paragraph;
-        let lines: Vec<Line> = get_array(props, "toasts").iter().filter_map(|t| t.as_object().and_then(|o| o.get("message")).and_then(|v| v.as_str()).map(|s| Line::from(s.to_string()))).collect();
+        let lines: Vec<Line> = get_array(props, "toasts")
+            .iter()
+            .filter_map(|t| {
+                t.as_object()
+                    .and_then(|o| o.get("message"))
+                    .and_then(|v| v.as_str())
+                    .map(|s| Line::from(s.to_string()))
+            })
+            .collect();
         frame.render_widget(Paragraph::new(lines), area);
     }
 }

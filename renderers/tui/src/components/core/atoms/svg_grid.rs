@@ -34,7 +34,9 @@ impl PatternRenderer for SvgGridRenderer {
         let cols = get_number_or(props, "cols", 4.0) as usize;
         let rows = get_number_or(props, "rows", 4.0) as usize;
         let row_str: String = (0..cols.min(8)).map(|_| "·").collect::<Vec<_>>().join(" ");
-        let grid: Vec<Line> = (0..rows.min(4)).map(|_| Line::from(row_str.clone())).collect();
+        let grid: Vec<Line> = (0..rows.min(4))
+            .map(|_| Line::from(row_str.clone()))
+            .collect();
         frame.render_widget(Paragraph::new(grid), area);
     }
 }

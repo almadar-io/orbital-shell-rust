@@ -31,6 +31,14 @@ impl PatternRenderer for SkeletonRenderer {
     ) {
         use ratatui::layout::Alignment;
         use ratatui::widgets::{Block, Borders, Paragraph};
-        frame.render_widget(Paragraph::new(format!("[skeleton: {}]", get_string_or(props, "variant", "text"))).alignment(Alignment::Center).block(Block::default().borders(Borders::ALL)), area);
+        frame.render_widget(
+            Paragraph::new(format!(
+                "[skeleton: {}]",
+                get_string_or(props, "variant", "text")
+            ))
+            .alignment(Alignment::Center)
+            .block(Block::default().borders(Borders::ALL)),
+            area,
+        );
     }
 }

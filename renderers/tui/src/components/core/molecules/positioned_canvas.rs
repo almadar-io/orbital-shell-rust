@@ -34,7 +34,12 @@ impl PatternRenderer for PositionedCanvasRenderer {
         let items = get_array(props, "items");
         let w = get_number_or(props, "width", 400.0) as i64;
         let h = get_number_or(props, "height", 300.0) as i64;
-        let mut lines = vec![Line::from(format!("Canvas {}×{}  ({} items)", w, h, items.len()))];
+        let mut lines = vec![Line::from(format!(
+            "Canvas {}×{}  ({} items)",
+            w,
+            h,
+            items.len()
+        ))];
         for item in items.iter().take(6) {
             let label = get_string_or(item, "label", &get_string_or(item, "id", "?"));
             let x = get_number_or(item, "x", 0.0) as i64;
@@ -42,7 +47,11 @@ impl PatternRenderer for PositionedCanvasRenderer {
             lines.push(Line::from(format!("  [{label}] @({x},{y})")));
         }
         frame.render_widget(
-            Paragraph::new(Text::from(lines)).block(Block::default().borders(Borders::ALL).title("positioned-canvas")),
+            Paragraph::new(Text::from(lines)).block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title("positioned-canvas"),
+            ),
             area,
         );
     }

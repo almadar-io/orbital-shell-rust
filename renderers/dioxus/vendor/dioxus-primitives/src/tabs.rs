@@ -11,6 +11,7 @@ struct TabsContext {
     // State
     value: ReadSignal<String>,
     set_value: Callback<String>,
+    on_trigger_click: Callback<String>,
     disabled: ReadSignal<bool>,
 
     // Focus state
@@ -18,6 +19,8 @@ struct TabsContext {
 
     // Orientation
     horizontal: ReadSignal<bool>,
+    activate_on_focus: bool,
+    notify_on_active_click: bool,
 
     // ARIA attributes
     tab_content_ids: Signal<Vec<String>>,
@@ -37,6 +40,10 @@ pub struct TabsProps {
     #[props(default)]
     pub on_value_change: Callback<String>,
 
+    /// Callback fired by a trigger click, including clicks on the active tab.
+    #[props(default)]
+    pub on_trigger_click: Callback<String>,
+
     /// Whether the tabs are disabled.
     #[props(default)]
     pub disabled: ReadSignal<bool>,
@@ -44,6 +51,14 @@ pub struct TabsProps {
     /// Whether the tabs are horizontal.
     #[props(default)]
     pub horizontal: ReadSignal<bool>,
+
+    /// Select the tab when roving keyboard focus reaches it.
+    #[props(default)]
+    pub activate_on_focus: bool,
+
+    /// Notify on clicks of the already selected tab.
+    #[props(default)]
+    pub notify_on_active_click: bool,
 
     /// Whether focus should loop around when reaching the end.
     #[props(default = ReadSignal::new(Signal::new(true)))]
@@ -114,11 +129,14 @@ pub fn Tabs(props: TabsProps) -> Element {
     let mut ctx = use_context_provider(|| TabsContext {
         value: value.into(),
         set_value,
+        on_trigger_click: props.on_trigger_click,
         disabled: props.disabled,
 
         focus,
 
         horizontal: props.horizontal,
+        activate_on_focus: props.activate_on_focus,
+        notify_on_active_click: props.notify_on_active_click,
         tab_content_ids: Signal::new(Vec::new()),
     });
 
@@ -282,10 +300,13 @@ pub fn TabTrigger(props: TabTriggerProps) -> Element {
 
     let value = props.value.clone();
     let selected = use_memo(move || (ctx.value)() == value);
+    let click_value = props.value.clone();
+    let key_value = props.value.clone();
 
     let disabled = move || (ctx.disabled)() || (props.disabled)();
     let item = use_item(
         collection_item(ctx.focus, props.index)
+            .key(move || Some(key_value.clone()))
             .disabled(disabled)
             .selected(move || selected.cloned()),
     );
@@ -308,17 +329,28 @@ pub fn TabTrigger(props: TabTriggerProps) -> Element {
 
             onmounted,
             onclick: move |_| {
-                let value = props.value.clone();
-                if !selected() {
-                    ctx.set_value.call(value);
+                if disabled() {
+                    return;
                 }
+                if !selected() || ctx.notify_on_active_click {
+                    ctx.set_value.call(click_value.clone());
+                }
+                ctx.on_trigger_click.call(click_value.clone());
             },
 
-            onfocus: move |_| ctx.focus.set_focus(Some((props.index)())),
+            onfocus: move |_| {
+                ctx.focus.set_focus(Some((props.index)()));
+            },
 
             onkeydown: move |event: Event<KeyboardData>| {
+                if disabled() {
+                    return;
+                }
                 let key = event.key();
                 let horizontal = (ctx.horizontal)();
+                if !ctx.focus.any_focused() {
+                    ctx.focus.set_focus(Some((props.index)()));
+                }
                 let mut prevent_default = true;
                 match key {
                     Key::ArrowUp if !horizontal => ctx.focus.focus_prev(),
@@ -331,6 +363,13 @@ pub fn TabTrigger(props: TabTriggerProps) -> Element {
                 };
                 if prevent_default {
                     event.prevent_default();
+                    if ctx.activate_on_focus {
+                        if let Some(value) = ctx.focus.focused_key() {
+                            if (ctx.value)() != value {
+                                ctx.set_value.call(value);
+                            }
+                        }
+                    }
                 }
             },
 

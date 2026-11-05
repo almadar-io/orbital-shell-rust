@@ -32,7 +32,10 @@ impl PatternRenderer for SvgPulseRenderer {
         use ratatui::text::Line;
         use ratatui::widgets::Paragraph;
         let rings = get_number_or(props, "rings", 3.0) as usize;
-        let sym: String = (0..rings.min(5)).map(|i| if i == 0 { "●" } else { "○" }).collect::<Vec<_>>().join(" ");
+        let sym: String = (0..rings.min(5))
+            .map(|i| if i == 0 { "●" } else { "○" })
+            .collect::<Vec<_>>()
+            .join(" ");
         frame.render_widget(Paragraph::new(Line::from(format!("[pulse] {}", sym))), area);
     }
 }

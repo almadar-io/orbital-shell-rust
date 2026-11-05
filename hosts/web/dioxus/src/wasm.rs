@@ -48,7 +48,9 @@ use vello::{AaConfig, AaSupport, RenderParams, Renderer as VelloRenderer, Render
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement, ImageData, MouseEvent};
-use wgpu_context::{SurfaceRenderer, SurfaceRendererConfiguration, TextureConfiguration, WGPUContext};
+use wgpu_context::{
+    SurfaceRenderer, SurfaceRendererConfiguration, TextureConfiguration, WGPUContext,
+};
 
 use crate::app::{poke_rerender, App, CSS_TEXT};
 use crate::shell;
@@ -237,7 +239,6 @@ fn with_app<R>(f: impl FnOnce(&mut WasmApp) -> R) -> Option<R> {
     let mut app = app_rc.borrow_mut();
     Some(f(&mut app))
 }
-
 
 /// Recursive layout dump for diagnosing collapsed/zero-size subtrees. Logs
 /// tag, class, text prefix, and final Taffy rect per node — the ground truth
@@ -495,17 +496,17 @@ fn frame(app_rc: &Rc<RefCell<WasmApp>>) -> bool {
             }
             _ => {}
         }
-        app.perf.record(
-            [t1 - t0, t2 - t1, t3 - t2, t4 - t3, t5 - t4],
-            reasons,
-        );
+        app.perf
+            .record([t1 - t0, t2 - t1, t3 - t2, t4 - t3, t5 - t4], reasons);
         return true;
     };
     true
 }
 
 fn schedule_frame(raf: &Rc<RefCell<Option<Closure<dyn FnMut(f64)>>>>) {
-    let Some(window) = web_sys::window() else { return };
+    let Some(window) = web_sys::window() else {
+        return;
+    };
     let borrow = raf.borrow();
     if let Some(cb) = borrow.as_ref() {
         let _ = window.request_animation_frame(cb.as_ref().unchecked_ref());
@@ -685,7 +686,10 @@ fn init_cpu_renderer(app: &mut WasmApp) -> Result<(), String> {
             )
             .map_err(|_| "listener mousedown failed")?;
         canvas
-            .add_event_listener_with_callback("mouseup", listeners.on_mouse_up.as_ref().unchecked_ref())
+            .add_event_listener_with_callback(
+                "mouseup",
+                listeners.on_mouse_up.as_ref().unchecked_ref(),
+            )
             .map_err(|_| "listener mouseup failed")?;
     }
 
@@ -852,7 +856,8 @@ impl WebHandle {
 
         // Build the VDOM with the head-element sink, then the Blitz document —
         // the same sequence as dioxus-native's `resumed`.
-        let head_ops: Rc<RefCell<VecDeque<crate::offscreen::HeadOp>>> = Rc::new(RefCell::new(VecDeque::new()));
+        let head_ops: Rc<RefCell<VecDeque<crate::offscreen::HeadOp>>> =
+            Rc::new(RefCell::new(VecDeque::new()));
         let vdom = VirtualDom::new(App);
         let sink = crate::offscreen::HeadSink {
             ops: head_ops.clone(),
@@ -1013,18 +1018,16 @@ impl WebHandle {
                                         "renderer active (vello/wgpu → canvas) surface={surface_ms:.0}ms reused={vello_reused}"
                                     );
                                 }
-                                None => {
-                                    match init_cpu_renderer(&mut app) {
-                                        Ok(()) => {
-                                            app.dirty = true;
-                                            app.dirty_reasons |= dirty::RENDERER;
-                                        }
-                                        Err(msg) => {
-                                            app.renderer = RendererState::Failed;
-                                            log::error!(target: NS, "vello_cpu fallback failed: {msg}");
-                                        }
+                                None => match init_cpu_renderer(&mut app) {
+                                    Ok(()) => {
+                                        app.dirty = true;
+                                        app.dirty_reasons |= dirty::RENDERER;
                                     }
-                                }
+                                    Err(msg) => {
+                                        app.renderer = RendererState::Failed;
+                                        log::error!(target: NS, "vello_cpu fallback failed: {msg}");
+                                    }
+                                },
                             }
                         }
                         Err(e) => {

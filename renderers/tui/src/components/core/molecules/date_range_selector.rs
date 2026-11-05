@@ -30,6 +30,10 @@ impl PatternRenderer for DateRangeSelectorRenderer {
         _ctx: &mut RenderContext<'_>,
     ) {
         use ratatui::widgets::{Block, Borders, Paragraph};
-        frame.render_widget(Paragraph::new("[Today] [7d] [30d] [All]").block(Block::default().borders(Borders::ALL)), area);
+        frame.render_widget(
+            Paragraph::new("[Today] [7d] [30d] [All]")
+                .block(Block::default().borders(Borders::ALL)),
+            area,
+        );
     }
 }

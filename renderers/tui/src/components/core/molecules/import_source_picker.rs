@@ -36,9 +36,24 @@ impl PatternRenderer for ImportSourcePickerRenderer {
             let id = get_string_or(&source, "id", "?");
             let label = get_string_or(&source, "label", &id);
             let description = get_string_or(&source, "description", "");
-            if description.is_empty() { lines.push(Line::from(format!("\u{2022} {}", label))); }
-            else { lines.push(Line::from(format!("\u{2022} {} \u{2014} {}", label, description))); }
+            if description.is_empty() {
+                lines.push(Line::from(format!("\u{2022} {}", label)));
+            } else {
+                lines.push(Line::from(format!(
+                    "\u{2022} {} \u{2014} {}",
+                    label, description
+                )));
+            }
         }
-        frame.render_widget(Paragraph::new(lines).block(Block::default().borders(Borders::ALL).title(get_string_or(props, "title", "Import from"))), area);
+        frame.render_widget(
+            Paragraph::new(lines).block(
+                Block::default().borders(Borders::ALL).title(get_string_or(
+                    props,
+                    "title",
+                    "Import from",
+                )),
+            ),
+            area,
+        );
     }
 }

@@ -33,14 +33,40 @@ impl PatternRenderer for VersionDiffRenderer {
         let mut text = String::new();
         for hunk in get_array(props, "hunks") {
             let o = hunk.as_object();
-            text.push_str(o.and_then(|o| o.get("header")).and_then(|v| v.as_str()).unwrap_or(""));
+            text.push_str(
+                o.and_then(|o| o.get("header"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or(""),
+            );
             text.push('\n');
-            for line in o.and_then(|o| o.get("lines")).and_then(|v| v.as_array()).cloned().unwrap_or_default() {
+            for line in o
+                .and_then(|o| o.get("lines"))
+                .and_then(|v| v.as_array())
+                .cloned()
+                .unwrap_or_default()
+            {
                 let lo = line.as_object();
-                let prefix = match lo.and_then(|o| o.get("type")).and_then(|v| v.as_str()).unwrap_or("") { "added" => "+", "removed" => "-", _ => " " };
-                text.push_str(&format!("{} {}\n", prefix, lo.and_then(|o| o.get("content")).and_then(|v| v.as_str()).unwrap_or("")));
+                let prefix = match lo
+                    .and_then(|o| o.get("type"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                {
+                    "added" => "+",
+                    "removed" => "-",
+                    _ => " ",
+                };
+                text.push_str(&format!(
+                    "{} {}\n",
+                    prefix,
+                    lo.and_then(|o| o.get("content"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                ));
             }
         }
-        frame.render_widget(Paragraph::new(text).block(Block::default().borders(Borders::ALL).title("Diff")), area);
+        frame.render_widget(
+            Paragraph::new(text).block(Block::default().borders(Borders::ALL).title("Diff")),
+            area,
+        );
     }
 }

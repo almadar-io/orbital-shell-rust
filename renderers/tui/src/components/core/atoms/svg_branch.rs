@@ -32,7 +32,13 @@ impl PatternRenderer for SvgBranchRenderer {
         use ratatui::text::Line;
         use ratatui::widgets::Paragraph;
         let branches = get_number_or(props, "branches", 3.0) as usize;
-        let arms: String = (0..branches.min(6)).map(|_| "/").collect::<Vec<_>>().join(" ");
-        frame.render_widget(Paragraph::new(Line::from(format!("[branch {}]  |{}", branches, arms))), area);
+        let arms: String = (0..branches.min(6))
+            .map(|_| "/")
+            .collect::<Vec<_>>()
+            .join(" ");
+        frame.render_widget(
+            Paragraph::new(Line::from(format!("[branch {}]  |{}", branches, arms))),
+            area,
+        );
     }
 }

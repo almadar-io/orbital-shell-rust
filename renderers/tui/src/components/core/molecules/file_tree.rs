@@ -31,8 +31,29 @@ impl PatternRenderer for FileTreeRenderer {
     ) {
         use ratatui::text::Line;
         use ratatui::widgets::{Block, Borders, Paragraph};
-        let nodes = { let mut n = get_array(props, "nodes"); if n.is_empty() { n = get_array(props, "files"); } n };
-        let lines: Vec<Line> = nodes.iter().map(|n| Line::from(n.as_object().and_then(|o| o.get("name")).and_then(|v| v.as_str()).or_else(|| n.as_str()).unwrap_or("").to_string())).collect();
-        frame.render_widget(Paragraph::new(lines).block(Block::default().borders(Borders::ALL).title("Files")), area);
+        let nodes = {
+            let mut n = get_array(props, "nodes");
+            if n.is_empty() {
+                n = get_array(props, "files");
+            }
+            n
+        };
+        let lines: Vec<Line> = nodes
+            .iter()
+            .map(|n| {
+                Line::from(
+                    n.as_object()
+                        .and_then(|o| o.get("name"))
+                        .and_then(|v| v.as_str())
+                        .or_else(|| n.as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                )
+            })
+            .collect();
+        frame.render_widget(
+            Paragraph::new(lines).block(Block::default().borders(Borders::ALL).title("Files")),
+            area,
+        );
     }
 }

@@ -35,14 +35,27 @@ impl PatternRenderer for ReflectionBlockRenderer {
         let prompt = get_string_or(props, "prompt", "Reflect on what you just learned.");
         let saved = get_string_or(props, "savedNote", "");
         let mut lines = vec![
-            Line::from(Span::styled("⏸ Pause & Reflect", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))),
+            Line::from(Span::styled(
+                "⏸ Pause & Reflect",
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            )),
             Line::from(prompt),
         ];
         if !saved.is_empty() {
-            lines.push(Line::from(Span::styled(format!("✓ {}", saved), Style::default().fg(Color::DarkGray))));
+            lines.push(Line::from(Span::styled(
+                format!("✓ {}", saved),
+                Style::default().fg(Color::DarkGray),
+            )));
         }
         frame.render_widget(
-            Paragraph::new(Text::from(lines)).block(Block::default().borders(Borders::ALL).border_style(Style::default().fg(Color::Yellow)).title("Reflect")),
+            Paragraph::new(Text::from(lines)).block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(Color::Yellow))
+                    .title("Reflect"),
+            ),
             area,
         );
     }

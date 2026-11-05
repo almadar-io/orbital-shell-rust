@@ -33,6 +33,9 @@ impl PatternRenderer for SvgConnectionRenderer {
         use ratatui::widgets::Paragraph;
         let variant = get_string_or(props, "variant", "straight");
         let sym = if variant.contains("curved") { "~" } else { "-" };
-        frame.render_widget(Paragraph::new(Line::from(format!("●{}{}{}●", sym, sym, sym))), area);
+        frame.render_widget(
+            Paragraph::new(Line::from(format!("●{}{}{}●", sym, sym, sym))),
+            area,
+        );
     }
 }

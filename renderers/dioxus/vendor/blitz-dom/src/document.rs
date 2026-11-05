@@ -1,8 +1,8 @@
 use crate::events::handle_dom_event;
 use crate::font_metrics::BlitzFontMetricsProvider;
 use crate::layout::construct::{
-    ConstructionTask, ConstructionTaskData, ConstructionTaskResult, ConstructionTaskResultData,
-    build_inline_layout_into, collect_layout_children,
+    build_inline_layout_into, collect_layout_children, ConstructionTask, ConstructionTaskData,
+    ConstructionTaskResult, ConstructionTaskResultData,
 };
 use crate::layout::damage::{ALL_DAMAGE, CONSTRUCT_BOX, CONSTRUCT_DESCENDENT, CONSTRUCT_FC};
 use crate::mutator::ViewportMut;
@@ -13,12 +13,12 @@ use crate::traversal::TreeTraverser;
 use crate::url::DocumentUrl;
 use crate::util::ImageType;
 use crate::{
-    DEFAULT_CSS, DocumentConfig, DocumentMutator, DummyHtmlParserProvider, ElementData,
-    EventDriver, HtmlParserProvider, NON_INCREMENTAL, Node, NodeData, NoopEventHandler,
-    TextNodeData,
+    DocumentConfig, DocumentMutator, DummyHtmlParserProvider, ElementData, EventDriver,
+    HtmlParserProvider, Node, NodeData, NoopEventHandler, TextNodeData, DEFAULT_CSS,
+    NON_INCREMENTAL,
 };
 use blitz_traits::devtools::DevtoolSettings;
-use blitz_traits::events::{DomEvent, HitResult, UiEvent};
+use blitz_traits::events::{BlitzDragTransfer, DomEvent, HitResult, UiEvent};
 use blitz_traits::navigation::{DummyNavigationProvider, NavigationProvider};
 use blitz_traits::net::{DummyNetProvider, NetProvider, Request, SharedProvider};
 use blitz_traits::shell::{ColorScheme, DummyShellProvider, ShellProvider, Viewport};
@@ -27,7 +27,7 @@ use debug_timer::debug_timer;
 use linebender_resource_handle::Blob;
 use markup5ever::local_name;
 use parley::{FontContext, LayoutContext};
-use selectors::{Element, matching::QuirksMode};
+use selectors::{matching::QuirksMode, Element};
 use slab::Slab;
 use std::any::Any;
 use std::cell::RefCell;
@@ -37,18 +37,18 @@ use std::str::FromStr;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::task::Context as TaskContext;
-use style::Atom;
 use style::animation::DocumentAnimationSet;
 use style::attr::{AttrIdentifier, AttrValue};
 use style::data::{ElementData as StyloElementData, ElementStyles};
 use style::media_queries::MediaType;
-use style::properties::ComputedValues;
 use style::properties::style_structs::Font;
+use style::properties::ComputedValues;
 use style::queries::values::PrefersColorScheme;
 use style::selector_parser::ServoElementSnapshot;
 use style::servo_arc::Arc as ServoArc;
-use style::values::GenericAtomIdent;
 use style::values::computed::Overflow;
+use style::values::GenericAtomIdent;
+use style::Atom;
 use style::{
     dom::{TDocument, TNode},
     media_queries::{Device, MediaList},
@@ -74,6 +74,10 @@ use style::selector_parser::RestyleDamage;
 /// Abstraction over wrappers around [`BaseDocument`] to allow for them all to
 /// be driven by [`blitz-shell`](https://docs.rs/blitz-shell)
 pub trait Document: Deref<Target = BaseDocument> + DerefMut + 'static {
+    fn load_resource(&mut self, resource: Resource) {
+        self.deref_mut().load_resource(resource);
+    }
+
     /// Update the [`Document`] in response to a [`UiEvent`] (click, keypress, etc)
     fn handle_ui_event(&mut self, event: UiEvent) {
         let mut driver = EventDriver::new((*self).mutate(), NoopEventHandler);
@@ -138,6 +142,8 @@ pub struct BaseDocument {
     pub(crate) active_node_id: Option<usize>,
     /// The node which recieved a mousedown event (if any)
     pub(crate) mousedown_node_id: Option<usize>,
+    pub(crate) drag_candidate: Option<(usize, f32, f32)>,
+    pub(crate) drag_active: Option<(usize, Option<usize>, BlitzDragTransfer, bool)>,
 
     /// Whether there are active CSS animations/transitions (so we should re-render every frame)
     pub(crate) has_active_animations: bool,
@@ -197,27 +203,13 @@ impl BaseDocument {
 
         let id = ID_GENERATOR.fetch_add(1, Ordering::SeqCst);
 
-        let font_ctx = config
-            .font_ctx
-            // .map(|mut font_ctx| {
-            //     font_ctx.collection.make_shared();
-            //     font_ctx.source_cache.make_shared();
-            //     font_ctx
-            // })
-            .unwrap_or_else(|| {
-                // let mut font_ctx = FontContext {
-                //     source_cache: SourceCache::new_shared(),
-                //     collection: Collection::new(CollectionOptions {
-                //         shared: true,
-                //         system_fonts: true,
-                //     }),
-                // };
-                let mut font_ctx = FontContext::default();
-                font_ctx
-                    .collection
-                    .register_fonts(Blob::new(Arc::new(crate::BULLET_FONT) as _), None);
-                font_ctx
-            });
+        let mut font_ctx = config.font_ctx.unwrap_or_default();
+        font_ctx
+            .collection
+            .register_fonts(Blob::new(Arc::new(crate::BULLET_FONT) as _), None);
+        font_ctx
+            .collection
+            .register_fonts(Blob::new(Arc::new(crate::SYMBOL_FONT) as _), None);
         let font_ctx = Arc::new(Mutex::new(font_ctx));
 
         let viewport = config.viewport.unwrap_or_default();
@@ -274,6 +266,8 @@ impl BaseDocument {
             focus_node_id: None,
             active_node_id: None,
             mousedown_node_id: None,
+            drag_candidate: None,
+            drag_active: None,
             has_active_animations: false,
             has_canvas: false,
             changed_nodes: HashSet::new(),
@@ -492,7 +486,7 @@ impl BaseDocument {
 
     /// Whether the document has been mutated
     pub fn has_changes(&self) -> bool {
-        self.changed_nodes.is_empty()
+        !self.changed_nodes.is_empty()
     }
 
     pub fn create_text_node(&mut self, text: &str) -> usize {
@@ -692,6 +686,7 @@ impl BaseDocument {
                     }
                 }
             }
+            Resource::ImageError(_, _) => {}
             #[cfg(feature = "svg")]
             Resource::Svg(node_id, kind, tree) => {
                 let node = self.get_node_mut(node_id).unwrap();
@@ -846,6 +841,7 @@ impl BaseDocument {
 
         // Fix up tree for layout (insert anonymous blocks as necessary, etc)
         self.resolve_layout_children();
+        self.hoist_fixed_layout_children();
         timer.record_time("construct");
 
         self.resolve_deferred_tasks();
@@ -853,6 +849,7 @@ impl BaseDocument {
 
         // Merge stylo into taffy
         self.flush_styles_to_layout(root_node_id);
+        self.resolve_fixed_viewport_sizes();
         timer.record_time("flush");
 
         // Next we resolve layout with the data resolved by stlist
@@ -881,7 +878,12 @@ impl BaseDocument {
             return None;
         }
 
-        self.root_element().hit(x, y)
+        self.root_element().hit_with_viewport_scroll(
+            x,
+            y,
+            self.viewport_scroll.x as f32,
+            self.viewport_scroll.y as f32,
+        )
     }
 
     pub fn focus_next_node(&mut self) -> Option<usize> {
@@ -901,6 +903,10 @@ impl BaseDocument {
 
     pub fn set_mousedown_node_id(&mut self, node_id: Option<usize>) {
         self.mousedown_node_id = node_id;
+    }
+
+    pub fn is_dragging(&self) -> bool {
+        self.drag_active.is_some()
     }
     pub fn set_focus_to(&mut self, focus_node_id: usize) -> bool {
         if Some(focus_node_id) == self.focus_node_id {
@@ -963,7 +969,14 @@ impl BaseDocument {
     pub fn set_hover_to(&mut self, x: f32, y: f32) -> bool {
         let hit = self.hit(x, y);
         let hover_node_id = hit.map(|hit| hit.node_id);
+        self.set_hover_node(hover_node_id)
+    }
 
+    pub fn clear_hover(&mut self) -> bool {
+        self.set_hover_node(None)
+    }
+
+    fn set_hover_node(&mut self, hover_node_id: Option<usize>) -> bool {
         // Return early if the new node is the same as the already-hovered node
         if hover_node_id == self.hover_node_id {
             return false;
@@ -1069,7 +1082,15 @@ impl BaseDocument {
             let mut damage = doc.nodes[node_id].damage().unwrap_or(ALL_DAMAGE);
             let _flags = doc.nodes[node_id].flags;
 
-            if NON_INCREMENTAL || damage.intersects(CONSTRUCT_FC | CONSTRUCT_BOX) {
+            #[cfg(feature = "svg")]
+            let svg_restyle = !damage.is_empty()
+                && doc.nodes[node_id]
+                    .data
+                    .is_element_with_tag_name(&local_name!("svg"));
+            #[cfg(not(feature = "svg"))]
+            let svg_restyle = false;
+
+            if NON_INCREMENTAL || svg_restyle || damage.intersects(CONSTRUCT_FC | CONSTRUCT_BOX) {
                 //} || flags.contains(NodeFlags::IS_INLINE_ROOT) {
                 let mut layout_children = Vec::new();
                 let mut anonymous_block: Option<usize> = None;
@@ -1108,6 +1129,95 @@ impl BaseDocument {
             }
 
             doc.nodes[node_id].set_damage(damage);
+        }
+    }
+
+    fn hoist_fixed_layout_children(&mut self) {
+        use style::properties::generated::longhands::position::computed_value::T as Position;
+
+        let root = self.root_element().id;
+        let fixed: Vec<_> = self
+            .nodes
+            .iter()
+            .filter_map(|(id, node)| {
+                (id != root
+                    && node
+                        .primary_styles()
+                        .is_some_and(|style| style.clone_position() == Position::Fixed)
+                    && node
+                        .layout_parent
+                        .get()
+                        .is_some_and(|parent| parent != root))
+                .then_some(id)
+            })
+            .collect();
+
+        for id in fixed {
+            let parent = self.nodes[id].layout_parent.get().unwrap();
+            if let Some(children) = self.nodes[parent].layout_children.borrow_mut().as_mut() {
+                children.retain(|child| *child != id);
+            }
+            if let Some(children) = self.nodes[parent].paint_children.borrow_mut().as_mut() {
+                children.retain(|child| *child != id);
+            }
+            self.nodes[id].layout_parent.set(Some(root));
+            self.nodes[root]
+                .layout_children
+                .borrow_mut()
+                .get_or_insert_with(Vec::new)
+                .push(id);
+            self.nodes[root]
+                .paint_children
+                .borrow_mut()
+                .get_or_insert_with(Vec::new)
+                .push(id);
+        }
+    }
+
+    fn resolve_fixed_viewport_sizes(&mut self) {
+        use style::properties::generated::longhands::position::computed_value::T as Position;
+
+        let size = self.stylist.device().au_viewport_size();
+        let viewport_width = size.width.to_f32_px();
+        let viewport_height = size.height.to_f32_px();
+        for (_, node) in self.nodes.iter_mut() {
+            if !node
+                .primary_styles()
+                .is_some_and(|style| style.clone_position() == Position::Fixed)
+            {
+                continue;
+            }
+            let style = &mut node.style;
+            if style.size.width.is_auto() {
+                if let (Some(left), Some(right)) = (
+                    style
+                        .inset
+                        .left
+                        .resolve_to_option(viewport_width, crate::layout::resolve_calc_value),
+                    style
+                        .inset
+                        .right
+                        .resolve_to_option(viewport_width, crate::layout::resolve_calc_value),
+                ) {
+                    style.size.width =
+                        taffy::Dimension::length((viewport_width - left - right).max(0.0));
+                }
+            }
+            if style.size.height.is_auto() {
+                if let (Some(top), Some(bottom)) = (
+                    style
+                        .inset
+                        .top
+                        .resolve_to_option(viewport_height, crate::layout::resolve_calc_value),
+                    style
+                        .inset
+                        .bottom
+                        .resolve_to_option(viewport_height, crate::layout::resolve_calc_value),
+                ) {
+                    style.size.height =
+                        taffy::Dimension::length((viewport_height - top - bottom).max(0.0));
+                }
+            }
         }
     }
 
@@ -1390,5 +1500,30 @@ impl AsRef<BaseDocument> for BaseDocument {
 impl AsMut<BaseDocument> for BaseDocument {
     fn as_mut(&mut self) -> &mut BaseDocument {
         self
+    }
+}
+
+#[cfg(test)]
+mod accessibility_change_tests {
+    use super::{BaseDocument, DocumentConfig};
+
+    #[test]
+    fn creating_text_marks_document_changed() {
+        let mut doc = BaseDocument::new(DocumentConfig::default());
+        doc.changed_nodes.clear();
+        assert!(!doc.has_changes());
+
+        doc.create_text_node("task");
+        assert!(doc.has_changes());
+    }
+
+    #[test]
+    fn native_document_bundles_symbol_font_for_action_icons() {
+        let doc = BaseDocument::new(DocumentConfig::default());
+        let mut font_ctx = doc.font_ctx.lock().unwrap();
+        assert!(font_ctx
+            .collection
+            .family_by_name("Noto Sans Symbols 2")
+            .is_some());
     }
 }

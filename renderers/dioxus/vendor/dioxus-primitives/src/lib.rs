@@ -245,6 +245,14 @@ fn use_animated_open(
     id: impl Readable<Target = String> + Copy + 'static,
     open: impl Readable<Target = bool> + Copy + 'static,
 ) -> impl Fn() -> bool + Copy {
+    use_animated_open_with(id, open, false)
+}
+
+fn use_animated_open_with(
+    id: impl Readable<Target = String> + Copy + 'static,
+    open: impl Readable<Target = bool> + Copy + 'static,
+    instant_close: bool,
+) -> impl Fn() -> bool + Copy {
     let animating = use_signal(|| false);
 
     // Show in dom is a few frames behind the open signal to allow for the animation to start.
@@ -252,6 +260,9 @@ fn use_animated_open(
     let mut show_in_dom = use_signal(|| false);
 
     use_effect(move || {
+        if instant_close {
+            return;
+        }
         let open = open.cloned();
         if open {
             show_in_dom.set(open);
@@ -276,7 +287,13 @@ fn use_animated_open(
         }
     });
 
-    move || show_in_dom() || animating()
+    move || {
+        if instant_close {
+            open.cloned()
+        } else {
+            show_in_dom() || animating()
+        }
+    }
 }
 
 /// The side where the content will be displayed relative to the trigger

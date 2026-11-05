@@ -39,15 +39,32 @@ impl PatternRenderer for GanttRenderer {
         let lines: Vec<Line> = if rows.is_empty() {
             vec![Line::from("No scheduled items")]
         } else {
-            rows.iter().map(|row| {
-                let obj = row.as_object();
-                let title = obj.and_then(|o| o.get(&title_field)).and_then(|v| v.as_str()).unwrap_or("");
-                let status = obj.and_then(|o| o.get(&status_field)).and_then(|v| v.as_str()).unwrap_or("");
-                let start = obj.and_then(|o| o.get(&start_field)).map(format_value).unwrap_or_default();
-                let end = obj.and_then(|o| o.get(&end_field)).map(format_value).unwrap_or_default();
-                Line::from(format!("{}  {} -> {}  [{}]", title, start, end, status))
-            }).collect()
+            rows.iter()
+                .map(|row| {
+                    let obj = row.as_object();
+                    let title = obj
+                        .and_then(|o| o.get(&title_field))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
+                    let status = obj
+                        .and_then(|o| o.get(&status_field))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
+                    let start = obj
+                        .and_then(|o| o.get(&start_field))
+                        .map(format_value)
+                        .unwrap_or_default();
+                    let end = obj
+                        .and_then(|o| o.get(&end_field))
+                        .map(format_value)
+                        .unwrap_or_default();
+                    Line::from(format!("{}  {} -> {}  [{}]", title, start, end, status))
+                })
+                .collect()
         };
-        frame.render_widget(Paragraph::new(lines).block(Block::default().borders(Borders::ALL).title("Gantt")), area);
+        frame.render_widget(
+            Paragraph::new(lines).block(Block::default().borders(Borders::ALL).title("Gantt")),
+            area,
+        );
     }
 }

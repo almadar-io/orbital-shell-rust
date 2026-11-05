@@ -31,6 +31,9 @@ impl PatternRenderer for FilterPillRenderer {
     ) {
         use ratatui::text::Line;
         use ratatui::widgets::Paragraph;
-        frame.render_widget(Paragraph::new(Line::from(get_string_or(props, "label", "Filter"))), area);
+        frame.render_widget(
+            Paragraph::new(Line::from(get_string_or(props, "label", "Filter"))),
+            area,
+        );
     }
 }

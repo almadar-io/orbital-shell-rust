@@ -29,6 +29,5 @@ impl PatternRenderer for SpacerRenderer {
         _entity: Option<&Value>,
         _ctx: &mut RenderContext<'_>,
     ) {
-        
     }
 }

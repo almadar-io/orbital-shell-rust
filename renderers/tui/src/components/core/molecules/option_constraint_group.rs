@@ -31,7 +31,22 @@ impl PatternRenderer for OptionConstraintGroupRenderer {
     ) {
         use ratatui::text::Line;
         use ratatui::widgets::{Block, Borders, Paragraph};
-        let lines: Vec<Line> = get_array(props, "options").iter().map(|o| Line::from(format!("[ ] {}", o.as_object().and_then(|x| x.get("label")).and_then(|v| v.as_str()).or_else(|| o.as_str()).unwrap_or("")))).collect();
-        frame.render_widget(Paragraph::new(lines).block(Block::default().borders(Borders::ALL)), area);
+        let lines: Vec<Line> = get_array(props, "options")
+            .iter()
+            .map(|o| {
+                Line::from(format!(
+                    "[ ] {}",
+                    o.as_object()
+                        .and_then(|x| x.get("label"))
+                        .and_then(|v| v.as_str())
+                        .or_else(|| o.as_str())
+                        .unwrap_or("")
+                ))
+            })
+            .collect();
+        frame.render_widget(
+            Paragraph::new(lines).block(Block::default().borders(Borders::ALL)),
+            area,
+        );
     }
 }

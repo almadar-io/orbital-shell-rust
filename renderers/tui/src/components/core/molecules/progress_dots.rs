@@ -33,7 +33,9 @@ impl PatternRenderer for ProgressDotsRenderer {
         use ratatui::widgets::Paragraph;
         let total = get_number_or(props, "total", 3.0) as usize;
         let current = get_number_or(props, "current", 0.0) as usize;
-        let dots: String = (0..total).map(|i| if i <= current { '●' } else { '○' }).collect();
+        let dots: String = (0..total)
+            .map(|i| if i <= current { '●' } else { '○' })
+            .collect();
         frame.render_widget(Paragraph::new(Line::from(dots)), area);
     }
 }

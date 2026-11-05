@@ -30,6 +30,9 @@ impl PatternRenderer for PullToRefreshRenderer {
         _ctx: &mut RenderContext<'_>,
     ) {
         use ratatui::widgets::Paragraph;
-        frame.render_widget(Paragraph::new(get_string_or(props, "hint", "Pull to refresh")), area);
+        frame.render_widget(
+            Paragraph::new(get_string_or(props, "hint", "Pull to refresh")),
+            area,
+        );
     }
 }

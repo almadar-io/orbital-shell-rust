@@ -31,7 +31,24 @@ impl PatternRenderer for ChangeListRenderer {
     ) {
         use ratatui::text::Line;
         use ratatui::widgets::{Block, Borders, Paragraph};
-        let lines: Vec<Line> = get_array(props, "changes").iter().map(|c| { let o = c.as_object(); Line::from(format!("{} {}", o.and_then(|o| o.get("type")).and_then(|v| v.as_str()).unwrap_or(""), o.and_then(|o| o.get("title")).and_then(|v| v.as_str()).unwrap_or(""))) }).collect();
-        frame.render_widget(Paragraph::new(lines).block(Block::default().borders(Borders::ALL).title("Changes")), area);
+        let lines: Vec<Line> = get_array(props, "changes")
+            .iter()
+            .map(|c| {
+                let o = c.as_object();
+                Line::from(format!(
+                    "{} {}",
+                    o.and_then(|o| o.get("type"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or(""),
+                    o.and_then(|o| o.get("title"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                ))
+            })
+            .collect();
+        frame.render_widget(
+            Paragraph::new(lines).block(Block::default().borders(Borders::ALL).title("Changes")),
+            area,
+        );
     }
 }

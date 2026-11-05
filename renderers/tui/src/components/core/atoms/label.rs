@@ -31,6 +31,9 @@ impl PatternRenderer for LabelRenderer {
     ) {
         use ratatui::text::Line;
         use ratatui::widgets::Paragraph;
-        frame.render_widget(Paragraph::new(Line::from(get_string_or(props, "text", ""))), area);
+        frame.render_widget(
+            Paragraph::new(Line::from(get_string_or(props, "text", ""))),
+            area,
+        );
     }
 }

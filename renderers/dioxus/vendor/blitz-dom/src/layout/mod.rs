@@ -9,13 +9,13 @@ use crate::{document::BaseDocument, node::Node};
 use markup5ever::local_name;
 use std::cell::Ref;
 use std::sync::Arc;
-use style::Atom;
-use style::values::computed::CSSPixelLength;
 use style::values::computed::length_percentage::CalcLengthPercentage;
+use style::values::computed::CSSPixelLength;
+use style::Atom;
 use taffy::{
-    CollapsibleMarginSet, FlexDirection, LayoutPartialTree, NodeId, ResolveOrZero, RoundTree,
-    Style, TraversePartialTree, TraverseTree, compute_block_layout, compute_cached_layout,
-    compute_flexbox_layout, compute_grid_layout, compute_leaf_layout, prelude::*,
+    compute_block_layout, compute_cached_layout, compute_flexbox_layout, compute_grid_layout,
+    compute_leaf_layout, prelude::*, CollapsibleMarginSet, FlexDirection, LayoutPartialTree,
+    NodeId, ResolveOrZero, RoundTree, Style, TraversePartialTree, TraverseTree,
 };
 
 pub(crate) mod construct;
@@ -25,7 +25,7 @@ pub(crate) mod list;
 pub(crate) mod replaced;
 pub(crate) mod table;
 
-use self::replaced::{ReplacedContext, replaced_measure_function};
+use self::replaced::{replaced_measure_function, ReplacedContext};
 use self::table::TableTreeWrapper;
 
 pub(crate) fn resolve_calc_value(calc_ptr: *const (), parent_size: f32) -> f32 {

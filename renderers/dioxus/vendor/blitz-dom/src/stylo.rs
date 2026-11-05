@@ -4,19 +4,18 @@
 use std::ptr::NonNull;
 use std::sync::atomic::Ordering;
 
-use crate::layout::damage::ALL_DAMAGE;
 use crate::layout::damage::compute_layout_damage;
+use crate::layout::damage::ALL_DAMAGE;
 use crate::node::Node;
 use crate::node::NodeData;
 use atomic_refcell::{AtomicRef, AtomicRefMut};
-use markup5ever::{LocalName, LocalNameStaticSet, Namespace, NamespaceStaticSet, local_name};
+use markup5ever::{local_name, LocalName, LocalNameStaticSet, Namespace, NamespaceStaticSet};
 use selectors::{
-    Element, OpaqueElement,
     attr::{AttrSelectorOperation, AttrSelectorOperator, NamespaceConstraint},
     matching::{ElementSelectorFlags, MatchingContext, VisitedHandlingMode},
     sink::Push,
+    Element, OpaqueElement,
 };
-use style::CaseSensitivityExt;
 use style::animation::AnimationSetKey;
 use style::animation::AnimationState;
 use style::applicable_declarations::ApplicableDeclarationBlock;
@@ -29,10 +28,10 @@ use style::selector_parser::PseudoElement;
 use style::selector_parser::RestyleDamage;
 use style::stylesheets::layer_rule::LayerOrder;
 use style::stylesheets::scope_rule::ImplicitScopeRoot;
-use style::values::AtomString;
 use style::values::computed::Percentage;
+use style::values::AtomString;
+use style::CaseSensitivityExt;
 use style::{
-    Atom,
     context::{
         QuirksMode, RegisteredSpeculativePainter, RegisteredSpeculativePainters,
         SharedStyleContext, StyleContext,
@@ -47,6 +46,7 @@ use style::{
     traversal::{DomTraversal, PerLevelTraversalData},
     traversal_flags::TraversalFlags,
     values::{AtomIdent, GenericAtomIdent},
+    Atom,
 };
 use style_dom::ElementState;
 
@@ -894,7 +894,7 @@ impl<'a> TElement for BlitzNode<'a> {
             {
                 let is_table = *tag == local_name!("table");
                 if let Some(width) = parse_size_attr(value, |v| !is_table || *v != 0.0) {
-                    use style::values::generics::{NonNegative, length::Size};
+                    use style::values::generics::{length::Size, NonNegative};
 
                     push_style(PropertyDeclaration::Width(Size::LengthPercentage(
                         NonNegative(width),
@@ -909,7 +909,7 @@ impl<'a> TElement for BlitzNode<'a> {
                     || *tag == local_name!("tfoot"))
             {
                 if let Some(height) = parse_size_attr(value, |_| true) {
-                    use style::values::generics::{NonNegative, length::Size};
+                    use style::values::generics::{length::Size, NonNegative};
                     push_style(PropertyDeclaration::Height(Size::LengthPercentage(
                         NonNegative(height),
                     )));

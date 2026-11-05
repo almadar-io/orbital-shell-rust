@@ -31,6 +31,9 @@ impl PatternRenderer for ThemeToggleRenderer {
     ) {
         use ratatui::widgets::{Block, Borders, Paragraph};
         let _ = props;
-        frame.render_widget(Paragraph::new("🌙").block(Block::default().borders(Borders::ALL)), area);
+        frame.render_widget(
+            Paragraph::new("🌙").block(Block::default().borders(Borders::ALL)),
+            area,
+        );
     }
 }

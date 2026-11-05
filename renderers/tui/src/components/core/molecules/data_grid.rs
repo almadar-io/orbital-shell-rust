@@ -32,11 +32,38 @@ impl PatternRenderer for DataGridRenderer {
         use ratatui::style::{Modifier, Style};
         use ratatui::text::{Line, Span, Text};
         use ratatui::widgets::{Block, Borders, Paragraph};
-        let rows = { let mut r = get_array(props, "rows"); if r.is_empty() { r = get_array(props, "items"); } r };
+        let rows = {
+            let mut r = get_array(props, "rows");
+            if r.is_empty() {
+                r = get_array(props, "items");
+            }
+            r
+        };
         let cols = get_columns(props, &rows);
-        let header = cols.iter().map(|c| c.as_object().and_then(|o| o.get("label").or_else(|| o.get("header")).or_else(|| o.get("key"))).and_then(|v| v.as_str()).unwrap_or("").to_string()).collect::<Vec<_>>().join(" | ");
-        let mut lines: Vec<Line> = vec![Line::from(Span::styled(header, Style::default().add_modifier(Modifier::BOLD)))];
+        let header = cols
+            .iter()
+            .map(|c| {
+                c.as_object()
+                    .and_then(|o| {
+                        o.get("label")
+                            .or_else(|| o.get("header"))
+                            .or_else(|| o.get("key"))
+                    })
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string()
+            })
+            .collect::<Vec<_>>()
+            .join(" | ");
+        let mut lines: Vec<Line> = vec![Line::from(Span::styled(
+            header,
+            Style::default().add_modifier(Modifier::BOLD),
+        ))];
         lines.push(Line::from(format!("{} row(s)", rows.len())));
-        frame.render_widget(Paragraph::new(Text::from(lines)).block(Block::default().borders(Borders::ALL).title("Data Grid")), area);
+        frame.render_widget(
+            Paragraph::new(Text::from(lines))
+                .block(Block::default().borders(Borders::ALL).title("Data Grid")),
+            area,
+        );
     }
 }

@@ -32,7 +32,21 @@ impl PatternRenderer for ViolationAlertRenderer {
         use ratatui::style::{Color, Style};
         use ratatui::text::Line;
         use ratatui::widgets::{Block, Borders, Paragraph};
-        let message = props.as_object().and_then(|o| o.get("violation")).and_then(|v| v.as_object()).and_then(|o| o.get("message")).and_then(|v| v.as_str()).map(|s| s.to_string()).unwrap_or_else(|| get_string_or(props, "message", ""));
-        frame.render_widget(Paragraph::new(Line::from(message)).block(Block::default().borders(Borders::ALL).border_style(Style::default().fg(Color::Yellow))), area);
+        let message = props
+            .as_object()
+            .and_then(|o| o.get("violation"))
+            .and_then(|v| v.as_object())
+            .and_then(|o| o.get("message"))
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| get_string_or(props, "message", ""));
+        frame.render_widget(
+            Paragraph::new(Line::from(message)).block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(Color::Yellow)),
+            ),
+            area,
+        );
     }
 }

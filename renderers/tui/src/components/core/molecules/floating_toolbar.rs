@@ -32,12 +32,31 @@ impl PatternRenderer for FloatingToolbarRenderer {
         use ratatui::text::Line;
         use ratatui::widgets::{Block, Borders, Paragraph};
         let items = get_array(props, "items");
-        let cells: Vec<String> = items.iter().map(|it| {
-            let icon = get_string_or(it, "icon", "");
-            let label = get_string_or(it, "label", &icon);
-            let glyph = if icon.is_empty() { label.chars().next().map(|ch| ch.to_string()).unwrap_or_else(|| "?".to_string()) } else { icon_name_to_glyph(icon.as_str()).to_string() };
-            if get_bool_or(it, "active", false) { format!("[*{}]", glyph) } else { format!("[{}]", glyph) }
-        }).collect();
-        frame.render_widget(Paragraph::new(Line::from(cells.join(" "))).block(Block::default().borders(Borders::ALL).title("toolbar")), area);
+        let cells: Vec<String> = items
+            .iter()
+            .map(|it| {
+                let icon = get_string_or(it, "icon", "");
+                let label = get_string_or(it, "label", &icon);
+                let glyph = if icon.is_empty() {
+                    label
+                        .chars()
+                        .next()
+                        .map(|ch| ch.to_string())
+                        .unwrap_or_else(|| "?".to_string())
+                } else {
+                    icon_name_to_glyph(icon.as_str()).to_string()
+                };
+                if get_bool_or(it, "active", false) {
+                    format!("[*{}]", glyph)
+                } else {
+                    format!("[{}]", glyph)
+                }
+            })
+            .collect();
+        frame.render_widget(
+            Paragraph::new(Line::from(cells.join(" ")))
+                .block(Block::default().borders(Borders::ALL).title("toolbar")),
+            area,
+        );
     }
 }

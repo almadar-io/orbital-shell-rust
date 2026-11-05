@@ -31,11 +31,20 @@ impl PatternRenderer for DataListRenderer {
     ) {
         use ratatui::text::Line;
         use ratatui::widgets::{Block, Borders, Paragraph};
-        let rows = { let mut r = get_array(props, "rows"); if r.is_empty() { r = get_array(props, "items"); } r };
+        let rows = {
+            let mut r = get_array(props, "rows");
+            if r.is_empty() {
+                r = get_array(props, "items");
+            }
+            r
+        };
         let mut lines: Vec<Line> = Vec::new();
         for row in &rows {
             lines.push(Line::from(format_value(row)));
         }
-        frame.render_widget(Paragraph::new(lines).block(Block::default().borders(Borders::ALL).title("List")), area);
+        frame.render_widget(
+            Paragraph::new(lines).block(Block::default().borders(Borders::ALL).title("List")),
+            area,
+        );
     }
 }

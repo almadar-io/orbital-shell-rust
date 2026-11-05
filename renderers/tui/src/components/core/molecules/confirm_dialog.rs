@@ -33,6 +33,10 @@ impl PatternRenderer for ConfirmDialogRenderer {
         use ratatui::widgets::{Block, Borders, Paragraph};
         let title = get_string_or(props, "title", "Confirm");
         let message = get_string_or(props, "message", "Are you sure?");
-        frame.render_widget(Paragraph::new(vec![Line::from(message), Line::from("[Cancel] [Confirm]")]).block(Block::default().borders(Borders::ALL).title(title)), area);
+        frame.render_widget(
+            Paragraph::new(vec![Line::from(message), Line::from("[Cancel] [Confirm]")])
+                .block(Block::default().borders(Borders::ALL).title(title)),
+            area,
+        );
     }
 }

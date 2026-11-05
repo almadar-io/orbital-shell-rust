@@ -112,7 +112,7 @@ fn coverage(renderer: Renderer) -> DesktopReply {
         Renderer::Dioxus => {
             let registry = orbital_client_dioxus::registry::default_registry();
             DesktopReply::Coverage {
-                supported: registry.coverage().into_iter().map(str::to_string).collect(),
+                supported: registry.complete_coverage().into_iter().map(str::to_string).collect(),
                 stubbed: orbital_client_dioxus::registry::STUBBED_PATTERNS.iter().map(|s| s.to_string()).collect(),
             }
         }

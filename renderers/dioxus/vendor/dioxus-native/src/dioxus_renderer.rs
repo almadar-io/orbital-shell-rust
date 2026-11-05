@@ -6,28 +6,23 @@ use anyrender::WindowRenderer;
 
 pub use anyrender_vello::{
     wgpu::{Features, Limits},
-    CustomPaintSource, VelloRendererOptions,
+    CustomPaintSource, PaintSourceRegistry, VelloRendererOptions,
 };
 
-#[cfg(not(all(target_os = "ios", target_abi = "sim")))]
 pub use anyrender_vello::VelloWindowRenderer as InnerRenderer;
 
-#[cfg(all(target_os = "ios", target_abi = "sim"))]
-pub use anyrender_vello_cpu::VelloCpuWindowRenderer as InnerRenderer;
-
-#[cfg(not(all(target_os = "ios", target_abi = "sim")))]
 pub fn use_wgpu<T: CustomPaintSource>(create_source: impl FnOnce() -> T) -> u64 {
     use dioxus_core::{consume_context, use_hook_with_cleanup};
 
-    let (_renderer, id) = use_hook_with_cleanup(
+    let (_registry, id) = use_hook_with_cleanup(
         || {
-            let renderer = consume_context::<DioxusNativeWindowRenderer>();
+            let registry = consume_context::<PaintSourceRegistry>();
             let source = Box::new(create_source());
-            let id = renderer.register_custom_paint_source(source);
-            (renderer, id)
+            let id = registry.register(source);
+            (registry, id)
         },
-        |(renderer, id)| {
-            renderer.unregister_custom_paint_source(id);
+        |(registry, id)| {
+            registry.unregister(id);
         },
     );
 
@@ -51,7 +46,6 @@ impl DioxusNativeWindowRenderer {
         Self::with_inner_renderer(vello_renderer)
     }
 
-    #[cfg(not(all(target_os = "ios", target_abi = "sim")))]
     pub fn with_features_and_limits(features: Option<Features>, limits: Option<Limits>) -> Self {
         let vello_renderer = InnerRenderer::with_options(VelloRendererOptions {
             features,
@@ -68,8 +62,11 @@ impl DioxusNativeWindowRenderer {
     }
 }
 
-#[cfg(not(all(target_os = "ios", target_abi = "sim")))]
 impl DioxusNativeWindowRenderer {
+    pub fn paint_source_registry(&self) -> PaintSourceRegistry {
+        self.inner.borrow().paint_source_registry()
+    }
+
     pub fn register_custom_paint_source(&self, source: Box<dyn CustomPaintSource>) -> u64 {
         self.inner.borrow_mut().register_custom_paint_source(source)
     }

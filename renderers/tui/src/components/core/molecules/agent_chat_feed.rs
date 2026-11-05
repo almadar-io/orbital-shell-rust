@@ -35,12 +35,29 @@ impl PatternRenderer for AgentChatFeedRenderer {
         let line = |a: &Value| -> String {
             let kind = get_string_or(a, "type", "");
             match kind.as_str() {
-                "message" => format!("{}: {}", get_string_or(a, "role", ""), get_string_or(a, "content", "")),
-                "tool_call" => format!("⚙ {} {}", get_string_or(a, "tool", ""), get_string_or(a, "argsText", "")),
+                "message" => format!(
+                    "{}: {}",
+                    get_string_or(a, "role", ""),
+                    get_string_or(a, "content", "")
+                ),
+                "tool_call" => format!(
+                    "⚙ {} {}",
+                    get_string_or(a, "tool", ""),
+                    get_string_or(a, "argsText", "")
+                ),
                 "tool_result" => {
                     let ok = get_bool_or(a, "success", false);
                     let detail = get_string_or(a, "detail", "");
-                    format!("↳ {} {}{}", get_string_or(a, "tool", ""), if ok { "✓" } else { "✗" }, if detail.is_empty() { String::new() } else { format!(" {}", detail) })
+                    format!(
+                        "↳ {} {}{}",
+                        get_string_or(a, "tool", ""),
+                        if ok { "✓" } else { "✗" },
+                        if detail.is_empty() {
+                            String::new()
+                        } else {
+                            format!(" {}", detail)
+                        }
+                    )
                 }
                 "llm_response" => format!("◌ {}", get_string_or(a, "content", "")),
                 "error" => format!("⚠ {}", get_string_or(a, "message", "")),

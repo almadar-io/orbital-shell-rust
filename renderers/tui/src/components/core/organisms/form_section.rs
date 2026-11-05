@@ -33,8 +33,18 @@ impl PatternRenderer for FormRenderer {
         use ratatui::text::{Line, Span};
         use ratatui::widgets::{Block, Borders, Paragraph};
         let mut lines: Vec<Line> = Vec::new();
-        if let Some(t) = get_string(props, "title") { lines.push(Line::from(Span::styled(t, Style::default().add_modifier(Modifier::BOLD)))); }
-        for field in get_fields(props, "fields") { lines.push(Line::from(format!("{}: ____", field.label))); }
-        frame.render_widget(Paragraph::new(lines).block(Block::default().borders(Borders::ALL)), area);
+        if let Some(t) = get_string(props, "title") {
+            lines.push(Line::from(Span::styled(
+                t,
+                Style::default().add_modifier(Modifier::BOLD),
+            )));
+        }
+        for field in get_fields(props, "fields") {
+            lines.push(Line::from(format!("{}: ____", field.label)));
+        }
+        frame.render_widget(
+            Paragraph::new(lines).block(Block::default().borders(Borders::ALL)),
+            area,
+        );
     }
 }

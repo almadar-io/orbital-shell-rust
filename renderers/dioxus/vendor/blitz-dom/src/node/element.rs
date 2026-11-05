@@ -1,15 +1,15 @@
 use cssparser::ParserInput;
-use markup5ever::{LocalName, QualName, local_name};
+use markup5ever::{local_name, LocalName, QualName};
 use parley::{ContentWidths, FontContext, LayoutContext};
 use selectors::matching::QuirksMode;
 use std::str::FromStr;
 use std::sync::Arc;
-use style::Atom;
 use style::parser::ParserContext;
 use style::properties::{Importance, PropertyDeclaration, PropertyId, SourcePropertyDeclaration};
 use style::stylesheets::{DocumentStyleSheet, Origin, UrlExtraData};
+use style::Atom;
 use style::{
-    properties::{PropertyDeclarationBlock, parse_style_attribute},
+    properties::{parse_style_attribute, PropertyDeclarationBlock},
     servo_arc::Arc as ServoArc,
     shared_lock::{Locked, SharedRwLock},
     stylesheets::CssRuleType,
@@ -103,6 +103,10 @@ impl SpecialElementData {
 }
 
 impl ElementData {
+    pub fn has_text_input_type(&self) -> bool {
+        self.attr(local_name!("type")) != Some("checkbox")
+    }
+
     pub fn new(name: QualName, attrs: Vec<Attribute>) -> Self {
         let id_attr_atom = attrs
             .iter()
@@ -438,6 +442,8 @@ impl BackgroundImageData {
 pub struct TextInputData {
     /// A parley TextEditor instance
     pub editor: Box<parley::PlainEditor<TextBrush>>,
+    /// Display-only text, kept separate from the editable value.
+    pub placeholder_editor: Box<parley::PlainEditor<TextBrush>>,
     /// Whether the input is a singleline or multiline input
     pub is_multiline: bool,
 }
@@ -452,8 +458,10 @@ impl Clone for TextInputData {
 impl TextInputData {
     pub fn new(is_multiline: bool) -> Self {
         let editor = Box::new(parley::PlainEditor::new(16.0));
+        let placeholder_editor = Box::new(parley::PlainEditor::new(16.0));
         Self {
             editor,
+            placeholder_editor,
             is_multiline,
         }
     }
@@ -468,6 +476,41 @@ impl TextInputData {
             self.editor.set_text(text);
             self.editor.driver(font_ctx, layout_ctx).refresh_layout();
         }
+    }
+
+    pub fn set_placeholder(
+        &mut self,
+        font_ctx: &mut FontContext,
+        layout_ctx: &mut LayoutContext<TextBrush>,
+        text: &str,
+    ) {
+        if self.placeholder_editor.text() != text {
+            self.placeholder_editor.set_text(text);
+            self.placeholder_editor
+                .driver(font_ctx, layout_ctx)
+                .refresh_layout();
+        }
+    }
+}
+
+#[cfg(test)]
+mod text_input_placeholder_tests {
+    use super::TextInputData;
+    use parley::{FontContext, LayoutContext};
+
+    #[test]
+    fn placeholder_never_changes_the_editable_value() {
+        let mut input = TextInputData::new(false);
+        let mut fonts = FontContext::new();
+        let mut layouts = LayoutContext::new();
+        input.set_placeholder(&mut fonts, &mut layouts, "Search building blocks");
+        assert_eq!(input.editor.text(), "");
+        assert_eq!(input.placeholder_editor.text(), "Search building blocks");
+        input.set_text(&mut fonts, &mut layouts, "typed");
+        assert_eq!(input.editor.text(), "typed");
+        assert_eq!(input.placeholder_editor.text(), "Search building blocks");
+        input.set_text(&mut fonts, &mut layouts, "");
+        assert_eq!(input.editor.text(), "");
     }
 }
 

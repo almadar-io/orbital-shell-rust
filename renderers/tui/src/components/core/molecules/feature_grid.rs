@@ -31,8 +31,28 @@ impl PatternRenderer for FeatureGridRenderer {
     ) {
         use ratatui::text::Line;
         use ratatui::widgets::{Block, Borders, Paragraph};
-        let items = { let mut i = get_array(props, "features"); if i.is_empty() { i = get_array(props, "items"); } i };
-        let lines: Vec<Line> = items.iter().map(|it| Line::from(it.as_object().and_then(|o| o.get("title")).and_then(|v| v.as_str()).unwrap_or("").to_string())).collect();
-        frame.render_widget(Paragraph::new(lines).block(Block::default().borders(Borders::ALL).title("Features")), area);
+        let items = {
+            let mut i = get_array(props, "features");
+            if i.is_empty() {
+                i = get_array(props, "items");
+            }
+            i
+        };
+        let lines: Vec<Line> = items
+            .iter()
+            .map(|it| {
+                Line::from(
+                    it.as_object()
+                        .and_then(|o| o.get("title"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                )
+            })
+            .collect();
+        frame.render_widget(
+            Paragraph::new(lines).block(Block::default().borders(Borders::ALL).title("Features")),
+            area,
+        );
     }
 }

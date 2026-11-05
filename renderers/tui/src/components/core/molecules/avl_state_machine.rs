@@ -32,25 +32,64 @@ impl PatternRenderer for AvlStateMachineRenderer {
         use ratatui::style::{Color, Modifier, Style};
         use ratatui::text::{Line, Span, Text};
         use ratatui::widgets::{Block, Borders, Paragraph};
-        let tro = props.as_object().and_then(|o| o.get("trait")).and_then(|v| v.as_object());
-        let name = tro.and_then(|o| o.get("name")).and_then(|v| v.as_str()).unwrap_or("").to_string();
-        let states = tro.and_then(|o| o.get("states")).and_then(|v| v.as_array()).map(|a| a.to_vec()).unwrap_or_default();
-        let transitions = tro.and_then(|o| o.get("transitions")).and_then(|v| v.as_array()).map(|a| a.to_vec()).unwrap_or_default();
+        let tro = props
+            .as_object()
+            .and_then(|o| o.get("trait"))
+            .and_then(|v| v.as_object());
+        let name = tro
+            .and_then(|o| o.get("name"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let states = tro
+            .and_then(|o| o.get("states"))
+            .and_then(|v| v.as_array())
+            .map(|a| a.to_vec())
+            .unwrap_or_default();
+        let transitions = tro
+            .and_then(|o| o.get("transitions"))
+            .and_then(|v| v.as_array())
+            .map(|a| a.to_vec())
+            .unwrap_or_default();
         let active = get_string_or(props, "activeState", "");
         let mut spans: Vec<Span> = Vec::new();
         for st in &states {
-            let sn = st.as_object().and_then(|o| o.get("name")).and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let style = if sn == active { Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD) } else { Style::default() };
+            let sn = st
+                .as_object()
+                .and_then(|o| o.get("name"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let style = if sn == active {
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default()
+            };
             spans.push(Span::styled(format!("[{}] ", sn), style));
         }
         let mut lines: Vec<Line> = vec![Line::from(spans)];
         for t in &transitions {
             let o = t.as_object();
-            let from = o.and_then(|o| o.get("from")).and_then(|v| v.as_str()).unwrap_or("");
-            let to = o.and_then(|o| o.get("to")).and_then(|v| v.as_str()).unwrap_or("");
-            let event = o.and_then(|o| o.get("event")).and_then(|v| v.as_str()).unwrap_or("");
+            let from = o
+                .and_then(|o| o.get("from"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let to = o
+                .and_then(|o| o.get("to"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let event = o
+                .and_then(|o| o.get("event"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
             lines.push(Line::from(format!("  {} --{}--> {}", from, event, to)));
         }
-        frame.render_widget(Paragraph::new(Text::from(lines)).block(Block::default().borders(Borders::ALL).title(name)), area);
+        frame.render_widget(
+            Paragraph::new(Text::from(lines))
+                .block(Block::default().borders(Borders::ALL).title(name)),
+            area,
+        );
     }
 }

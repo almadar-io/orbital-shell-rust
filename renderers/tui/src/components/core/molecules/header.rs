@@ -32,7 +32,19 @@ impl PatternRenderer for HeaderRenderer {
         use ratatui::style::{Modifier, Style};
         use ratatui::text::{Line, Span};
         use ratatui::widgets::{Block, Borders, Paragraph};
-        let title = get_string_or(props, "appName", ""); let title = if title.is_empty() { get_string_or(props, "title", "App") } else { title };
-        frame.render_widget(Paragraph::new(Line::from(Span::styled(title, Style::default().add_modifier(Modifier::BOLD)))).block(Block::default().borders(Borders::BOTTOM)), area);
+        let title = get_string_or(props, "appName", "");
+        let title = if title.is_empty() {
+            get_string_or(props, "title", "App")
+        } else {
+            title
+        };
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(
+                title,
+                Style::default().add_modifier(Modifier::BOLD),
+            )))
+            .block(Block::default().borders(Borders::BOTTOM)),
+            area,
+        );
     }
 }

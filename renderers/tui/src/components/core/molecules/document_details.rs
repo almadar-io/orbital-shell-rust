@@ -36,13 +36,40 @@ impl PatternRenderer for DocumentDetailsRenderer {
         let entity = props.as_object().and_then(|o| o.get("entity")).cloned();
         let mut lines: Vec<Line> = Vec::new();
         for f in &fields {
-            let fo = match f.as_object() { Some(o) => o, None => continue };
-            let name = fo.get("name").or_else(|| fo.get("key")).and_then(|v| v.as_str()).unwrap_or("");
-            if name.is_empty() { continue; }
-            let label = fo.get("label").or_else(|| fo.get("header")).and_then(|v| v.as_str()).unwrap_or(name);
-            let value = entity.as_ref().and_then(|e| e.as_object()).and_then(|e| e.get(name)).map(|v| v.as_str().map(|s| s.to_string()).or_else(|| v.as_number().map(|n| n.to_string())).or_else(|| v.as_bool().map(|b| b.to_string())).unwrap_or_else(|| "—".to_string())).unwrap_or_else(|| "—".to_string());
+            let fo = match f.as_object() {
+                Some(o) => o,
+                None => continue,
+            };
+            let name = fo
+                .get("name")
+                .or_else(|| fo.get("key"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            if name.is_empty() {
+                continue;
+            }
+            let label = fo
+                .get("label")
+                .or_else(|| fo.get("header"))
+                .and_then(|v| v.as_str())
+                .unwrap_or(name);
+            let value = entity
+                .as_ref()
+                .and_then(|e| e.as_object())
+                .and_then(|e| e.get(name))
+                .map(|v| {
+                    v.as_str()
+                        .map(|s| s.to_string())
+                        .or_else(|| v.as_number().map(|n| n.to_string()))
+                        .or_else(|| v.as_bool().map(|b| b.to_string()))
+                        .unwrap_or_else(|| "—".to_string())
+                })
+                .unwrap_or_else(|| "—".to_string());
             lines.push(Line::from(format!("{}: {}", label, value)));
         }
-        frame.render_widget(Paragraph::new(lines).block(Block::default().borders(Borders::ALL).title(title)), area);
+        frame.render_widget(
+            Paragraph::new(lines).block(Block::default().borders(Borders::ALL).title(title)),
+            area,
+        );
     }
 }

@@ -1,5 +1,5 @@
 use selectors::context::QuirksMode;
-use std::{io::Cursor, sync::Arc, sync::atomic::AtomicBool};
+use std::{io::Cursor, sync::atomic::AtomicBool, sync::Arc};
 use style::{
     font_face::{FontFaceSourceFormat, FontFaceSourceFormatKeyword, Source},
     media_queries::MediaList,
@@ -8,10 +8,10 @@ use style::{
     shared_lock::SharedRwLock,
     shared_lock::{Locked, SharedRwLockReadGuard},
     stylesheets::{
+        import_rule::{ImportLayer, ImportSheet, ImportSupportsCondition},
         AllowImportRules, CssRule, CssRules, DocumentStyleSheet, ImportRule, Origin, Stylesheet,
         StylesheetContents, StylesheetInDocument, StylesheetLoader as ServoStylesheetLoader,
         UrlExtraData,
-        import_rule::{ImportLayer, ImportSheet, ImportSupportsCondition},
     },
     values::{CssUrl, SourceLocation},
 };
@@ -25,6 +25,7 @@ use crate::util::ImageType;
 #[derive(Clone, Debug)]
 pub enum Resource {
     Image(usize, ImageType, u32, u32, Arc<Vec<u8>>),
+    ImageError(usize, String),
     #[cfg(feature = "svg")]
     Svg(usize, ImageType, Box<usvg::Tree>),
     Css(usize, DocumentStyleSheet),
@@ -305,13 +306,20 @@ fn fetch_font_face(
         });
 }
 
-pub struct ImageHandler(usize, ImageType);
+pub struct ImageHandler(usize, ImageType, Option<String>);
 impl ImageHandler {
-    pub fn new(node_id: usize, kind: ImageType) -> Self {
-        Self(node_id, kind)
+    pub fn new(node_id: usize, kind: ImageType, src: Option<String>) -> Self {
+        Self(node_id, kind, src)
     }
 }
 impl NetHandler<Resource> for ImageHandler {
+    fn error_resource(&self) -> Option<Resource> {
+        match &self.1 {
+            ImageType::Image => self.2.clone().map(|src| Resource::ImageError(self.0, src)),
+            ImageType::Background(_) => None,
+        }
+    }
+
     fn bytes(self: Box<Self>, doc_id: usize, bytes: Bytes, callback: SharedCallback<Resource>) {
         // Try parse image
         if let Ok(image) = image::ImageReader::new(Cursor::new(&bytes))
@@ -342,6 +350,62 @@ impl NetHandler<Resource> for ImageHandler {
             }
         }
 
-        callback.call(doc_id, Err(Some(String::from("Could not parse image"))))
+        match self.error_resource() {
+            Some(error) => callback.call(doc_id, Ok(error)),
+            None => callback.call(doc_id, Err(Some(String::from("Could not parse image")))),
+        }
+    }
+}
+
+#[cfg(test)]
+mod image_error_tests {
+    use super::*;
+    use std::sync::Mutex;
+
+    #[test]
+    fn invalid_image_bytes_emit_a_targeted_error_and_valid_bytes_load() {
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let output = seen.clone();
+        let callback: SharedCallback<Resource> = Arc::new(move |doc_id, result| {
+            output.lock().unwrap().push((doc_id, result));
+        });
+
+        Box::new(ImageHandler::new(
+            12,
+            ImageType::Image,
+            Some("broken.png".into()),
+        ))
+        .bytes(4, Bytes::from(vec![0, 1, 2]), callback.clone());
+
+        let mut png = Cursor::new(Vec::new());
+        image::DynamicImage::new_rgba8(1, 1)
+            .write_to(&mut png, image::ImageFormat::Png)
+            .unwrap();
+        Box::new(ImageHandler::new(
+            13,
+            ImageType::Image,
+            Some("good.png".into()),
+        ))
+        .bytes(4, Bytes::from(png.into_inner()), callback);
+
+        let events = seen.lock().unwrap();
+        assert!(
+            matches!(&events[0], (4, Ok(Resource::ImageError(12, src))) if src == "broken.png")
+        );
+        assert!(matches!(
+            &events[1],
+            (4, Ok(Resource::Image(13, ImageType::Image, 1, 1, _)))
+        ));
+    }
+
+    #[test]
+    fn only_image_elements_have_a_dom_error_target() {
+        let image = ImageHandler::new(12, ImageType::Image, Some("broken.png".into()));
+        assert!(matches!(
+            image.error_resource(),
+            Some(Resource::ImageError(12, _))
+        ));
+        let background = ImageHandler::new(12, ImageType::Background(0), None);
+        assert!(background.error_resource().is_none());
     }
 }

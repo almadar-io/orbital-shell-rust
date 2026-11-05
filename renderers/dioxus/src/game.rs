@@ -17,13 +17,15 @@
 use crate::helpers::{format_value, get_entity_field, get_hud_stats, humanize_field_name};
 use crate::registry::DioxusPatternRegistry;
 use crate::renderer::{DioxusPatternRenderer, DioxusView};
+use crate::styles::style_with_props;
 use anyrender_vello::wgpu;
 use anyrender_vello::{CustomPaintCtx, CustomPaintSource, DeviceHandle, TextureHandle};
 use dioxus::prelude::*;
 use dioxus_native::use_wgpu;
-use orbital_core::Value;
 use orbital_canvas::mappers::scene;
 use orbital_canvas::{SceneHost, SharedDeviceRenderer};
+use orbital_core::client::helpers::merge_class_name;
+use orbital_core::Value;
 use std::sync::{Arc, Mutex};
 use web_time::Instant;
 
@@ -154,8 +156,7 @@ impl CustomPaintSource for GamePaintSource {
                 host.set_viewport(phys_w, phys_h);
             }
             #[cfg(not(target_arch = "wasm32"))]
-            let fonts_landed =
-                orbital_canvas::system_fonts::supply_missing_from_system() > 0;
+            let fonts_landed = orbital_canvas::system_fonts::supply_missing_from_system() > 0;
             #[cfg(target_arch = "wasm32")]
             let fonts_landed = false;
             if host.scene() != Some(&node) || fonts_landed {
@@ -166,6 +167,9 @@ impl CustomPaintSource for GamePaintSource {
             }
             host.refresh_assets();
             host.set_clock(self.started.elapsed().as_secs_f64() * 1000.0);
+            if let Ok(epoch) = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
+                host.set_epoch_clock(epoch.as_secs_f64() * 1000.0);
+            }
             host.frame_packet()?
         };
         let (texture, handle, _, _) = self.target.as_ref()?;
@@ -195,6 +199,74 @@ impl CustomPaintSource for GamePaintSource {
 struct SceneCanvasProps {
     node: serde_json::Value,
     sink: Option<crate::renderer::EventSink>,
+    fill_parent: bool,
+    a11y: SceneA11y,
+    class_name: String,
+    inline_style: String,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+struct SceneA11y {
+    label: Option<String>,
+    labelledby: Option<String>,
+    describedby: Option<String>,
+    live: Option<String>,
+    current: Option<String>,
+    pressed: Option<String>,
+    expanded: Option<String>,
+    selected: Option<String>,
+    hidden: Option<String>,
+    busy: Option<String>,
+    role: Option<String>,
+    lang: Option<String>,
+    dir: Option<String>,
+    tabindex: Option<String>,
+}
+
+impl SceneA11y {
+    fn from_props(props: &Value) -> Self {
+        let get = |key| {
+            props
+                .as_object()
+                .and_then(|fields| fields.get(key))
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+        };
+        let boolean = |key| {
+            props
+                .as_object()
+                .and_then(|fields| fields.get(key))
+                .and_then(Value::as_bool)
+                .map(|value| value.to_string())
+        };
+        Self {
+            label: get("aria-label"),
+            labelledby: get("aria-labelledby"),
+            describedby: get("aria-describedby"),
+            live: get("aria-live"),
+            current: get("aria-current"),
+            pressed: get("aria-pressed"),
+            expanded: boolean("aria-expanded"),
+            selected: boolean("aria-selected"),
+            hidden: boolean("aria-hidden"),
+            busy: boolean("aria-busy"),
+            role: get("role"),
+            lang: get("lang"),
+            dir: get("dir"),
+            tabindex: props
+                .as_object()
+                .and_then(|fields| fields.get("tabIndex"))
+                .and_then(Value::as_number)
+                .map(|value| value.to_string()),
+        }
+    }
+}
+
+fn scene_presentation(props: &Value) -> (String, SceneA11y) {
+    (
+        merge_class_name("almadar-game-canvas", props),
+        SceneA11y::from_props(props),
+    )
 }
 
 #[allow(non_snake_case)] // dioxus component convention (PascalCase)
@@ -207,13 +279,42 @@ fn SceneCanvas(props: SceneCanvasProps) -> Element {
         let (node_cell, host) = (node_cell.clone(), host.clone());
         move || GamePaintSource::new(node_cell, host)
     });
-    let Some((w, h)) = canvas_size(&props.node) else {
-        return rsx! {};
+    let (w, h) = if props.fill_parent {
+        (1, 1)
+    } else {
+        let Some(size) = canvas_size(&props.node) else {
+            return rsx! {};
+        };
+        size
+    };
+    let style = if props.fill_parent {
+        format!(
+            "display:block;width:100%;height:100%;{}",
+            props.inline_style
+        )
+    } else {
+        props.inline_style.clone()
     };
     let sink = props.sink;
+    let class_name = props.class_name.clone();
     rsx! {
         canvas {
-            class: "almadar-game-canvas",
+            class: "{class_name}",
+            style: style,
+            aria_label: props.a11y.label,
+            aria_labelledby: props.a11y.labelledby,
+            aria_describedby: props.a11y.describedby,
+            aria_live: props.a11y.live,
+            aria_current: props.a11y.current,
+            aria_pressed: props.a11y.pressed,
+            aria_expanded: props.a11y.expanded,
+            aria_selected: props.a11y.selected,
+            aria_hidden: props.a11y.hidden,
+            aria_busy: props.a11y.busy,
+            role: props.a11y.role,
+            lang: props.a11y.lang,
+            dir: props.a11y.dir,
+            tabindex: props.a11y.tabindex,
             "src": "{id}",
             width: w,
             height: h,
@@ -245,6 +346,49 @@ pub struct SceneCanvasRenderer {
     name: &'static str,
 }
 
+pub(crate) fn atlas_image(props: &Value, view: &DioxusView<'_>) -> Element {
+    let node = scene_node("atlas-image", props, view.canvas_theme.as_ref());
+    let (class_name, a11y) = scene_presentation(props);
+    let fill_parent = props
+        .as_object()
+        .and_then(|fields| fields.get("fill"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let inline_style = style_with_props("", props);
+    rsx! { SceneCanvas { node, sink: None, fill_parent, a11y, class_name, inline_style } }
+}
+
+pub(crate) fn atlas_panel(props: &Value, view: &DioxusView<'_>, fill_parent: bool) -> Element {
+    let mut node = scene_node("atlas-panel", props, view.canvas_theme.as_ref());
+    if let Some(fields) = node.as_object_mut() {
+        fields.remove("children");
+    }
+    let (class_name, mut a11y) = scene_presentation(props);
+    if fill_parent {
+        a11y.hidden = Some("true".to_string());
+    }
+    let inline_style = if fill_parent {
+        String::new()
+    } else {
+        style_with_props("", props)
+    };
+    rsx! { SceneCanvas { node, sink: None, fill_parent, a11y, class_name, inline_style } }
+}
+
+pub(crate) fn geometric_pattern_scene(props: &Value, view: &DioxusView<'_>) -> Element {
+    let node = scene_node("geometric-pattern-scene", props, view.canvas_theme.as_ref());
+    let mut a11y = SceneA11y::default();
+    a11y.hidden = Some("true".to_string());
+    rsx! { SceneCanvas {
+        node,
+        sink: None,
+        fill_parent: true,
+        a11y,
+        class_name: "almadar-game-canvas",
+        inline_style: String::new(),
+    } }
+}
+
 impl DioxusPatternRenderer for SceneCanvasRenderer {
     fn pattern_name(&self) -> &str {
         self.name
@@ -258,8 +402,16 @@ impl DioxusPatternRenderer for SceneCanvasRenderer {
         _registry: &DioxusPatternRegistry,
     ) -> Element {
         let node = scene_node(self.name, props, view.canvas_theme.as_ref());
-        rsx! { SceneCanvas { node, sink: view.sink } }
+        let (class_name, a11y) = scene_presentation(props);
+        let inline_style = style_with_props("", props);
+        rsx! { SceneCanvas { node, sink: view.sink, fill_parent: false, a11y, class_name, inline_style } }
     }
+}
+
+pub(crate) fn fill_parent_atlas_panel(asset: &Value, mode: &str, view: &DioxusView<'_>) -> Element {
+    let props = serde_json::json!({ "asset": asset, "mode": mode });
+    let props = serde_json::from_value::<Value>(props).expect("atlas panel props");
+    atlas_panel(&props, view, true)
 }
 
 /// Renderer for the `game-hud` pattern — stats/items/elements resolved against
@@ -333,5 +485,45 @@ mod tests {
     fn control_a_refused_three_d_scene_takes_no_room() {
         let props: Value = serde_json::from_value(json!({ "mode": "3d" })).unwrap();
         assert_eq!(canvas_size(&scene_node("canvas", &props, None)), None);
+    }
+
+    #[test]
+    fn pattern_tile_projects_authored_entry_and_accessibility_without_a_window() {
+        let spec: Value = serde_json::from_value(json!({
+            "type":"pattern-tile", "variant":"star8", "size":80,
+            "color":"#101010", "strokeWidth":2,
+            "className":"tile-accent", "enter":"fade", "enterDelay":2,
+            "aria-label":"Eight-point star", "aria-labelledby":"tile-title",
+            "aria-describedby":"tile-description", "aria-live":"polite",
+            "aria-current":"step", "aria-pressed":"mixed", "aria-expanded":true,
+            "aria-selected":false, "aria-hidden":false, "aria-busy":true,
+            "role":"img", "lang":"ar", "dir":"rtl", "tabIndex":0
+        }))
+        .unwrap();
+        let entry = crate::registry::entry_props(&spec).unwrap();
+        let (class_name, a11y) = scene_presentation(&entry);
+        assert_eq!(
+            class_name,
+            "almadar-game-canvas tile-accent almadar-enter-fade almadar-enter-delay-2"
+        );
+        assert_eq!(
+            a11y,
+            SceneA11y {
+                label: Some("Eight-point star".into()),
+                labelledby: Some("tile-title".into()),
+                describedby: Some("tile-description".into()),
+                live: Some("polite".into()),
+                current: Some("step".into()),
+                pressed: Some("mixed".into()),
+                expanded: Some("true".into()),
+                selected: Some("false".into()),
+                hidden: Some("false".into()),
+                busy: Some("true".into()),
+                role: Some("img".into()),
+                lang: Some("ar".into()),
+                dir: Some("rtl".into()),
+                tabindex: Some("0".into()),
+            }
+        );
     }
 }

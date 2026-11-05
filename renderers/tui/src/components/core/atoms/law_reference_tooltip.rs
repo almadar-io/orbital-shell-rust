@@ -30,6 +30,9 @@ impl PatternRenderer for LawReferenceTooltipRenderer {
         _ctx: &mut RenderContext<'_>,
     ) {
         use ratatui::widgets::Paragraph;
-        frame.render_widget(Paragraph::new(format!("§ {}", get_string_or(props, "reference", ""))), area);
+        frame.render_widget(
+            Paragraph::new(format!("§ {}", get_string_or(props, "reference", ""))),
+            area,
+        );
     }
 }

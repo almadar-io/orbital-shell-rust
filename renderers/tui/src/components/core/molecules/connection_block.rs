@@ -34,11 +34,21 @@ impl PatternRenderer for ConnectionBlockRenderer {
         use ratatui::widgets::{Block, Borders, Paragraph};
         let content = get_string_or(props, "content", "");
         let lines = vec![
-            Line::from(Span::styled("🔗 Building On What You Know", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))),
+            Line::from(Span::styled(
+                "🔗 Building On What You Know",
+                Style::default()
+                    .fg(Color::Green)
+                    .add_modifier(Modifier::BOLD),
+            )),
             Line::from(content),
         ];
         frame.render_widget(
-            Paragraph::new(Text::from(lines)).block(Block::default().borders(Borders::ALL).border_style(Style::default().fg(Color::Green)).title("Connect")),
+            Paragraph::new(Text::from(lines)).block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(Color::Green))
+                    .title("Connect"),
+            ),
             area,
         );
     }

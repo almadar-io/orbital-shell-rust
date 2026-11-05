@@ -14,6 +14,7 @@
 
 use crate::registry::DioxusPatternRegistry;
 use dioxus::prelude::*;
+use orbital_core::client::recurse::trait_ref_name;
 use orbital_core::Value;
 use std::collections::HashMap;
 
@@ -21,13 +22,33 @@ use std::collections::HashMap;
 /// Orbital circuit. `(event_name, payload)` — `Callback` is `Copy`, so controls
 /// capture it inside `onclick: move |_| …` without cloning.
 pub type EventSink = Callback<(String, Value)>;
+pub type SourceSinkFactory = Callback<Option<String>, EventSink>;
+
+pub(crate) fn emit_empty_event(sink: Option<EventSink>, name: Option<&str>) {
+    if let (Some(sink), Some(name)) = (sink, name.filter(|name| !name.is_empty())) {
+        sink.call((name.to_string(), Value::Null));
+    }
+}
+
+pub type NavigationSink = Callback<String>;
+
+#[derive(Clone, Copy, PartialEq)]
+pub enum DockCommand {
+    ShowPanel,
+    CloseMenu,
+}
+
+#[derive(Clone, PartialEq)]
+pub struct DockContext {
+    pub compact: bool,
+    pub command: Callback<DockCommand>,
+}
 
 /// Read-only view handed to a Dioxus renderer. Carries the immutable subset of
 /// the shared `RenderContext` renderers actually need (entity cache, `@trait`
 /// content, current state) plus the [`EventSink`] for dispatch. `source_trait`
 /// mirrors `RenderContext::source_trait` so a button nested under `@trait.X`
-/// emits with source `X` (switched per subtree in later phases; Phase 1 atoms
-/// have no `@trait.X` nesting).
+/// emits with source `X`.
 pub struct DioxusView<'a> {
     /// Name of the currently active trait.
     pub trait_name: &'a str,
@@ -44,8 +65,14 @@ pub struct DioxusView<'a> {
     pub source_trait: Option<String>,
     /// Event sink wired by the root `App` into `ClientCore::send_event`.
     pub sink: Option<EventSink>,
+    pub source_sink: SourceSinkFactory,
+    pub navigate: Option<NavigationSink>,
+    pub dock: Option<DockContext>,
+    pub viewport_width: Option<f64>,
     /// The kernel's `canvasTheme`, handed to every Rust-drawn scene (`None` without a kernel).
     pub canvas_theme: Option<serde_json::Value>,
+    pub theme_mode: Option<orbital_core::ThemeMode>,
+    pub toggle_theme: Option<Callback<()>>,
 }
 
 /// A named UI pattern rendered to a Dioxus subtree.
@@ -60,7 +87,113 @@ impl<'a> DioxusView<'a> {
             trait_content: self.trait_content,
             source_trait: source,
             sink: Some(sink),
+            source_sink: self.source_sink,
+            navigate: self.navigate,
+            dock: self.dock.clone(),
+            viewport_width: self.viewport_width,
             canvas_theme: self.canvas_theme.clone(),
+            theme_mode: self.theme_mode,
+            toggle_theme: self.toggle_theme,
+        }
+    }
+
+    pub fn for_trait_source(&self, source: String) -> DioxusView<'a> {
+        let sink = self.source_sink.call(Some(source.clone()));
+        self.for_source(Some(source), sink)
+    }
+
+    pub fn render_child(
+        &self,
+        registry: &DioxusPatternRegistry,
+        child: &Value,
+        source: Option<&str>,
+    ) -> Element {
+        match source {
+            Some(source) => {
+                registry.render_spec(child, None, &self.for_trait_source(source.to_string()))
+            }
+            None => registry.render_spec(child, None, self),
+        }
+    }
+
+    pub fn render_node(&self, registry: &DioxusPatternRegistry, node: &Value) -> Element {
+        match node {
+            Value::Array(items) => rsx! {
+                for item in items.iter() {
+                    {self.render_node(registry, item)}
+                }
+            },
+            Value::String(text) => {
+                if let Some(source) = trait_ref_name(text) {
+                    if let Some(content) = self.trait_content.get(&source) {
+                        registry.render_spec(content, None, &self.for_trait_source(source))
+                    } else {
+                        rsx! {}
+                    }
+                } else {
+                    rsx! { "{text}" }
+                }
+            }
+            Value::Object(_) => registry.render_spec(node, None, self),
+            _ => rsx! {},
+        }
+    }
+
+    pub fn to_owned(&self) -> OwnedDioxusView {
+        OwnedDioxusView {
+            trait_name: self.trait_name.to_string(),
+            orbital_name: self.orbital_name.to_string(),
+            current_state: self.current_state.to_string(),
+            entities: self.entities.clone(),
+            trait_content: self.trait_content.clone(),
+            source_trait: self.source_trait.clone(),
+            sink: self.sink,
+            source_sink: self.source_sink,
+            navigate: self.navigate,
+            dock: self.dock.clone(),
+            viewport_width: self.viewport_width,
+            canvas_theme: self.canvas_theme.clone(),
+            theme_mode: self.theme_mode,
+            toggle_theme: self.toggle_theme,
+        }
+    }
+}
+
+#[derive(Clone, PartialEq)]
+pub struct OwnedDioxusView {
+    pub trait_name: String,
+    pub orbital_name: String,
+    pub current_state: String,
+    pub entities: HashMap<String, Vec<Value>>,
+    pub trait_content: orbital_core::ValueMap,
+    pub source_trait: Option<String>,
+    pub sink: Option<EventSink>,
+    pub source_sink: SourceSinkFactory,
+    pub navigate: Option<NavigationSink>,
+    pub dock: Option<DockContext>,
+    pub viewport_width: Option<f64>,
+    pub canvas_theme: Option<serde_json::Value>,
+    pub theme_mode: Option<orbital_core::ThemeMode>,
+    pub toggle_theme: Option<Callback<()>>,
+}
+
+impl OwnedDioxusView {
+    pub fn as_view(&self) -> DioxusView<'_> {
+        DioxusView {
+            trait_name: &self.trait_name,
+            orbital_name: &self.orbital_name,
+            current_state: &self.current_state,
+            entities: &self.entities,
+            trait_content: &self.trait_content,
+            source_trait: self.source_trait.clone(),
+            sink: self.sink,
+            source_sink: self.source_sink,
+            navigate: self.navigate,
+            dock: self.dock.clone(),
+            viewport_width: self.viewport_width,
+            canvas_theme: self.canvas_theme.clone(),
+            theme_mode: self.theme_mode,
+            toggle_theme: self.toggle_theme,
         }
     }
 }

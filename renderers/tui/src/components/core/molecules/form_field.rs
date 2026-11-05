@@ -32,6 +32,9 @@ impl PatternRenderer for FormFieldRenderer {
         use ratatui::text::Line;
         use ratatui::widgets::{Block, Borders, Paragraph};
         let label = get_string_or(props, "label", "Field");
-        frame.render_widget(Paragraph::new(Line::from(label)).block(Block::default().borders(Borders::ALL)), area);
+        frame.render_widget(
+            Paragraph::new(Line::from(label)).block(Block::default().borders(Borders::ALL)),
+            area,
+        );
     }
 }

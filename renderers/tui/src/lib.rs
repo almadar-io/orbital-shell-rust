@@ -7,7 +7,7 @@
 pub mod components;
 
 use crossterm::event::KeyCode;
-use orbital_core::client::client_core::ClientCore;
+use orbital_core::client::client_core::{host_ask_failure_payload, ClientCore};
 use orbital_core::client::helpers::*;
 use orbital_core::Value;
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
@@ -185,6 +185,7 @@ impl TuiApp {
         let timestamp = chrono::Utc::now().timestamp_millis();
         self.core.status_message = None;
         drive(&mut self.core);
+        self.refuse_host_asks();
         let error = self
             .core
             .status_message
@@ -203,6 +204,37 @@ impl TuiApp {
         });
         if self.request_history.len() > 50 {
             self.request_history.remove(0);
+        }
+    }
+
+    fn refuse_host_asks(&mut self) {
+        for ask in std::mem::take(&mut self.core.pending_host_asks) {
+            let message = format!(
+                "host action `{}` is unavailable in the terminal host",
+                ask.op
+            );
+            error!(op = %ask.op, source_trait = %ask.source_trait, "{message}");
+            let Some(completion) = ask.completion else {
+                self.core.status_message = Some((message, true));
+                continue;
+            };
+            let Some(event) = completion.failure.clone() else {
+                continue;
+            };
+            let Some(kernel) = self.core.client_kernel.clone() else {
+                self.core.status_message = Some((message, true));
+                continue;
+            };
+            let payload = host_ask_failure_payload(&completion, &message, "unavailable");
+            match self
+                .core
+                .begin_host_completion(&completion, &event, payload)
+            {
+                Ok(begun) => self.core.finish_control(&begun, kernel.settle(&begun)),
+                Err(error) => {
+                    self.core.status_message = Some((format!("{message}: {error}"), true));
+                }
+            }
         }
     }
 

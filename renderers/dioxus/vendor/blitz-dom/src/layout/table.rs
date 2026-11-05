@@ -2,10 +2,10 @@ use std::{ops::Range, sync::Arc};
 
 use markup5ever::local_name;
 use style::values::specified::box_::{DisplayInside, DisplayOutside};
-use style::{Atom, computed_values::table_layout::T as TableLayout};
+use style::{computed_values::table_layout::T as TableLayout, Atom};
 use taffy::{
-    Dimension, LayoutPartialTree as _, ResolveOrZero, TrackSizingFunction, compute_leaf_layout,
-    style_helpers,
+    compute_leaf_layout, style_helpers, Dimension, LayoutPartialTree as _, ResolveOrZero,
+    TrackSizingFunction,
 };
 
 use crate::BaseDocument;

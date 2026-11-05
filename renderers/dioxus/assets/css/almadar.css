@@ -9,6 +9,7 @@
 :root {
   --almadar-font: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
   --almadar-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  --almadar-symbol-font: "Noto Sans Symbols 2", var(--almadar-font);
   --almadar-fg: #111827;
   --almadar-muted: #6b7280;
   --almadar-line: #d1d5db;
@@ -24,12 +25,34 @@
 }
 
 .almadar-orbital-dioxus {
+  --almadar-fg: var(--color-foreground);
+  --almadar-muted: var(--color-muted-foreground);
+  --almadar-line: var(--color-border);
+  --almadar-bg: var(--color-background);
+  --almadar-accent: var(--color-primary);
+  --almadar-accent-bg: var(--color-secondary);
+  --almadar-danger: var(--color-error);
+  --almadar-warn: var(--color-warning);
+  --almadar-ok: var(--color-success);
+  --almadar-radius: var(--radius-md);
   font-family: var(--almadar-font);
   color: var(--almadar-fg);
+  background: var(--almadar-bg);
+  min-height: 100vh;
   font-size: 14px;
   line-height: 1.5;
 }
-.almadar-slot { display: contents; }
+[data-reduced-motion="true"],
+[data-reduced-motion="true"] * {
+  --motion-enable: off;
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+}
+.almadar-slot { display: block; }
+.almadar-drawer-overlay-contained.almadar-drawer-overlay-contained { position: absolute; z-index: 50; }
+.almadar-drawer-overlay-viewport.almadar-drawer-overlay-viewport { position: fixed; z-index: 60; }
+.almadar-orbital-dioxus .line-clamp-2 { height: calc(var(--leading-base, 24px) * 2); overflow: hidden; }
 .almadar-fallback {
   font-family: var(--almadar-mono);
   font-size: 12px;
@@ -68,6 +91,30 @@
 /* animated counter */
 .almadar-animated-counter__value { font-size: 28px; font-weight: 700; color: var(--almadar-fg); }
 .almadar-animated-counter__label { display: block; color: var(--almadar-muted); font-size: 13px; }
+
+.almadar-animated-graphic svg :is(path, line, polyline, polygon, circle, ellipse, rect) {
+  stroke: var(--almadar-graphic-stroke);
+}
+.almadar-animated-graphic[data-orbital-animation="fill"] svg :is(path, circle, ellipse, rect, polygon) {
+  fill: var(--almadar-graphic-fill);
+}
+@keyframes almadar-graphic-pulse {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.04); opacity: 0.85; }
+}
+.almadar-animated-graphic[data-orbital-animation="pulse"][data-orbital-animate="true"] svg {
+  animation: almadar-graphic-pulse var(--almadar-graphic-duration) ease-in-out var(--almadar-graphic-delay) infinite;
+}
+.almadar-animated-graphic[data-orbital-animation="morph"] svg :is(path, circle, ellipse, rect, polygon) {
+  transform: scale(0);
+  transform-origin: center;
+  opacity: 0;
+  transition: transform var(--almadar-graphic-duration) var(--almadar-graphic-easing) var(--almadar-graphic-delay), opacity var(--almadar-graphic-duration) var(--almadar-graphic-easing) var(--almadar-graphic-delay);
+}
+.almadar-animated-graphic[data-orbital-animation="morph"][data-orbital-animate="true"] svg :is(path, circle, ellipse, rect, polygon) {
+  transform: scale(1);
+  opacity: 1;
+}
 
 /* Tier S — structural */
 .almadar-icon { display: inline-block; line-height: 1; }
@@ -155,6 +202,11 @@
 .almadar-chart-legend__dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
 
 .almadar-confetti-effect, .almadar-game-icon { display: inline-block; }
+.almadar-action-tile__icon, .almadar-choice-button__icon,
+.almadar-stat-badge__icon, .almadar-score-display__icon,
+.almadar-activity-rail__icon {
+  font-family: var(--almadar-symbol-font);
+}
 .almadar-signature-pad__label { font-weight: 600; margin-bottom: 4px; }
 .almadar-qr-scanner svg, .almadar-map-view svg, .almadar-chart svg,
 .almadar-line-chart svg, .almadar-positioned-canvas svg, .almadar-scaled-diagram svg,
@@ -192,3 +244,17 @@
   font: inherit; font-size: 11px; color: var(--almadar-muted); background: none;
   border: none; cursor: pointer; text-align: left; padding: 0 2px;
 }
+
+.almadar-game-menu { min-height: 100%; display: flex; align-items: center; justify-content: center; padding: 32px; }
+.almadar-game-menu__card { width: 100%; max-width: 420px; display: flex; flex-direction: column; align-items: center; gap: 16px; padding: 24px; border: 1px solid var(--almadar-line); border-radius: var(--almadar-radius); background: var(--almadar-bg); }
+.almadar-game-menu__logo { display: flex; justify-content: center; }
+.almadar-game-menu__title { margin: 0; font-size: 36px; text-align: center; }
+.almadar-game-menu__subtitle { margin: 0; color: var(--almadar-muted); text-align: center; }
+.almadar-game-menu__options { width: 100%; display: flex; flex-direction: column; gap: 12px; }
+.almadar-game-menu__option { width: 100%; }
+.almadar-game-menu__option .almadar-choice-button { width: 100%; text-align: left; }
+.almadar-game-menu__sub-label { display: block; color: var(--almadar-muted); font-size: 12px; }
+.almadar-choice-button--selected { border-color: var(--almadar-accent); background: var(--almadar-accent-bg); }
+.almadar-control-button--primary { background: var(--almadar-accent); color: var(--almadar-bg); }
+.almadar-control-button--ghost { background: transparent; }
+.almadar-control-button--pressed { filter: brightness(1.1); transform: scale(0.95); }

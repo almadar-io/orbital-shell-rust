@@ -31,6 +31,11 @@ impl PatternRenderer for AnimatedGraphicRenderer {
     ) {
         use ratatui::layout::Alignment;
         use ratatui::widgets::{Block, Borders, Paragraph};
-        frame.render_widget(Paragraph::new("◆").alignment(Alignment::Center).block(Block::default().borders(Borders::ALL).title("graphic")), area);
+        frame.render_widget(
+            Paragraph::new("◆")
+                .alignment(Alignment::Center)
+                .block(Block::default().borders(Borders::ALL).title("graphic")),
+            area,
+        );
     }
 }

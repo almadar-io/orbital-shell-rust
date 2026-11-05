@@ -1,9 +1,9 @@
-use crate::NON_INCREMENTAL;
 use crate::node::NodeFlags;
-use crate::{BaseDocument, net::ImageHandler, node::BackgroundImageData, util::ImageType};
+use crate::NON_INCREMENTAL;
+use crate::{net::ImageHandler, node::BackgroundImageData, util::ImageType, BaseDocument};
 use blitz_traits::net::Request;
-use style::properties::ComputedValues;
 use style::properties::generated::longhands::position::computed_value::T as Position;
+use style::properties::ComputedValues;
 use style::selector_parser::RestyleDamage;
 use style::servo::url::ComputedUrl;
 use style::values::generics::image::Image as StyloImage;
@@ -300,7 +300,11 @@ impl BaseDocument {
                             self.net_provider.fetch(
                                 doc_id,
                                 Request::get((**new_url).clone()),
-                                Box::new(ImageHandler::new(node_id, ImageType::Background(idx))),
+                                Box::new(ImageHandler::new(
+                                    node_id,
+                                    ImageType::Background(idx),
+                                    None,
+                                )),
                             );
 
                             let bg_image_data = BackgroundImageData::new(new_url.clone());

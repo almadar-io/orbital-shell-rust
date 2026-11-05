@@ -32,6 +32,9 @@ impl PatternRenderer for IconButtonRenderer {
         use ratatui::widgets::Paragraph;
         let icon = get_string_or(props, "icon", "");
         let label = get_string_or(props, "label", "");
-        frame.render_widget(Paragraph::new(format!("[{}] {}", icon_name_to_glyph(icon.as_str()), label)), area);
+        frame.render_widget(
+            Paragraph::new(format!("[{}] {}", icon_name_to_glyph(icon.as_str()), label)),
+            area,
+        );
     }
 }

@@ -30,6 +30,9 @@ impl PatternRenderer for WizardNavigationRenderer {
         _ctx: &mut RenderContext<'_>,
     ) {
         use ratatui::widgets::{Block, Borders, Paragraph};
-        frame.render_widget(Paragraph::new("[Back]  [Next]").block(Block::default().borders(Borders::ALL)), area);
+        frame.render_widget(
+            Paragraph::new("[Back]  [Next]").block(Block::default().borders(Borders::ALL)),
+            area,
+        );
     }
 }

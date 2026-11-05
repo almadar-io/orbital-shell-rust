@@ -40,7 +40,9 @@ impl PatternRenderer for StateMachineViewRenderer {
         }
         if !error.is_empty() {
             frame.render_widget(
-                Paragraph::new(Line::from(format!("⚠ {}", error)).style(Style::default().fg(Color::Red))),
+                Paragraph::new(
+                    Line::from(format!("⚠ {}", error)).style(Style::default().fg(Color::Red)),
+                ),
                 area,
             );
             return;
@@ -51,17 +53,30 @@ impl PatternRenderer for StateMachineViewRenderer {
         if let Some(ld) = layout {
             let nodes = get_array(ld, "nodes");
             let edges = get_array(ld, "edges");
-            lines.push(Line::from(format!("  {} states, {} transitions", nodes.len(), edges.len())));
+            lines.push(Line::from(format!(
+                "  {} states, {} transitions",
+                nodes.len(),
+                edges.len()
+            )));
             for node in nodes.iter().take(6) {
                 let label = get_string_or(node, "label", &get_string_or(node, "id", "?"));
                 let active = get_bool_or(node, "active", false);
                 let mark = if active { "●" } else { "○" };
-                lines.push(Line::from(format!("  {} {}", mark, label))
-                    .style(if active { Style::default().fg(Color::Green) } else { Style::default() }));
+                lines.push(
+                    Line::from(format!("  {} {}", mark, label)).style(if active {
+                        Style::default().fg(Color::Green)
+                    } else {
+                        Style::default()
+                    }),
+                );
             }
         }
         frame.render_widget(
-            Paragraph::new(Text::from(lines)).block(Block::default().borders(Borders::ALL).title("state-machine-view")),
+            Paragraph::new(Text::from(lines)).block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title("state-machine-view"),
+            ),
             area,
         );
     }

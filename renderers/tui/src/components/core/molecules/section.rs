@@ -33,8 +33,15 @@ impl PatternRenderer for SectionRenderer {
         use ratatui::text::{Line, Span};
         use ratatui::widgets::Paragraph;
         let mut lines: Vec<Line> = Vec::new();
-        if let Some(title) = get_string(props, "title") { lines.push(Line::from(Span::styled(title, Style::default().add_modifier(Modifier::BOLD)))); }
-        if let Some(desc) = get_string(props, "description") { lines.push(Line::from(desc)); }
+        if let Some(title) = get_string(props, "title") {
+            lines.push(Line::from(Span::styled(
+                title,
+                Style::default().add_modifier(Modifier::BOLD),
+            )));
+        }
+        if let Some(desc) = get_string(props, "description") {
+            lines.push(Line::from(desc));
+        }
         frame.render_widget(Paragraph::new(lines), area);
     }
 }

@@ -9,6 +9,8 @@
 //! retained VDOM).
 
 pub mod app;
+#[cfg(all(feature = "native-audio", not(target_arch = "wasm32")))]
+pub mod audio;
 // Generated pattern renderers: scaffold whose unused imports/params vary by
 // atom (a leaf renderer ignores `registry`/`entity`). Scoped here, not
 // crate-wide, so hand-written code keeps its dead-code signal. Mirrors the
@@ -22,8 +24,14 @@ pub mod renderer;
 pub mod offscreen;
 pub mod probe_target;
 pub mod styles;
+pub(crate) mod timer;
 #[path = "../../../runtime/dioxus/src/shell.rs"]
 pub mod shell;
+pub mod video_overlay;
+#[cfg(test)]
+pub(crate) static EVENT_CONVERTER_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+#[cfg(all(feature = "native", not(target_arch = "wasm32")))]
+pub mod visibility;
 
 // Browser (wasm32) shell: the native (Blitz) render path painted into a
 // <canvas> via vello/wgpu — no DOM rendering (that stays React's job in
@@ -38,7 +46,7 @@ pub mod wasm;
 pub mod native;
 
 /// Game pattern renderers (`canvas` / `canvas-2d` via a shared-device wgpu paint
-/// source, `game-hud`) — desktop-only; the GPU substrate has no wasm32 build.
+/// source, `game-hud`) — native targets only; the GPU substrate has no wasm32 build.
 #[cfg(all(feature = "native", not(target_arch = "wasm32")))]
 pub mod game;
 

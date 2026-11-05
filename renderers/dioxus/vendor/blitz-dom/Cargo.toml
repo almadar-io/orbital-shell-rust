@@ -54,7 +54,7 @@ name = "blitz_dom"
 path = "src/lib.rs"
 
 [dependencies.accesskit]
-version = "0.17"
+version = "0.25.1"
 optional = true
 
 [dependencies.app_units]
@@ -94,6 +94,7 @@ version = "0.2.13"
 [dependencies.image]
 version = "=0.25.6"
 default-features = false
+features = ["png", "jpeg", "gif", "webp"]
 
 [dependencies.keyboard-types]
 version = "0.7"

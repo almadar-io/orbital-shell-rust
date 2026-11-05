@@ -31,6 +31,9 @@ impl PatternRenderer for SplitPaneRenderer {
     ) {
         use ratatui::text::Line;
         use ratatui::widgets::{Block, Borders, Paragraph};
-        frame.render_widget(Paragraph::new(Line::from("Split Pane")).block(Block::default().borders(Borders::ALL)), area);
+        frame.render_widget(
+            Paragraph::new(Line::from("Split Pane")).block(Block::default().borders(Borders::ALL)),
+            area,
+        );
     }
 }

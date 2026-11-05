@@ -2,15 +2,15 @@ use std::sync::{Arc, Mutex};
 
 use crate::stylo_to_parley;
 use app_units::Au;
-use parley::FontContext;
 use parley::swash::Setting;
+use parley::FontContext;
 use skrifa::MetadataProvider as _;
-use skrifa::{Tag, charmap::Charmap};
+use skrifa::{charmap::Charmap, Tag};
 use style::properties::style_structs::Font as FontStyles;
 use style::{
     font_metrics::FontMetrics,
     servo::media_queries::FontMetricsProvider,
-    values::computed::{CSSPixelLength, font::QueryFontMetricsFlags},
+    values::computed::{font::QueryFontMetricsFlags, CSSPixelLength},
 };
 
 #[derive(Clone)]

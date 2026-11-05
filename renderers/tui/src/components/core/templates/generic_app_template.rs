@@ -32,7 +32,19 @@ impl PatternRenderer for GenericAppTemplateRenderer {
         use ratatui::style::{Modifier, Style};
         use ratatui::text::{Line, Span};
         use ratatui::widgets::{Block, Borders, Paragraph};
-        let name = get_string_or(props, "appName", ""); let name = if name.is_empty() { get_string_or(props, "title", "App") } else { name };
-        frame.render_widget(Paragraph::new(Line::from(Span::styled(name, Style::default().add_modifier(Modifier::BOLD)))).block(Block::default().borders(Borders::ALL)), area);
+        let name = get_string_or(props, "appName", "");
+        let name = if name.is_empty() {
+            get_string_or(props, "title", "App")
+        } else {
+            name
+        };
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(
+                name,
+                Style::default().add_modifier(Modifier::BOLD),
+            )))
+            .block(Block::default().borders(Borders::ALL)),
+            area,
+        );
     }
 }

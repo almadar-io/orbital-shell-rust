@@ -30,6 +30,9 @@ impl PatternRenderer for DrawerSlotRenderer {
         _ctx: &mut RenderContext<'_>,
     ) {
         use ratatui::widgets::{Block, Borders, Paragraph};
-        frame.render_widget(Paragraph::new("").block(Block::default().borders(Borders::ALL).title("drawer-slot")), area);
+        frame.render_widget(
+            Paragraph::new("").block(Block::default().borders(Borders::ALL).title("drawer-slot")),
+            area,
+        );
     }
 }

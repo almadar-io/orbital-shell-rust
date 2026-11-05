@@ -35,6 +35,17 @@ impl PatternRenderer for EmptyStateRenderer {
         use ratatui::widgets::{Block, Borders, Paragraph};
         let title = get_string_or(props, "title", "Nothing here");
         let message = get_string_or(props, "message", "");
-        frame.render_widget(Paragraph::new(Text::from(vec![Line::from(Span::styled(title, Style::default().add_modifier(Modifier::BOLD))), Line::from(message)])).alignment(Alignment::Center).block(Block::default().borders(Borders::ALL)), area);
+        frame.render_widget(
+            Paragraph::new(Text::from(vec![
+                Line::from(Span::styled(
+                    title,
+                    Style::default().add_modifier(Modifier::BOLD),
+                )),
+                Line::from(message),
+            ]))
+            .alignment(Alignment::Center)
+            .block(Block::default().borders(Borders::ALL)),
+            area,
+        );
     }
 }

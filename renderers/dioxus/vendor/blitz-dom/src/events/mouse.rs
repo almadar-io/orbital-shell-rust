@@ -7,7 +7,7 @@ use blitz_traits::{
 };
 use markup5ever::local_name;
 
-use crate::{BaseDocument, node::SpecialElementData};
+use crate::{node::SpecialElementData, BaseDocument};
 
 pub(crate) fn handle_mousemove(
     doc: &mut BaseDocument,

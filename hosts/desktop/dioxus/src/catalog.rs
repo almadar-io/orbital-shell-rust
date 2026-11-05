@@ -319,31 +319,6 @@ pub fn CatalogApp() -> Element {
             use_future(move || {
                 let names = names.clone();
                 async move {
-                    // Real wall-clock pacing: park on a timer thread that
-                    // wakes the winit waker after the delay, so the event
-                    // loop goes IDLE between swaps (an immediate re-wake
-                    // loop here kept the vdom permanently hot and froze
-                    // the window — WM "Not Responding").
-                    struct Delay(std::time::Duration, bool);
-                    impl std::future::Future for Delay {
-                        type Output = ();
-                        fn poll(
-                            mut self: std::pin::Pin<&mut Self>,
-                            cx: &mut std::task::Context<'_>,
-                        ) -> std::task::Poll<()> {
-                            if self.1 {
-                                return std::task::Poll::Ready(());
-                            }
-                            self.1 = true;
-                            let w = cx.waker().clone();
-                            let d = self.0;
-                            std::thread::spawn(move || {
-                                std::thread::sleep(d);
-                                w.wake();
-                            });
-                            std::task::Poll::Pending
-                        }
-                    }
                     let mut cycle = 0usize;
                     loop {
                         for (name, file) in &names {
@@ -356,13 +331,11 @@ pub fn CatalogApp() -> Element {
                                     mount_error,
                                     pending,
                                 ),
-                                Err(e) => {
-                                    mount_error.set(Some(e))
-                                }
+                                Err(e) => mount_error.set(Some(e)),
                             }
                             poke_rerender();
                             *rev.write() += 1;
-                            Delay(std::time::Duration::from_millis(400), false).await;
+                            crate::timer::Delay::new(std::time::Duration::from_millis(400)).await;
                         }
                         cycle += 1;
                         tracing::info!(target: shell::NS, cycle, "autoswap cycle complete");

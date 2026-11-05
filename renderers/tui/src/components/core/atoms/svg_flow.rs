@@ -33,6 +33,9 @@ impl PatternRenderer for SvgFlowRenderer {
         use ratatui::widgets::Paragraph;
         let n = get_array(props, "points").len();
         let color = get_string_or(props, "color", "#5B8DB8");
-        frame.render_widget(Paragraph::new(Line::from(format!("⇝ flow ({} pts) [{}]", n, &color))), area);
+        frame.render_widget(
+            Paragraph::new(Line::from(format!("⇝ flow ({} pts) [{}]", n, &color))),
+            area,
+        );
     }
 }

@@ -22,21 +22,34 @@ fn orbital(name: &str, text: &serde_json::Value) -> serde_json::Value {
 }
 
 fn app(orbitals: Vec<serde_json::Value>) -> TuiApp {
-    let schema: OrbitalSchema = serde_json::from_value(serde_json::json!({ "name": "t", "typeContractVersion": 1, "orbitals": orbitals })).unwrap();
+    let schema: OrbitalSchema = serde_json::from_value(
+        serde_json::json!({ "name": "t", "typeContractVersion": 1, "orbitals": orbitals }),
+    )
+    .unwrap();
     let bridge: Arc<dyn ServerBridge> = Arc::new(KernelBridge::new(schema.clone()).unwrap());
     TuiApp::new(schema, Some(bridge), Vec::new()).unwrap()
 }
 
 #[test]
 fn the_first_page_mounts_through_the_kernel_and_draws_its_main_slot() {
-    let mut app = app(vec![orbital("Notes", &serde_json::json!({ "type": "typography", "content": "hello notes" }))]);
-    assert!(app.core().slot_contents("main").iter().any(|c| c.pattern == "typography"));
+    let mut app = app(vec![orbital(
+        "Notes",
+        &serde_json::json!({ "type": "typography", "content": "hello notes" }),
+    )]);
+    assert!(app
+        .core()
+        .slot_contents("main")
+        .iter()
+        .any(|c| c.pattern == "typography"));
     assert!(app.render_to_text(100, 20).unwrap().contains("hello notes"));
 }
 
 #[test]
 fn control_a_pattern_without_a_terminal_renderer_draws_the_declared_unsupported_answer() {
-    let mut app = app(vec![orbital("Notes", &serde_json::json!({ "type": "zz-no-such-pattern" }))]);
+    let mut app = app(vec![orbital(
+        "Notes",
+        &serde_json::json!({ "type": "zz-no-such-pattern" }),
+    )]);
     assert!(!app.registry().supports("zz-no-such-pattern"));
     let text = app.render_to_text(100, 20).unwrap();
     assert!(!text.contains("No content to display"), "{text}");
@@ -45,14 +58,56 @@ fn control_a_pattern_without_a_terminal_renderer_draws_the_declared_unsupported_
 #[test]
 fn the_registry_covers_the_core_patterns() {
     let registry = PatternRegistry::new();
-    assert!(registry.coverage().len() > 200, "{}", registry.coverage().len());
+    assert!(
+        registry.coverage().len() > 200,
+        "{}",
+        registry.coverage().len()
+    );
     assert!(registry.supports("typography") && registry.supports("button"));
 }
 
 #[test]
 fn edge_an_empty_main_slot_says_so() {
     let mut app = app(vec![orbital("Notes", &serde_json::json!(null))]);
-    assert!(app.render_to_text(80, 10).unwrap().contains("No content to display"));
+    assert!(app
+        .render_to_text(80, 10)
+        .unwrap()
+        .contains("No content to display"));
+}
+
+#[test]
+fn terminal_host_refuses_an_unavailable_ask_through_its_declared_failure_route() {
+    use orbital_core::client::client_core::PendingHostAsk;
+    use orbital_core::HostAskCompletion;
+
+    let mut note = orbital(
+        "Notes",
+        &serde_json::json!({ "type": "typography", "content": "ready" }),
+    );
+    note["traits"][0]["stateMachine"]["transitions"]
+        .as_array_mut()
+        .unwrap()
+        .push(serde_json::json!({
+            "from": "idle", "to": "idle", "event": "UNAVAILABLE",
+            "effects": [["render-ui", "main", { "type": "typography", "content": "audio unavailable" }]]
+        }));
+    let mut app = app(vec![note]);
+    app.core_mut().pending_host_asks.push(PendingHostAsk {
+        source_trait: "NotesView".into(),
+        op: "audio/play-sound".into(),
+        args: vec![orbital_core::Value::string("jump")],
+        completion: Some(HostAskCompletion {
+            trait_name: "NotesView".into(),
+            failure: Some("UNAVAILABLE".into()),
+            ..Default::default()
+        }),
+    });
+    app.send_event("INIT", orbital_core::Value::Null);
+    assert!(app.core().pending_host_asks.is_empty());
+    assert!(app
+        .render_to_text(80, 12)
+        .unwrap()
+        .contains("audio unavailable"));
 }
 
 mod rows_by_reference {
@@ -97,18 +152,40 @@ mod rows_by_reference {
     fn app() -> (TuiApp, Arc<ClientKernel>) {
         let schema = schema();
         let server = KernelBridge::new(schema.clone()).unwrap();
-        server.seed("Ticket", vec![row("t1", "alpha-row", "u1")]).unwrap();
+        server
+            .seed("Ticket", vec![row("t1", "alpha-row", "u1")])
+            .unwrap();
         let bridge: Arc<dyn ServerBridge> = Arc::new(server);
         let kernel = Arc::new(ClientKernel::new(schema.clone(), Some(bridge)).unwrap());
-        kernel.seed("Ticket", vec![row("t1", "alpha-row", "u1"), row("t2", "hidden-row", "u2"), row("t3", "gamma-row", "u1")]).unwrap();
-        let app = TuiApp::with_core(ClientCore::with_client_kernel(schema, kernel.clone()), Vec::new());
+        kernel
+            .seed(
+                "Ticket",
+                vec![
+                    row("t1", "alpha-row", "u1"),
+                    row("t2", "hidden-row", "u2"),
+                    row("t3", "gamma-row", "u1"),
+                ],
+            )
+            .unwrap();
+        let app = TuiApp::with_core(
+            ClientCore::with_client_kernel(schema, kernel.clone()),
+            Vec::new(),
+        );
         (app, kernel)
     }
 
     fn list_all(app: &mut TuiApp) {
-        let reference = RowSetRef { entity_type: "Ticket".into(), ids: vec!["t1".into(), "t2".into(), "t3".into()], total: 3, query: Default::default() };
+        let reference = RowSetRef {
+            entity_type: "Ticket".into(),
+            ids: vec!["t1".into(), "t2".into(), "t3".into()],
+            total: 3,
+            query: Default::default(),
+        };
         let data = serde_json::to_value(row_set_marker(&reference)).unwrap();
-        app.send_event("LISTED", serde_json::from_value(json!({ "data": data, "totalCount": 3 })).unwrap());
+        app.send_event(
+            "LISTED",
+            serde_json::from_value(json!({ "data": data, "totalCount": 3 })).unwrap(),
+        );
     }
 
     #[test]
@@ -116,8 +193,14 @@ mod rows_by_reference {
         let (mut app, _) = app();
         list_all(&mut app);
         let text = app.render_to_text(80, 12).unwrap();
-        assert!(text.contains("alpha-row") && text.contains("gamma-row"), "{text}");
-        assert!(!text.contains("hidden-row"), "the policy hides u2's row: {text}");
+        assert!(
+            text.contains("alpha-row") && text.contains("gamma-row"),
+            "{text}"
+        );
+        assert!(
+            !text.contains("hidden-row"),
+            "the policy hides u2's row: {text}"
+        );
         assert!(!text.contains("$rowSet"), "{text}");
     }
 
@@ -127,10 +210,15 @@ mod rows_by_reference {
         list_all(&mut app);
         assert!(app.render_to_text(80, 12).unwrap().contains("alpha-row"));
         // the server runs the persist; the row it wrote reaches the client's rows before the repaint paints
-        kernel.seed("Ticket", vec![row("t1", "renamed", "u1")]).unwrap();
+        kernel
+            .seed("Ticket", vec![row("t1", "renamed", "u1")])
+            .unwrap();
         app.send_event("RENAME", orbital_core::Value::Null);
         let text = app.render_to_text(80, 12).unwrap();
-        assert!(text.contains("renamed") && !text.contains("alpha-row"), "{text}");
+        assert!(
+            text.contains("renamed") && !text.contains("alpha-row"),
+            "{text}"
+        );
         assert!(text.contains("gamma-row"), "{text}");
     }
 

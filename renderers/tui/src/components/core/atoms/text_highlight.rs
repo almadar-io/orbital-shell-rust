@@ -32,6 +32,12 @@ impl PatternRenderer for TextHighlightRenderer {
         use ratatui::style::{Color, Style};
         use ratatui::text::{Line, Span};
         use ratatui::widgets::Paragraph;
-        frame.render_widget(Paragraph::new(Line::from(Span::styled(get_string_or(props, "text", ""), Style::default().bg(Color::Yellow).fg(Color::Black)))), area);
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(
+                get_string_or(props, "text", ""),
+                Style::default().bg(Color::Yellow).fg(Color::Black),
+            ))),
+            area,
+        );
     }
 }

@@ -31,8 +31,29 @@ impl PatternRenderer for DocTOCRenderer {
     ) {
         use ratatui::text::Line;
         use ratatui::widgets::{Block, Borders, Paragraph};
-        let items = { let mut i = get_array(props, "items"); if i.is_empty() { i = get_array(props, "headings"); } i };
-        let lines: Vec<Line> = items.iter().map(|it| Line::from(it.as_object().and_then(|o| o.get("label")).and_then(|v| v.as_str()).or_else(|| it.as_str()).unwrap_or("").to_string())).collect();
-        frame.render_widget(Paragraph::new(lines).block(Block::default().borders(Borders::ALL).title("Contents")), area);
+        let items = {
+            let mut i = get_array(props, "items");
+            if i.is_empty() {
+                i = get_array(props, "headings");
+            }
+            i
+        };
+        let lines: Vec<Line> = items
+            .iter()
+            .map(|it| {
+                Line::from(
+                    it.as_object()
+                        .and_then(|o| o.get("label"))
+                        .and_then(|v| v.as_str())
+                        .or_else(|| it.as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                )
+            })
+            .collect();
+        frame.render_widget(
+            Paragraph::new(lines).block(Block::default().borders(Borders::ALL).title("Contents")),
+            area,
+        );
     }
 }

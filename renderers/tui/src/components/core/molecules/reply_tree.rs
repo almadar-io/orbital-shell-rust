@@ -31,7 +31,21 @@ impl PatternRenderer for ReplyTreeRenderer {
     ) {
         use ratatui::text::Line;
         use ratatui::widgets::{Block, Borders, Paragraph};
-        let lines: Vec<Line> = get_array(props, "replies").iter().map(|r| Line::from(r.as_object().and_then(|o| o.get("text")).and_then(|v| v.as_str()).unwrap_or("").to_string())).collect();
-        frame.render_widget(Paragraph::new(lines).block(Block::default().borders(Borders::ALL).title("Replies")), area);
+        let lines: Vec<Line> = get_array(props, "replies")
+            .iter()
+            .map(|r| {
+                Line::from(
+                    r.as_object()
+                        .and_then(|o| o.get("text"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                )
+            })
+            .collect();
+        frame.render_widget(
+            Paragraph::new(lines).block(Block::default().borders(Borders::ALL).title("Replies")),
+            area,
+        );
     }
 }

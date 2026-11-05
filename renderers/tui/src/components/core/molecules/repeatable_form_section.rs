@@ -31,7 +31,13 @@ impl PatternRenderer for RepeatableFormSectionRenderer {
     ) {
         use ratatui::text::Line;
         use ratatui::widgets::{Block, Borders, Paragraph};
-        let lines: Vec<Line> = get_fields(props, "fields").into_iter().map(|f| Line::from(format!("{}: ____", f.label))).collect();
-        frame.render_widget(Paragraph::new(lines).block(Block::default().borders(Borders::ALL)), area);
+        let lines: Vec<Line> = get_fields(props, "fields")
+            .into_iter()
+            .map(|f| Line::from(format!("{}: ____", f.label)))
+            .collect();
+        frame.render_widget(
+            Paragraph::new(lines).block(Block::default().borders(Borders::ALL)),
+            area,
+        );
     }
 }

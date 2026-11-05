@@ -31,7 +31,22 @@ impl PatternRenderer for MatrixQuestionRenderer {
     ) {
         use ratatui::text::Line;
         use ratatui::widgets::{Block, Borders, Paragraph};
-        let lines: Vec<Line> = get_array(props, "rows").iter().map(|r| Line::from(r.as_object().and_then(|o| o.get("label")).and_then(|v| v.as_str()).or_else(|| r.as_str()).unwrap_or("").to_string())).collect();
-        frame.render_widget(Paragraph::new(lines).block(Block::default().borders(Borders::ALL)), area);
+        let lines: Vec<Line> = get_array(props, "rows")
+            .iter()
+            .map(|r| {
+                Line::from(
+                    r.as_object()
+                        .and_then(|o| o.get("label"))
+                        .and_then(|v| v.as_str())
+                        .or_else(|| r.as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                )
+            })
+            .collect();
+        frame.render_widget(
+            Paragraph::new(lines).block(Block::default().borders(Borders::ALL)),
+            area,
+        );
     }
 }

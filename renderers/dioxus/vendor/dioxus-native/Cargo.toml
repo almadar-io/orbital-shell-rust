@@ -64,9 +64,10 @@ hot-reload = [
 html = ["dep:blitz-html"]
 incremental = ["blitz-dom/incremental"]
 net = [
-    "dep:tokio",
+    "time",
     "dep:blitz-net",
 ]
+time = ["dep:tokio", "tokio/time"]
 prelude = [
     "dep:dioxus-core-macro",
     "dep:dioxus-hooks",

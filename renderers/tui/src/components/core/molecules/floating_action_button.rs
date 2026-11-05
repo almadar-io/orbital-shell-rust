@@ -31,6 +31,13 @@ impl PatternRenderer for FloatingActionButtonRenderer {
     ) {
         use ratatui::text::Line;
         use ratatui::widgets::{Block, Borders, Paragraph};
-        frame.render_widget(Paragraph::new(Line::from(format!("[{}]", get_string_or(props, "icon", "+")))).block(Block::default().borders(Borders::ALL).title("FAB")), area);
+        frame.render_widget(
+            Paragraph::new(Line::from(format!(
+                "[{}]",
+                get_string_or(props, "icon", "+")
+            )))
+            .block(Block::default().borders(Borders::ALL).title("FAB")),
+            area,
+        );
     }
 }

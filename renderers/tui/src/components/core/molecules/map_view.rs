@@ -44,10 +44,14 @@ impl PatternRenderer for MapViewRenderer {
             let label = get_string_or(m, "label", "?");
             let mlat = get_number_or(m, "lat", 0.0);
             let mlng = get_number_or(m, "lng", 0.0);
-            lines.push(Line::from(format!("  ◉ {} ({:.3},{:.3})", label, mlat, mlng)));
+            lines.push(Line::from(format!(
+                "  ◉ {} ({:.3},{:.3})",
+                label, mlat, mlng
+            )));
         }
         frame.render_widget(
-            Paragraph::new(Text::from(lines)).block(Block::default().borders(Borders::ALL).title("map-view")),
+            Paragraph::new(Text::from(lines))
+                .block(Block::default().borders(Borders::ALL).title("map-view")),
             area,
         );
     }

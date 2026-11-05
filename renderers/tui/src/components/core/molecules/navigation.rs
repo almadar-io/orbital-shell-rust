@@ -31,8 +31,23 @@ impl PatternRenderer for NavigationRenderer {
     ) {
         use ratatui::text::Line;
         use ratatui::widgets::Paragraph;
-        let items = { let mut i = get_array(props, "items"); if i.is_empty() { i = get_array(props, "links"); } i };
-        let labels: Vec<String> = items.iter().map(|it| it.as_object().and_then(|o| o.get("label")).and_then(|v| v.as_str()).unwrap_or("").to_string()).collect();
+        let items = {
+            let mut i = get_array(props, "items");
+            if i.is_empty() {
+                i = get_array(props, "links");
+            }
+            i
+        };
+        let labels: Vec<String> = items
+            .iter()
+            .map(|it| {
+                it.as_object()
+                    .and_then(|o| o.get("label"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string()
+            })
+            .collect();
         frame.render_widget(Paragraph::new(Line::from(labels.join("   "))), area);
     }
 }

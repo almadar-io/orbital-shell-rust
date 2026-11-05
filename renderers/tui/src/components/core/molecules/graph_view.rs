@@ -33,9 +33,16 @@ impl PatternRenderer for GraphViewRenderer {
         use ratatui::widgets::{Block, Borders, Paragraph};
         let nodes = get_array(props, "nodes");
         let edges = get_array(props, "edges");
-        let mut lines = vec![Line::from(format!("🕸 {} nodes, {} edges", nodes.len(), edges.len()))];
+        let mut lines = vec![Line::from(format!(
+            "🕸 {} nodes, {} edges",
+            nodes.len(),
+            edges.len()
+        ))];
         for node in nodes.iter().take(8) {
-            lines.push(Line::from(format!("  • {}", get_string_or(node, "label", &get_string_or(node, "id", "?")))));
+            lines.push(Line::from(format!(
+                "  • {}",
+                get_string_or(node, "label", &get_string_or(node, "id", "?"))
+            )));
         }
         frame.render_widget(
             Paragraph::new(Text::from(lines)).block(Block::default().borders(Borders::ALL)),

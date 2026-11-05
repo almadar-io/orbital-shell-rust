@@ -33,7 +33,14 @@ impl PatternRenderer for SvgRingRenderer {
         use ratatui::widgets::Paragraph;
         let r = get_number_or(props, "r", 30.0) as usize;
         let variant = get_string_or(props, "variant", "solid");
-        let sym = if variant.contains("dashed") { "◌" } else { "○" };
-        frame.render_widget(Paragraph::new(Line::from(format!("[ring r={}] {}", r, sym))), area);
+        let sym = if variant.contains("dashed") {
+            "◌"
+        } else {
+            "○"
+        };
+        frame.render_widget(
+            Paragraph::new(Line::from(format!("[ring r={}] {}", r, sym))),
+            area,
+        );
     }
 }

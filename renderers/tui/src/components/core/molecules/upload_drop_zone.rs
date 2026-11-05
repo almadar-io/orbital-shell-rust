@@ -31,6 +31,11 @@ impl PatternRenderer for UploadDropZoneRenderer {
     ) {
         use ratatui::layout::Alignment;
         use ratatui::widgets::{Block, Borders, Paragraph};
-        frame.render_widget(Paragraph::new(get_string_or(props, "label", "Drop files here")).alignment(Alignment::Center).block(Block::default().borders(Borders::ALL)), area);
+        frame.render_widget(
+            Paragraph::new(get_string_or(props, "label", "Drop files here"))
+                .alignment(Alignment::Center)
+                .block(Block::default().borders(Borders::ALL)),
+            area,
+        );
     }
 }

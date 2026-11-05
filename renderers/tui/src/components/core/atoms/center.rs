@@ -32,6 +32,9 @@ impl PatternRenderer for CenterRenderer {
         use ratatui::layout::Alignment;
         use ratatui::text::Line;
         use ratatui::widgets::Paragraph;
-        frame.render_widget(Paragraph::new(Line::from("Center")).alignment(Alignment::Center), area);
+        frame.render_widget(
+            Paragraph::new(Line::from("Center")).alignment(Alignment::Center),
+            area,
+        );
     }
 }

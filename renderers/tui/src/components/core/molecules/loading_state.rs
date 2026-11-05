@@ -33,6 +33,10 @@ impl PatternRenderer for LoadingStateRenderer {
         use ratatui::text::{Line, Text};
         use ratatui::widgets::Paragraph;
         let message = get_string_or(props, "message", "Loading...");
-        frame.render_widget(Paragraph::new(Text::from(vec![Line::from("…"), Line::from(message)])).alignment(Alignment::Center), area);
+        frame.render_widget(
+            Paragraph::new(Text::from(vec![Line::from("…"), Line::from(message)]))
+                .alignment(Alignment::Center),
+            area,
+        );
     }
 }

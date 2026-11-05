@@ -36,14 +36,36 @@ impl PatternRenderer for SegmentRendererRenderer {
         let mut lines: Vec<Line> = Vec::new();
         for seg in segments.iter().take(8) {
             let seg_type = get_string_or(seg, "type", "");
-            let content = { let c = get_string_or(seg, "content", ""); if c.is_empty() { get_string_or(seg, "question", "") } else { c } };
-            let label = Span::styled(format!("[{}] ", seg_type), Style::default().fg(Color::DarkGray).add_modifier(Modifier::BOLD));
-            let text_span = Span::raw(if content.len() > 60 { format!("{}…", &content[..60]) } else { content });
+            let content = {
+                let c = get_string_or(seg, "content", "");
+                if c.is_empty() {
+                    get_string_or(seg, "question", "")
+                } else {
+                    c
+                }
+            };
+            let label = Span::styled(
+                format!("[{}] ", seg_type),
+                Style::default()
+                    .fg(Color::DarkGray)
+                    .add_modifier(Modifier::BOLD),
+            );
+            let text_span = Span::raw(if content.len() > 60 {
+                format!("{}…", &content[..60])
+            } else {
+                content
+            });
             lines.push(Line::from(vec![label, text_span]));
         }
-        if lines.is_empty() { lines.push(Line::from("No segments")); }
+        if lines.is_empty() {
+            lines.push(Line::from("No segments"));
+        }
         frame.render_widget(
-            Paragraph::new(Text::from(lines)).block(Block::default().borders(Borders::ALL).title(format!("Segments ({})", get_array(props, "segments").len()))),
+            Paragraph::new(Text::from(lines)).block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(format!("Segments ({})", get_array(props, "segments").len())),
+            ),
             area,
         );
     }

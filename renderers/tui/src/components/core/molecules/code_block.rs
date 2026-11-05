@@ -31,6 +31,9 @@ impl PatternRenderer for CodeBlockRenderer {
     ) {
         use ratatui::widgets::{Block, Borders, Paragraph};
         let code = get_string_or(props, "code", get_string_or(props, "content", "").as_str());
-        frame.render_widget(Paragraph::new(code).block(Block::default().borders(Borders::ALL).title("code")), area);
+        frame.render_widget(
+            Paragraph::new(code).block(Block::default().borders(Borders::ALL).title("code")),
+            area,
+        );
     }
 }

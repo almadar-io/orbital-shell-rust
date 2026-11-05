@@ -30,6 +30,10 @@ impl PatternRenderer for FlipCardRenderer {
         _ctx: &mut RenderContext<'_>,
     ) {
         use ratatui::widgets::{Block, Borders, Paragraph};
-        frame.render_widget(Paragraph::new(get_string_or(props, "front", "")).block(Block::default().borders(Borders::ALL)), area);
+        frame.render_widget(
+            Paragraph::new(get_string_or(props, "front", ""))
+                .block(Block::default().borders(Borders::ALL)),
+            area,
+        );
     }
 }

@@ -32,7 +32,22 @@ impl PatternRenderer for SortableListRenderer {
         use ratatui::text::Line;
         use ratatui::widgets::{Block, Borders, Paragraph};
         let items = get_array(props, "items");
-        let lines: Vec<Line> = items.iter().map(|it| Line::from(format!("☰ {}", it.as_object().and_then(|o| o.get("label")).and_then(|v| v.as_str()).or_else(|| it.as_str()).unwrap_or("")))).collect();
-        frame.render_widget(Paragraph::new(lines).block(Block::default().borders(Borders::ALL)), area);
+        let lines: Vec<Line> = items
+            .iter()
+            .map(|it| {
+                Line::from(format!(
+                    "☰ {}",
+                    it.as_object()
+                        .and_then(|o| o.get("label"))
+                        .and_then(|v| v.as_str())
+                        .or_else(|| it.as_str())
+                        .unwrap_or("")
+                ))
+            })
+            .collect();
+        frame.render_widget(
+            Paragraph::new(lines).block(Block::default().borders(Borders::ALL)),
+            area,
+        );
     }
 }

@@ -32,18 +32,53 @@ impl PatternRenderer for AvlTransitionExplainerRenderer {
         use ratatui::style::{Modifier, Style};
         use ratatui::text::{Line, Span, Text};
         use ratatui::widgets::{Block, Borders, Paragraph};
-        let tro = props.as_object().and_then(|o| o.get("transition")).and_then(|v| v.as_object());
-        let from = tro.and_then(|o| o.get("from")).and_then(|v| v.as_str()).unwrap_or("").to_string();
-        let to = tro.and_then(|o| o.get("to")).and_then(|v| v.as_str()).unwrap_or("").to_string();
-        let event = tro.and_then(|o| o.get("event")).and_then(|v| v.as_str()).unwrap_or("").to_string();
-        let guard = tro.and_then(|o| o.get("guard")).filter(|v| !matches!(v, Value::Null)).map(|v| v.to_string());
-        let effects = tro.and_then(|o| o.get("effects")).and_then(|v| v.as_array()).map(|a| a.to_vec()).unwrap_or_default();
-        let mut lines: Vec<Line> = vec![Line::from(Span::styled(format!("{} --{}--> {}", from, event, to), Style::default().add_modifier(Modifier::BOLD)))];
-        if let Some(g) = guard { lines.push(Line::from(format!("guard: {}", g))); }
+        let tro = props
+            .as_object()
+            .and_then(|o| o.get("transition"))
+            .and_then(|v| v.as_object());
+        let from = tro
+            .and_then(|o| o.get("from"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let to = tro
+            .and_then(|o| o.get("to"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let event = tro
+            .and_then(|o| o.get("event"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let guard = tro
+            .and_then(|o| o.get("guard"))
+            .filter(|v| !matches!(v, Value::Null))
+            .map(|v| v.to_string());
+        let effects = tro
+            .and_then(|o| o.get("effects"))
+            .and_then(|v| v.as_array())
+            .map(|a| a.to_vec())
+            .unwrap_or_default();
+        let mut lines: Vec<Line> = vec![Line::from(Span::styled(
+            format!("{} --{}--> {}", from, event, to),
+            Style::default().add_modifier(Modifier::BOLD),
+        ))];
+        if let Some(g) = guard {
+            lines.push(Line::from(format!("guard: {}", g)));
+        }
         for (i, e) in effects.iter().enumerate() {
-            let kind = e.as_object().and_then(|o| o.get("type")).and_then(|v| v.as_str()).unwrap_or("");
+            let kind = e
+                .as_object()
+                .and_then(|o| o.get("type"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
             lines.push(Line::from(format!("{}. {}", i + 1, kind)));
         }
-        frame.render_widget(Paragraph::new(Text::from(lines)).block(Block::default().borders(Borders::ALL).title("transition")), area);
+        frame.render_widget(
+            Paragraph::new(Text::from(lines))
+                .block(Block::default().borders(Borders::ALL).title("transition")),
+            area,
+        );
     }
 }

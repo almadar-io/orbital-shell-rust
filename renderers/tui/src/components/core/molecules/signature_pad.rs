@@ -50,7 +50,11 @@ impl PatternRenderer for SignaturePadRenderer {
             lines.push(Line::from(helper).style(Style::default().fg(Color::DarkGray)));
         }
         frame.render_widget(
-            Paragraph::new(Text::from(lines)).block(Block::default().borders(Borders::ALL).title("signature-pad")),
+            Paragraph::new(Text::from(lines)).block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title("signature-pad"),
+            ),
             area,
         );
     }

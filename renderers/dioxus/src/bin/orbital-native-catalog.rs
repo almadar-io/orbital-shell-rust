@@ -7,8 +7,7 @@
 //! every baked behavior; clicking a row mounts its `.orb` through the SAME
 //! pipeline `orb verify` runs (`shell::mount_core` → `KernelBridge` +
 //! `ClientCore`), and event chips drive the state machine. With no `--css` flag it paints with the
-//! renderer's own stylesheets (`styles::stylesheets()`: the `@almadar/ui` theme bundle, the base layer, the
-//! Tailwind utilities); each `--css <file>` replaces that stack.
+//! renderer's themed stylesheets; each `--css <file>` replaces that stack.
 
 #[cfg(not(target_arch = "wasm32"))]
 fn main() {
@@ -35,11 +34,13 @@ fn main() {
         }
     }
     let css_texts: Vec<String> = if css_paths.is_empty() {
-        orbital_client_dioxus::styles::stylesheets()
+        orbital_client_dioxus::styles::themed_stylesheets()
     } else {
         css_paths
             .iter()
-            .map(|p| std::fs::read_to_string(p).unwrap_or_else(|e| panic!("failed to read css {p}: {e}")))
+            .map(|p| {
+                std::fs::read_to_string(p).unwrap_or_else(|e| panic!("failed to read css {p}: {e}"))
+            })
             .collect()
     };
 

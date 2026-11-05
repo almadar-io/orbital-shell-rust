@@ -30,6 +30,15 @@ impl PatternRenderer for DocumentViewerRenderer {
         _ctx: &mut RenderContext<'_>,
     ) {
         use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
-        frame.render_widget(Paragraph::new(get_string_or(props, "content", "")).wrap(Wrap { trim: true }).block(Block::default().borders(Borders::ALL).title(get_string_or(props, "title", "Document"))), area);
+        frame.render_widget(
+            Paragraph::new(get_string_or(props, "content", ""))
+                .wrap(Wrap { trim: true })
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .title(get_string_or(props, "title", "Document")),
+                ),
+            area,
+        );
     }
 }

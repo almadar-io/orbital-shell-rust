@@ -32,6 +32,14 @@ impl PatternRenderer for CommitRowRenderer {
         use ratatui::widgets::Paragraph;
         let sha = get_string_or(props, "sha", "");
         let short: String = sha.chars().take(7).collect();
-        frame.render_widget(Paragraph::new(format!("{} {} {}", short, get_string_or(props, "message", ""), get_string_or(props, "author", ""))), area);
+        frame.render_widget(
+            Paragraph::new(format!(
+                "{} {} {}",
+                short,
+                get_string_or(props, "message", ""),
+                get_string_or(props, "author", "")
+            )),
+            area,
+        );
     }
 }

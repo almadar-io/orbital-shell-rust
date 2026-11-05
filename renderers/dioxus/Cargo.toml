@@ -8,11 +8,15 @@ description = "Dioxus renderer for Orbital, over the shared client circuit in or
 
 [lib]
 # `cdylib` so the wasm32 build can be loaded by `wasm-bindgen` in the browser;
-# `rlib` keeps native dependents linking as before.
+# `rlib` lets platform-owned hosts link the renderer.
 crate-type = ["cdylib", "rlib"]
 
 [features]
 default = []
+research-drag = []
+research-video = ["native", "dep:wry"]
+research-dock = []
+research-audio = []
 # Native (Blitz) shell: the SAME kernel circuit (`ClientCore` + `KernelBridge`,
 # offline, no HTTP) + renderers, painted through Blitz (Stylo CSS + Taffy +
 # wgpu) instead of browser DOM. On desktop the shell uses
@@ -24,6 +28,10 @@ default = []
 # accesskit trees that have no wasm32 build.
 native = [
     "dep:dioxus-native",
+    "dioxus-native/time",
+    "dioxus-native/svg",
+    "dep:android-activity",
+    "dep:blitz-shell",
     "dep:tracing-subscriber",
     # Blitz paint stack for the wasm32 canvas glue.
     "dep:blitz-dom",
@@ -51,6 +59,9 @@ native = [
     "dep:orbital-canvas",
     "dep:png",
 ]
+native-a11y = ["native", "dioxus-native/accessibility", "native-http"]
+native-http = ["orbital-core/client-http", "dep:futures-channel"]
+native-audio = ["native", "dep:rodio", "dep:ureq", "dep:fastrand", "dep:dioxus-asset-resolver", "dep:futures-channel"]
 
 [dependencies]
 # `Instant` that works on wasm32 (performance.now); std's panics there.
@@ -70,7 +81,9 @@ dioxus = { version = "0.7", default-features = false, features = ["minimal", "do
 # renderers in `components/` use them on every target, so it must build on
 # wasm32 too (`web` feature = time/wasm-bindgen, inert on desktop).
 dioxus-primitives = { path = "vendor/dioxus-primitives", default-features = false, features = ["web"] }
+dioxus-sdk-time = "0.7.0"
 serde_json = "1.0"
+serde = { version = "1.0", features = ["derive"] }
 thiserror = "1.0"
 tracing = "0.1"
 
@@ -116,6 +129,11 @@ dioxus-core = { version = "0.7.9", optional = true }
 # Native-only game-renderer transports: `http` (ureq → ring) and `system-fonts`
 # (filesystem font scan) do not build for wasm32-unknown-unknown.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+futures-channel = { version = "0.3", optional = true }
+rodio = { version = "0.21.1", default-features = false, features = ["playback", "symphonia-all"], optional = true }
+ureq = { version = "2.9", default-features = false, features = ["tls"], optional = true }
+fastrand = { version = "2.3", optional = true }
+dioxus-asset-resolver = { version = "0.7.9", features = ["native"], optional = true }
 orbital-canvas = { git = "https://github.com/almadar-io/orbital-canvas", branch = "main", features = ["http", "system-fonts"], optional = true }
 # PNG encoding for the offscreen capture (`offscreen::capture_png`).
 png = { version = "0.17", optional = true }
@@ -147,3 +165,13 @@ required-features = ["native"]
 
 [dev-dependencies]
 pretty_assertions = "1.4"
+dioxus-html = { version = "0.7.9", features = ["serialize"] }
+
+[target.'cfg(target_os = "android")'.dependencies]
+android-activity = { version = "0.6.0", features = ["game-activity"], optional = true }
+blitz-shell = { version = "0.2.3", default-features = false, optional = true }
+jni = "0.21.1"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+wry = { version = "0.57.1", default-features = false, optional = true }
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["NSAccessibility", "NSWorkspace"] }

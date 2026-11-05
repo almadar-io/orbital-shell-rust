@@ -32,6 +32,13 @@ impl PatternRenderer for VoteStackRenderer {
         use ratatui::text::Line;
         use ratatui::widgets::Paragraph;
         let count = get_number_or(props, "count", 0.0) as i64;
-        frame.render_widget(Paragraph::new(vec![Line::from("▲"), Line::from(format!("{}", count)), Line::from("▼")]), area);
+        frame.render_widget(
+            Paragraph::new(vec![
+                Line::from("▲"),
+                Line::from(format!("{}", count)),
+                Line::from("▼"),
+            ]),
+            area,
+        );
     }
 }

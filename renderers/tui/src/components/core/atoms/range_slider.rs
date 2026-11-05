@@ -34,6 +34,12 @@ impl PatternRenderer for RangeSliderRenderer {
         let max = get_number_or(props, "max", 100.0);
         let value = get_number_or(props, "value", min);
         let ratio = ((value - min) / (max - min).max(1.0)).clamp(0.0, 1.0);
-        frame.render_widget(Gauge::default().block(Block::default().borders(Borders::ALL)).ratio(ratio).label(format!("{}", value as i64)), area);
+        frame.render_widget(
+            Gauge::default()
+                .block(Block::default().borders(Borders::ALL))
+                .ratio(ratio)
+                .label(format!("{}", value as i64)),
+            area,
+        );
     }
 }

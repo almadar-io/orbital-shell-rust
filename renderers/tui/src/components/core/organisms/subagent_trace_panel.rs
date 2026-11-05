@@ -41,7 +41,8 @@ impl PatternRenderer for SubagentTracePanelRenderer {
             lines.push(Line::from(format!("  > {}", format_value(m))));
         }
         frame.render_widget(
-            Paragraph::new(Text::from(lines)).block(Block::default().borders(Borders::ALL).title("trace")),
+            Paragraph::new(Text::from(lines))
+                .block(Block::default().borders(Borders::ALL).title("trace")),
             area,
         );
     }

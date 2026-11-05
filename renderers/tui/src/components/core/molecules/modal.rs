@@ -32,6 +32,10 @@ impl PatternRenderer for ModalRenderer {
         use ratatui::text::Line;
         use ratatui::widgets::{Block, Borders, Paragraph};
         let title = get_string_or(props, "title", "Modal");
-        frame.render_widget(Paragraph::new(Line::from("[modal]")).block(Block::default().borders(Borders::ALL).title(title)), area);
+        frame.render_widget(
+            Paragraph::new(Line::from("[modal]"))
+                .block(Block::default().borders(Borders::ALL).title(title)),
+            area,
+        );
     }
 }

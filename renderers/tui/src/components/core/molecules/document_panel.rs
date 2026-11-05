@@ -40,14 +40,55 @@ impl PatternRenderer for DocumentPanelRenderer {
             if in_tag {
                 if ch == '>' {
                     in_tag = false;
-                    let t = tag.trim_start_matches('/').split_whitespace().next().unwrap_or("").to_ascii_lowercase();
-                    if matches!(t.as_str(), "p" | "div" | "br" | "li" | "h1" | "h2" | "h3" | "h4" | "blockquote" | "pre" | "ul" | "ol" | "hr") && !text.ends_with('\n') { text.push('\n'); }
+                    let t = tag
+                        .trim_start_matches('/')
+                        .split_whitespace()
+                        .next()
+                        .unwrap_or("")
+                        .to_ascii_lowercase();
+                    if matches!(
+                        t.as_str(),
+                        "p" | "div"
+                            | "br"
+                            | "li"
+                            | "h1"
+                            | "h2"
+                            | "h3"
+                            | "h4"
+                            | "blockquote"
+                            | "pre"
+                            | "ul"
+                            | "ol"
+                            | "hr"
+                    ) && !text.ends_with('\n')
+                    {
+                        text.push('\n');
+                    }
                     tag.clear();
-                } else { tag.push(ch); }
-            } else if ch == '<' { in_tag = true; } else { text.push(ch); }
+                } else {
+                    tag.push(ch);
+                }
+            } else if ch == '<' {
+                in_tag = true;
+            } else {
+                text.push(ch);
+            }
         }
-        let text = text.replace("&nbsp;", " ").replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&");
-        let lines: Vec<Line> = text.lines().filter(|l| !l.trim().is_empty()).map(|l| Line::from(l.trim().to_string())).collect();
-        frame.render_widget(Paragraph::new(lines).wrap(ratatui::widgets::Wrap { trim: true }).block(Block::default().borders(Borders::ALL).title(title)), area);
+        let text = text
+            .replace("&nbsp;", " ")
+            .replace("&lt;", "<")
+            .replace("&gt;", ">")
+            .replace("&amp;", "&");
+        let lines: Vec<Line> = text
+            .lines()
+            .filter(|l| !l.trim().is_empty())
+            .map(|l| Line::from(l.trim().to_string()))
+            .collect();
+        frame.render_widget(
+            Paragraph::new(lines)
+                .wrap(ratatui::widgets::Wrap { trim: true })
+                .block(Block::default().borders(Borders::ALL).title(title)),
+            area,
+        );
     }
 }
