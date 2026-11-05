@@ -583,7 +583,7 @@ pub fn VideoAnchor(anchor: VideoAnchorProps) -> Element {
     let id = mount.0 .0.to_string();
     let props = &anchor.props;
     let source = VideoSource::from_props(props);
-    let class = merge_class_name(
+    let class = crate::renderer::merge_class_name(
         "aspect-video w-full overflow-hidden rounded-md bg-muted",
         props,
     );
