@@ -3,7 +3,6 @@
 
 use orbital_core::Value;
 
-const THEME: &str = include_str!("../assets/css/almadar-theme.css");
 const BASE: &str = include_str!("../assets/css/almadar.css");
 const WEB_CLIENT: &str = include_str!("../assets/css/web-client.css");
 
@@ -13,11 +12,24 @@ pub fn stylesheets() -> Vec<String> {
 
 pub fn program_stylesheets(schema: &orbital_core::OrbitalSchema) -> Vec<String> {
     let declared = schema.theme_definitions.as_deref().unwrap_or_default();
-    vec![orbital_core::runtime::theme::program_themes_css(declared), WEB_CLIENT.to_string(), BASE.to_string()]
+    vec![
+        orbital_core::runtime::theme::program_themes_css(declared),
+        WEB_CLIENT.to_string(),
+        BASE.to_string(),
+    ]
 }
 
-pub fn themed_stylesheets() -> Vec<String> {
-    vec![THEME.to_string(), WEB_CLIENT.to_string(), BASE.to_string()]
+pub fn preset_stylesheets() -> Vec<String> {
+    let presets = orbital_core::runtime::theme::ThemePresets::installed()
+        .definitions()
+        .into_iter()
+        .cloned()
+        .collect::<Vec<_>>();
+    vec![
+        orbital_core::runtime::theme::program_themes_css(&presets),
+        WEB_CLIENT.to_string(),
+        BASE.to_string(),
+    ]
 }
 
 pub(crate) fn style_with_props(base: &str, props: &Value) -> String {
@@ -90,7 +102,7 @@ fn css_property_name(name: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{program_stylesheets, style_with_props};
+    use super::{preset_stylesheets, program_stylesheets, style_with_props};
     use orbital_core::{Value, ValueMap};
 
     fn schema_with_themes(themes: &str) -> orbital_core::OrbitalSchema {
@@ -111,6 +123,15 @@ mod tests {
         assert!(css.contains(r#"[data-theme="almadar-dark"]"#));
         assert!(css.contains(r#"[data-theme="almadar-light"]"#));
         assert!(!css.contains(r#"[data-theme="minimalist-light"]"#));
+    }
+
+    #[test]
+    fn preset_stylesheets_paint_every_installed_preset() {
+        let css = &preset_stylesheets()[0];
+        assert!(css.contains(r#"[data-theme="almadar-dark"]"#));
+        assert!(css.contains(r#"[data-theme="minimalist-light"]"#));
+        let declared = &program_stylesheets(&schema_with_themes("[]"))[0];
+        assert!(!declared.contains(r#"[data-theme="almadar-dark"]"#));
     }
 
     #[test]

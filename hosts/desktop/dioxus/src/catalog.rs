@@ -106,7 +106,7 @@ fn tier_rank(level: &str) -> usize {
 }
 
 /// Theme names parsed from the injected CSS bundle (`[data-theme="…"]`
-/// selectors in `almadar-theme.css`) — the catalog header's theme cycler.
+/// selectors in the generated preset stylesheet) — the catalog header's theme cycler.
 fn theme_names() -> &'static Vec<String> {
     static NAMES: OnceLock<Vec<String>> = OnceLock::new();
     NAMES.get_or_init(|| {

@@ -284,7 +284,7 @@ std::thread_local! {
     /// on web, where CSS arrives via `<link>` in the preview HTML instead.
     pub static CSS_TEXT: RefCell<Vec<String>> = RefCell::new(Vec::new());
     /// Active design-system theme (`@almadar/ui` `[data-theme="…"]` blocks in
-    /// `almadar-theme.css`). `None` uses the web shell's wireframe-light default.
+    /// the generated preset stylesheet). `None` uses the web shell's wireframe-light default.
     /// Read by the root `App`
     /// component into the `data-theme` attribute.
     pub static THEME: RefCell<Option<String>> = RefCell::new(None);

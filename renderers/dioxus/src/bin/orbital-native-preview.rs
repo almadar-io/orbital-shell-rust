@@ -140,7 +140,7 @@ fn main() {
     }
     let css_texts: Vec<String> = if css_paths.is_empty() {
         if orbital_client_dioxus::app::THEME.with(|cell| cell.borrow().is_some()) {
-            orbital_client_dioxus::styles::themed_stylesheets()
+            orbital_client_dioxus::styles::preset_stylesheets()
         } else {
             orbital_client_dioxus::styles::stylesheets()
         }

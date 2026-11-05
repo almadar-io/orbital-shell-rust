@@ -34,7 +34,7 @@ fn main() {
         }
     }
     let css_texts: Vec<String> = if css_paths.is_empty() {
-        orbital_client_dioxus::styles::themed_stylesheets()
+        orbital_client_dioxus::styles::preset_stylesheets()
     } else {
         css_paths
             .iter()
