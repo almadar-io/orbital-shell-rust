@@ -453,11 +453,50 @@ fn payloads(module: &OirModule) -> BTreeMap<String, Vec<OirField>> {
     out
 }
 
+/// One `<Trait>Config` per trait that declares knobs. A knob with a usable declared default carries it; one without
+/// (none, null, or an `@config.` forward) is optional.
+fn trait_configs(module: &OirModule) -> BTreeMap<String, Vec<OirField>> {
+    let mut out = BTreeMap::new();
+    for t in &module.traits {
+        let fields = t.config_fields();
+        if fields.is_empty() {
+            continue;
+        }
+        out.insert(format!("{}Config", symbol(&t.name)), fields);
+    }
+    out
+}
+
+/// `impl Default` building each field from its default fn, or `None` for an optional knob without one.
+fn default_impl(name: &str, fields: &[OirField], types: &RsTypes<'_>) -> String {
+    let inits: Vec<String> = fields
+        .iter()
+        .map(|f| {
+            let ident = rs_identifier(&f.name);
+            let value = if field_line(f, name, types).1.is_some() {
+                format!("default_{name}_{ident}()")
+            } else {
+                "None".to_string()
+            };
+            format!("            {ident}: {value},")
+        })
+        .collect();
+    format!(
+        "impl Default for {name} {{\n    fn default() -> Self {{\n        Self {{\n{}\n        }}\n    }}\n}}",
+        inits.join("\n")
+    )
+}
+
 pub fn events_file(module: &OirModule) -> GeneratedFile {
     let local = local_entities(module);
     let hoisted = RefCell::new(Vec::new());
     let mut body = String::new();
-    for (name, fields) in payloads(module) {
+    let configs = trait_configs(module);
+    let declared = payloads(module)
+        .into_iter()
+        .map(|(n, f)| (n, f, false))
+        .chain(configs.into_iter().map(|(n, f)| (n, f, true)));
+    for (name, fields, is_config) in declared {
         let types = RsTypes {
             context: name.clone(),
             hoisted: &hoisted,
@@ -470,6 +509,10 @@ pub fn events_file(module: &OirModule) -> GeneratedFile {
         }
         body.push_str(&struct_source(&name, None, &lines, &fns));
         body.push_str("\n\n");
+        if is_config {
+            body.push_str(&default_impl(&name, &fields, &types));
+            body.push_str("\n\n");
+        }
     }
     GeneratedFile::new(
         "src/generated/events.rs",
@@ -491,7 +534,7 @@ pub fn files(module: &OirModule) -> Vec<GeneratedFile> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use orbital_core::ir::{OirEvent, OirTrait, OirTypeMap, OirValue};
+    use orbital_core::ir::{OirConfigFieldType, OirEvent, OirTrait, OirTypeMap, OirValue};
 
     pub(crate) fn module(with_trait: bool) -> OirModule {
         let mut m = OirModule::new("app", "1.0.0");
@@ -590,6 +633,34 @@ mod tests {
         assert!(content.contains("pub struct ChunkCHUNKPayload {\n    pub size: f64,\n    pub text: String,\n}"), "{content}");
         assert!(content.contains("pub struct ChunkCHUNKEDPayload {\n    pub count: i64,\n}"), "{content}");
         assert!(content.contains("use super::entities::*;"));
+    }
+
+    fn knob(ty: OirType) -> OirConfigFieldType {
+        OirConfigFieldType { field_type: ty, values: None }
+    }
+
+    #[test]
+    fn a_trait_with_config_knobs_declares_one_typed_config_with_defaults() {
+        let mut m = OirModule::new("app", "1.0.0");
+        let mut t = OirTrait::new("Game");
+        let mut schema = orbital_core::ir::OirConfigSchema::new();
+        schema.insert("running".into(), knob(OirType::Boolean));
+        schema.insert("pointsPerKill".into(), knob(OirType::Number));
+        schema.insert("label".into(), knob(OirType::String));
+        t.declared_config_schema = Some(schema);
+        let mut defaults = orbital_core::ir::OirObject::new();
+        defaults.insert("running".into(), OirValue::Bool(true));
+        defaults.insert("pointsPerKill".into(), OirValue::Number(10.0));
+        t.declared_config_defaults = Some(defaults);
+        m.traits.push(t);
+        let expected = "#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]\npub struct GameConfig {\n    pub label: Option<String>,\n    #[serde(default = \"default_GameConfig_pointsPerKill\")]\n    pub pointsPerKill: f64,\n    #[serde(default = \"default_GameConfig_running\")]\n    pub running: bool,\n}\n\nfn default_GameConfig_pointsPerKill() -> f64 {\n    10.0\n}\n\nfn default_GameConfig_running() -> bool {\n    true\n}\n\nimpl Default for GameConfig {\n    fn default() -> Self {\n        Self {\n            label: None,\n            pointsPerKill: default_GameConfig_pointsPerKill(),\n            running: default_GameConfig_running(),\n        }\n    }\n}";
+        let content = events_file(&m).content;
+        assert!(content.contains(expected), "{content}");
+    }
+
+    #[test]
+    fn control_a_trait_without_config_declares_no_config() {
+        assert!(!events_file(&module(true)).content.contains("ChunkConfig"));
     }
 
     #[test]
