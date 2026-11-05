@@ -23,6 +23,16 @@ fn program() -> OrbitalSchema {
                 ]
             } }],
             "pages": [{ "name": "Home", "path": "/", "traits": [{ "ref": "View" }] }]
+        }, {
+            "name": "Second",
+            "entity": { "name": "Note", "persistence": "runtime", "fields": [{ "name": "id", "type": "string" }] },
+            "traits": [{ "name": "OtherView", "linkedEntity": "Note", "stateMachine": {
+                "states": [{ "name": "idle", "isInitial": true }],
+                "transitions": [
+                    { "from": "idle", "to": "idle", "event": "INIT", "effects": [["render-ui", "main", { "type": "typography", "content": "Other page" }]] }
+                ]
+            } }],
+            "pages": [{ "name": "Other", "path": "/other", "traits": [{ "ref": "OtherView" }] }]
         }]
     }))
     .unwrap()
@@ -63,9 +73,25 @@ fn the_terminal_cannot_paint_a_canvas_and_says_so() {
 #[test]
 fn screenshots_write_one_png_per_orbital_and_text_for_the_terminal() {
     let out = std::env::temp_dir().join(format!("orb-desktop-shots-{}", std::process::id()));
-    let png = files(request(Path::new(BINARY), DesktopRequest::Screenshot { renderer: "dioxus".into(), item: "t".into(), schema: Box::new(program()), out_dir: out.clone() }).unwrap());
-    let txt = files(request(Path::new(BINARY), DesktopRequest::Screenshot { renderer: "tui".into(), item: "t".into(), schema: Box::new(program()), out_dir: out.clone() }).unwrap());
-    assert_eq!(png, vec![out.join("t.orbital0.png")]);
+    let png = files(request(Path::new(BINARY), DesktopRequest::Screenshot { renderer: "dioxus".into(), item: "t".into(), schema: Box::new(program()), out_dir: out.clone(), route: None }).unwrap());
+    let txt = files(request(Path::new(BINARY), DesktopRequest::Screenshot { renderer: "tui".into(), item: "t".into(), schema: Box::new(program()), out_dir: out.clone(), route: None }).unwrap());
+    assert_eq!(png, vec![out.join("t.orbital0.png"), out.join("t.orbital1.png")]);
     assert!(std::fs::read_to_string(&txt[0]).unwrap().contains("Hello frames"));
+    std::fs::remove_dir_all(&out).unwrap();
+}
+
+fn route_shot(route: &str, out: &Path) -> String {
+    let txt = files(request(Path::new(BINARY), DesktopRequest::Screenshot { renderer: "tui".into(), item: "r".into(), schema: Box::new(program()), out_dir: out.to_path_buf(), route: Some(route.into()) }).unwrap());
+    assert_eq!(txt, vec![out.join("r.txt")]);
+    std::fs::read_to_string(&txt[0]).unwrap()
+}
+
+#[test]
+fn a_route_screenshot_captures_the_page_that_route_mount_opens() {
+    let out = std::env::temp_dir().join(format!("orb-desktop-route-{}", std::process::id()));
+    let other = route_shot("/other", &out);
+    assert!(other.contains("Other page") && !other.contains("Hello frames"), "{other}");
+    let home = route_shot("/", &out);
+    assert!(home.contains("Hello frames") && !home.contains("Other page"), "{home}");
     std::fs::remove_dir_all(&out).unwrap();
 }
