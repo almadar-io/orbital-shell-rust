@@ -121,7 +121,7 @@ fn emit_selection(sink: Option<EventSink>, event: &Option<String>, ids: &[String
 }
 
 fn action_button(action: &Value, row: &Value) -> Option<Value> {
-    let route = row_action_route(action, row, None).ok().flatten();
+    let route = crate::renderer::logged_row_route(action, row);
     let event = if action.get("navigatesTo").is_some() {
         None
     } else {
@@ -132,7 +132,7 @@ fn action_button(action: &Value, row: &Value) -> Option<Value> {
     }
     let mut fields = vec![
         ("label", Value::string(get_string_or(action, "label", ""))),
-        ("actionPayload", row_action_payload(action, row, None)),
+        ("actionPayload", crate::renderer::logged_row_payload(action, row)?),
         (
             "variant",
             Value::string(get_string_or(action, "variant", "ghost")),
@@ -164,7 +164,7 @@ fn action_menu(actions: &[Value], row: &Value) -> Value {
                     Value::string(get_string_or(action, "variant", "default")),
                 ),
             ];
-            let route = row_action_route(action, row, None).ok().flatten();
+            let route = crate::renderer::logged_row_route(action, row);
             if action.get("navigatesTo").is_some() && route.is_none() {
                 fields.push(("disabled", Value::Bool(true)));
             } else if let Some(route) = route {
@@ -382,7 +382,7 @@ fn Grid(input: GridProps) -> Element {
                             let relay: EventSink = Callback::new(move |(event, payload): (String, Value)| {
                                 let Some(index) = payload.get("itemId").and_then(Value::as_str).and_then(|id| id.parse::<usize>().ok()) else { return; };
                                 let Some(action) = actions_for_menu.get(index) else { return; };
-                                sink.call((event, row_action_payload(action, &row_for_menu, None)));
+                                if let Some(payload) = crate::renderer::logged_row_payload(action, &row_for_menu) { sink.call((event, payload)); }
                             });
                             view.for_source(view.source_trait.clone(), relay)
                         });
@@ -404,7 +404,7 @@ fn Grid(input: GridProps) -> Element {
                             onclick: move |_| {
                                 if let (Some(sink), Some(event)) = (sink, &click_event) {
                                     let empty = Value::Object(ValueMap::new().into());
-                                    sink.call((event.clone(), row_action_payload(&empty, &row_for_click, None)));
+                                    if let Some(payload) = crate::renderer::logged_row_payload(&empty, &row_for_click) { sink.call((event.clone(), payload)); }
                                 }
                             },
                             if let Some(custom) = custom.as_ref() {

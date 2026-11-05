@@ -42,7 +42,7 @@ fn empty_pattern(props: &Value) -> Value {
 }
 
 fn action_pattern(action: &Value, row: &Value) -> Option<Value> {
-    let route = row_action_route(action, row, None).ok().flatten();
+    let route = crate::renderer::logged_row_route(action, row);
     let event = if action.get("navigatesTo").is_some() {
         None
     } else {
@@ -63,7 +63,7 @@ fn action_pattern(action: &Value, row: &Value) -> Option<Value> {
         ),
         (
             "actionPayload".to_string(),
-            row_action_payload(action, row, None),
+            crate::renderer::logged_row_payload(action, row)?,
         ),
     ];
     if let Some(route) = route {
@@ -150,7 +150,7 @@ impl DioxusPatternRenderer for DataListRenderer {
                         onclick: move |_| {
                             if let (Some(sink), Some(event)) = (sink, &click) {
                                 let empty = Value::Object(orbital_core::ValueMap::new().into());
-                                sink.call((event.clone(), row_action_payload(&empty, &row_for_click, None)));
+                                if let Some(payload) = crate::renderer::logged_row_payload(&empty, &row_for_click) { sink.call((event.clone(), payload)); }
                             }
                         },
                         if let Some(custom) = custom.as_ref() { {registry.render_spec(custom, None, view)} }

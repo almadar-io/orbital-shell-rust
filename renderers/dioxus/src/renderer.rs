@@ -30,6 +30,21 @@ pub(crate) fn emit_empty_event(sink: Option<EventSink>, name: Option<&str>) {
     }
 }
 
+/// A row action's route; a route that fails to evaluate is logged and the action draws no link.
+pub(crate) fn logged_row_route(action: &Value, row: &Value) -> Option<String> {
+    orbital_core::client::helpers::row_action_route(action, row, None).unwrap_or_else(|error| {
+        tracing::error!(%error, "row action route");
+        None
+    })
+}
+
+/// A row action's payload; a payload that fails to evaluate is logged and the action is not drawn or dispatched.
+pub(crate) fn logged_row_payload(action: &Value, row: &Value) -> Option<Value> {
+    orbital_core::client::helpers::row_action_payload(action, row, None)
+        .map_err(|error| tracing::error!(%error, "row action payload"))
+        .ok()
+}
+
 pub type NavigationSink = Callback<String>;
 
 #[derive(Clone, Copy, PartialEq)]

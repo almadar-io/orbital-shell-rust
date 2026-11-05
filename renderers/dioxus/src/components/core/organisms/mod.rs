@@ -10,7 +10,6 @@ pub mod flow_canvas;
 pub mod form;
 pub mod form_section;
 pub mod layers_panel;
-pub mod machine_panel;
 pub mod master_detail_layout;
 pub mod media_gallery;
 pub mod modal_slot;
