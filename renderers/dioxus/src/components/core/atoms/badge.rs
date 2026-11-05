@@ -1,8 +1,8 @@
 //! Native Dioxus renderer for the shared pattern contract.
 
+use crate::registry::DioxusPatternRegistry;
 use crate::renderer::merge_class_name;
-use crate::registry::{shared_root_attrs, DioxusPatternRegistry};
-use crate::renderer::{emit_empty_event, DioxusPatternRenderer, DioxusView};
+use crate::renderer::{emit_empty_event, passthrough_attrs, DioxusPatternRenderer, DioxusView};
 use dioxus::prelude::*;
 use orbital_core::client::helpers::*;
 use orbital_core::client::recurse::*;
@@ -44,10 +44,20 @@ impl DioxusPatternRenderer for BadgeRenderer {
             "lg" => "px-3 py-1.5 text-base",
             _ => "px-2 py-0.5 text-xs",
         };
+        let on_remove = get_string(props, "onRemove").filter(|name| !name.is_empty());
+        let on_click = get_string(props, "onClick").filter(|name| !name.is_empty());
+        let remove_pad = if on_remove.is_some() { "pr-1" } else { "" };
         let base = format!(
-            "inline-flex items-center gap-1 font-bold rounded-pill {variant_class} {size_class}"
+            "inline-flex items-center gap-1 font-bold rounded-pill {variant_class} {size_class} {remove_pad}"
         );
         let class = merge_class_name(&base, props);
+        let children = props.get("children").filter(|children| !children.is_null());
+        let children_text = match children {
+            Some(Value::String(text)) if !text.is_empty() => Some(text.to_string()),
+            Some(Value::Int(number)) => Some(number.to_string()),
+            Some(Value::Number(number)) => Some(number.to_string()),
+            _ => None,
+        };
         let label = props
             .as_object()
             .and_then(|fields| fields.get("label"))
@@ -66,11 +76,18 @@ impl DioxusPatternRenderer for BadgeRenderer {
                 Value::Number(number) => Some(number.to_string()),
                 _ => None,
             });
-        let text = match amount {
-            Some(amount) if !label.is_empty() => format!("{label} {amount}"),
-            Some(amount) => amount,
-            None => label,
+        let text = match (children_text, amount) {
+            (Some(text), _) => text,
+            (None, Some(amount)) if !label.is_empty() => format!("{label} {amount}"),
+            (None, Some(amount)) => amount,
+            (None, None) => label,
         };
+        let child_node = children.filter(|_| {
+            !matches!(
+                children,
+                Some(Value::String(_) | Value::Int(_) | Value::Number(_))
+            )
+        });
         let icon_spec = props.as_object().and_then(|fields| {
             if let Some(asset) = fields.get("iconAsset") {
                 let mut spec = orbital_core::ValueMap::new();
@@ -99,8 +116,7 @@ impl DioxusPatternRenderer for BadgeRenderer {
             );
             Some(Value::Object(spec.into()))
         });
-        let on_remove = get_string(props, "onRemove").filter(|name| !name.is_empty());
-        if text.is_empty() && icon_spec.is_none() && on_remove.is_none() {
+        if text.is_empty() && child_node.is_none() && icon_spec.is_none() && on_remove.is_none() {
             return rsx! {};
         }
         let remove_label = get_string(props, "removeLabel").unwrap_or_else(|| {
@@ -114,7 +130,10 @@ impl DioxusPatternRenderer for BadgeRenderer {
             let mut spec = orbital_core::ValueMap::new();
             spec.insert("type".into(), Value::string("icon"));
             spec.insert("name".into(), Value::string("x"));
-            spec.insert("size".into(), Value::string("xs"));
+            spec.insert(
+                "className".into(),
+                Value::string("h-icon-default w-icon-default"),
+            );
             spec.into()
         });
         let remove_size = match size.as_str() {
@@ -123,9 +142,21 @@ impl DioxusPatternRenderer for BadgeRenderer {
             _ => "w-4 h-4 ml-0.5",
         };
         let sink = view.sink;
-        rsx! { span { class: "{class}", ..shared_root_attrs(props),
+        let body = rsx! {
             if let Some(icon) = icon_spec.as_ref() { {registry.render_spec(icon, None, view)} }
             "{text}"
+            if let Some(node) = child_node { {view.render_node(registry, node)} }
+        };
+        let body = if on_click.is_some() {
+            rsx! { button { r#type: "button", class: "inline-flex items-center gap-1 rounded-pill focus:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+                onclick: move |_| emit_empty_event(sink, on_click.as_deref()),
+                {body}
+            } }
+        } else {
+            body
+        };
+        rsx! { span { class: "{class}", ..passthrough_attrs(props, &[]),
+            {body}
             if on_remove.is_some() {
                 button { type: "button", class: "inline-flex items-center justify-center rounded-pill hover:bg-foreground/10 focus:outline-none focus-visible:ring-1 focus-visible:ring-ring transition-colors {remove_size}", aria_label: "{remove_label}",
                     onclick: move |event| {

@@ -27,6 +27,10 @@ impl DioxusPatternRenderer for GuestViewRenderer {
         registry: &DioxusPatternRegistry,
     ) -> Element {
         let children = child_patterns(props, view.trait_content);
-        rsx! { div { style: "width:100%;height:100%", for (child, src) in children.iter() { {view.render_child(registry, child, src.as_deref())} } } }
+        rsx! {
+            div { class: "bg-transparent rounded-none shadow-none w-full h-full relative overflow-auto",
+                for (child, src) in children.iter() { {view.render_child(registry, child, src.as_deref())} }
+            }
+        }
     }
 }

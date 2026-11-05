@@ -1,12 +1,12 @@
 //! Native Dioxus renderer for the shared pattern contract.
 
-use crate::renderer::merge_class_name;
-use crate::registry::{shared_root_attrs, DioxusPatternRegistry};
-use crate::renderer::{DioxusPatternRenderer, DioxusView};
+use crate::registry::DioxusPatternRegistry;
+use crate::renderer::{
+    cn, format_display_value, passthrough_attrs, DioxusPatternRenderer, DioxusView,
+};
 use crate::styles::style_with_props;
 use dioxus::prelude::*;
 use orbital_core::client::helpers::*;
-use orbital_core::client::recurse::*;
 use orbital_core::Value;
 
 /// Dioxus renderer for the `typography` pattern.
@@ -40,19 +40,32 @@ impl DioxusPatternRenderer for TypographyRenderer {
         let color = get_string_or(props, "color", "primary");
         let weight = get_string_or(props, "weight", "none");
         let variant_class = match variant.as_str() {
-            "h1" => "text-4xl heading-voice",
-            "h2" => "text-3xl heading-voice",
-            "h3" | "heading" => "text-2xl heading-voice",
-            "h4" => "text-xl heading-voice",
-            "h5" | "subheading" => "text-lg heading-voice",
-            "h6" => "text-base heading-voice",
-            "caption" => "text-xs font-normal",
-            "body2" | "small" => "text-sm font-normal",
-            "large" => "text-lg font-medium",
-            "label" => "text-sm font-medium",
-            "overline" => "text-xs uppercase tracking-wide font-bold",
-            _ => "text-base font-normal",
+            "h1" => "text-4xl heading-voice text-foreground",
+            "h2" => "text-3xl heading-voice text-foreground",
+            "h3" | "heading" => "text-2xl heading-voice text-foreground",
+            "h4" => "text-xl heading-voice text-foreground",
+            "h5" | "subheading" => "text-lg heading-voice text-foreground",
+            "h6" => "text-base heading-voice text-foreground",
+            "caption" => "text-xs font-normal text-muted-foreground",
+            "body2" | "small" => "text-sm font-normal text-foreground",
+            "large" => "text-lg font-medium text-foreground",
+            "label" => "text-sm font-medium text-foreground",
+            "overline" => "text-xs uppercase tracking-wide font-bold text-muted-foreground",
+            _ => "text-base font-normal text-foreground",
         };
+        let default_tag = match variant.as_str() {
+            "h1" => "h1",
+            "h2" | "heading" => "h2",
+            "h3" | "subheading" => "h3",
+            "h4" => "h4",
+            "h5" => "h5",
+            "h6" => "h6",
+            "caption" | "overline" | "small" | "label" => "span",
+            _ => "p",
+        };
+        let tag = get_string(props, "as")
+            .filter(|tag| !tag.is_empty())
+            .unwrap_or_else(|| default_tag.to_string());
         let color_class = match color.as_str() {
             "secondary" | "muted" => "text-muted-foreground",
             "error" => "text-error",
@@ -93,25 +106,80 @@ impl DioxusPatternRenderer for TypographyRenderer {
             Some("clamp-3") => "overflow-hidden line-clamp-3 min-w-0",
             _ => "",
         };
-        let truncate_class = if get_bool_or(props, "truncate", false) {
-            "truncate min-w-0"
+        let truncate = get_bool_or(props, "truncate", false);
+        let truncate_class = if truncate { "truncate min-w-0" } else { "" };
+        let block_class = if truncate && tag == "span" {
+            "block"
         } else {
             ""
         };
-        let base = format!("{variant_class} {color_class} {weight_class} {size_class} {align_class} {overflow_class} {truncate_class}");
-        let class = merge_class_name(&base, props);
+        let class = cn(&[
+            variant_class,
+            color_class,
+            weight_class,
+            size_class,
+            align_class,
+            truncate_class,
+            block_class,
+            overflow_class,
+            &get_string_or(props, "className", ""),
+        ]);
         let style = style_with_props("", props);
-        let text = props
-            .as_object()
-            .and_then(|fields| fields.get("content"))
-            .and_then(|value| match value {
-                Value::String(text) => Some(text.to_string()),
-                Value::Int(number) => Some(number.to_string()),
-                Value::Number(number) => Some(number.to_string()),
-                _ => None,
-            })
-            .filter(|text| !text.is_empty());
-        let children = child_patterns(props, view.trait_content);
-        rsx! { div { class: "{class}", style: "{style}", ..shared_root_attrs(props), if let Some(t) = text { span { "{t}" } } for (child, src) in children.iter() { {view.render_child(registry, child, src.as_deref())} } } }
+        let format = get_string(props, "format").filter(|format| format != "none");
+        let attrs = passthrough_attrs(props, &[]);
+        let children = props.get("children").filter(|children| !children.is_null());
+        let body = match (children, props.get("content")) {
+            (Some(children), _) => view.render_node(registry, children),
+            (None, Some(content @ (Value::String(_) | Value::Int(_) | Value::Number(_)))) => {
+                let text = format_display_value(content, format.as_deref());
+                rsx! { "{text}" }
+            }
+            (None, Some(content)) if !content.is_null() => view.render_node(registry, content),
+            _ => rsx! {},
+        };
+        macro_rules! element {
+            ($tag:ident) => {
+                rsx! { $tag { class: "{class}", style: "{style}", ..attrs, {body} } }
+            };
+        }
+        match tag.as_str() {
+            "h1" => element!(h1),
+            "h2" => element!(h2),
+            "h3" => element!(h3),
+            "h4" => element!(h4),
+            "h5" => element!(h5),
+            "h6" => element!(h6),
+            "p" => element!(p),
+            "span" => element!(span),
+            "label" => element!(label),
+            "legend" => element!(legend),
+            "a" => element!(a),
+            "li" => element!(li),
+            "ul" => element!(ul),
+            "ol" => element!(ol),
+            "strong" => element!(strong),
+            "b" => element!(b),
+            "em" => element!(em),
+            "i" => element!(i),
+            "u" => element!(u),
+            "small" => element!(small),
+            "code" => element!(code),
+            "pre" => element!(pre),
+            "blockquote" => element!(blockquote),
+            "figcaption" => element!(figcaption),
+            "dt" => element!(dt),
+            "dd" => element!(dd),
+            "th" => element!(th),
+            "td" => element!(td),
+            "time" => element!(time),
+            "section" => element!(section),
+            "article" => element!(article),
+            "header" => element!(header),
+            "footer" => element!(footer),
+            "nav" => element!(nav),
+            "main" => element!(main),
+            "aside" => element!(aside),
+            _ => element!(div),
+        }
     }
 }

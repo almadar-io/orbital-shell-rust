@@ -1,8 +1,9 @@
 //! Native Dioxus renderer for the shared pattern contract.
 
-use crate::renderer::merge_class_name;
-use crate::registry::{shared_root_attrs_with_defaults, DioxusPatternRegistry};
-use crate::renderer::{DioxusPatternRenderer, DioxusView};
+use crate::registry::DioxusPatternRegistry;
+use crate::renderer::{
+    merge_class_name, passthrough_attrs, pattern_spec, DioxusPatternRenderer, DioxusView,
+};
 use dioxus::prelude::*;
 use orbital_core::client::helpers::*;
 use orbital_core::client::recurse::*;
@@ -20,22 +21,30 @@ fn icon_spec(props: &Value, name_keys: &[&str], asset: Option<&Value>, px: i64) 
         );
         spec.insert("asset".into(), asset.clone());
         spec.insert("size".into(), Value::Int(px));
+        let alt = ["name", "category"]
+            .iter()
+            .find_map(|key| asset.get(key).and_then(Value::as_str))
+            .unwrap_or("");
+        spec.insert("alt".into(), Value::string(alt));
+        spec.insert(
+            "className".into(),
+            Value::String("flex-shrink-0".to_string().into()),
+        );
     } else {
         let fields = props.as_object()?;
-        let name = name_keys
-            .iter()
-            .find_map(|key| fields.get(*key).and_then(Value::as_str))?;
+        let name = name_keys.iter().find_map(|key| {
+            fields
+                .get(*key)
+                .and_then(Value::as_str)
+                .filter(|name| !name.is_empty())
+        })?;
         spec.insert("type".into(), Value::String("icon".to_string().into()));
         spec.insert("name".into(), Value::String(name.to_string().into()));
+        spec.insert(
+            "className".into(),
+            Value::String("h-icon-default w-icon-default".to_string().into()),
+        );
     }
-    spec.insert(
-        "className".into(),
-        Value::String(
-            "flex-shrink-0 h-icon-default w-icon-default"
-                .to_string()
-                .into(),
-        ),
-    );
     Some(Value::Object(spec.into()))
 }
 
@@ -81,22 +90,37 @@ impl DioxusPatternRenderer for ButtonRenderer {
         } else {
             "chrome-button"
         };
-        let base = format!("relative inline-flex items-center justify-center gap-2 font-medium rounded-interactive interactive-border cursor-pointer transition-all duration-normal focus:outline-none focus-visible:ring-[length:var(--focus-ring-width)] focus-visible:ring-ring focus-visible:ring-offset-[length:var(--focus-ring-offset)] disabled:opacity-50 disabled:cursor-not-allowed {chrome} {variant_class} {size_class}");
-        let class = merge_class_name(&base, props);
-        let label = get_string_or(props, "label", "Button");
-        let html_type = get_string_or(props, "htmlType", "button");
-        let action = get_string(props, "action");
         let disabled = get_bool_or(props, "disabled", false);
         let busy = get_bool_or(props, "isLoading", false);
+        let cursor = if busy { "cursor-progress" } else { "" };
+        let base = format!("relative inline-flex items-center justify-center gap-2 font-medium rounded-interactive interactive-border cursor-pointer {chrome} transition-all duration-normal focus:outline-none focus-visible:ring-[length:var(--focus-ring-width)] focus-visible:ring-ring focus-visible:ring-offset-[length:var(--focus-ring-offset)] disabled:opacity-50 disabled:cursor-not-allowed {variant_class} {size_class} {cursor}");
+        let class = merge_class_name(&base, props);
+        let style = crate::styles::style_with_props("", props);
+        let html_type = get_string_or(props, "htmlType", "button");
+        let action = get_string(props, "action");
         let href = get_string(props, "href").filter(|href| !href.is_empty());
-        let asset = props.as_object().and_then(|fields| fields.get("iconAsset"));
+        let asset = props
+            .as_object()
+            .and_then(|fields| fields.get("iconAsset"))
+            .filter(|asset| {
+                asset
+                    .get("url")
+                    .and_then(Value::as_str)
+                    .is_some_and(|url| !url.is_empty())
+            });
         let icon_px = if size == "lg" { 20 } else { 16 };
         let left_icon = icon_spec(props, &["leftIcon", "icon"], asset, icon_px);
         let right_icon = icon_spec(props, &["rightIcon", "iconRight"], None, icon_px);
-        let mut spinner_fields = orbital_core::ValueMap::new();
-        spinner_fields.insert("type".into(), Value::String("spinner".to_string().into()));
-        spinner_fields.insert("size".into(), Value::String("sm".to_string().into()));
-        let spinner = Value::Object(spinner_fields.into());
+        let spinner = pattern_spec(
+            "icon",
+            [
+                ("name", Value::string("loader-2")),
+                (
+                    "className",
+                    Value::string("h-icon-default w-icon-default animate-spin"),
+                ),
+            ],
+        );
         let action_payload = props
             .as_object()
             .and_then(|value| value.get("actionPayload"))
@@ -104,16 +128,45 @@ impl DioxusPatternRenderer for ButtonRenderer {
             .unwrap_or_else(|| Value::Object(orbital_core::ValueMap::new().into()));
         let sink = view.sink;
         let navigate = view.navigate;
-        let attrs = shared_root_attrs_with_defaults(
-            props,
-            &[
-                ("aria-busy", Value::Bool(busy)),
-                ("aria-disabled", Value::Bool(disabled || busy)),
-            ],
-        );
+        let mut defaults: Vec<(&'static str, Value)> = Vec::new();
+        if busy {
+            defaults.push(("aria-busy", Value::Bool(true)));
+        }
+        if disabled || busy {
+            defaults.push(("aria-disabled", Value::Bool(true)));
+        }
+        let mut attrs = passthrough_attrs(props, &defaults);
+        let has_test_id = props
+            .as_object()
+            .is_some_and(|fields| fields.contains_key("data-testid"));
+        if let (false, Some(action)) = (has_test_id, action.as_ref()) {
+            attrs.push(Attribute::new(
+                "data-testid",
+                format!("action-{action}"),
+                None,
+                false,
+            ));
+        }
+        let children = child_patterns(props, view.trait_content);
+        let has_children = !children.is_empty();
+        let label = get_string(props, "label").filter(|label| !label.is_empty() && !has_children);
+        let content_class = if busy {
+            "inline-flex flex-1 min-w-0 items-center [justify-content:inherit] gap-2 almadar-busy-content"
+        } else {
+            "inline-flex flex-1 min-w-0 items-center [justify-content:inherit] gap-2"
+        };
+        let content = rsx! {
+            if busy { span { class: "almadar-busy-indicator absolute inset-0 flex items-center justify-center", aria_hidden: "true", {registry.render_spec(&spinner, None, view)} } }
+            span { class: "{content_class}",
+                if let Some(icon) = left_icon.as_ref() { span { class: "flex-shrink-0", {registry.render_spec(icon, None, view)} } }
+                for (child, src) in children.iter() { {view.render_child(registry, child, src.as_deref())} }
+                if let Some(label) = label.as_ref() { span { "{label}" } }
+                if let Some(icon) = right_icon.as_ref() { span { class: "flex-shrink-0", {registry.render_spec(icon, None, view)} } }
+            }
+        };
         if let Some(href) = href {
             return rsx! {
-                a { class: "{class}", href: "{href}",
+                a { class: "{class}", style: "{style}", href: "{href}",
                     onclick: move |event| {
                         if disabled || busy { event.prevent_default(); return; }
                         if let (Some(sink), Some(action)) = (sink, &action) {
@@ -127,18 +180,14 @@ impl DioxusPatternRenderer for ButtonRenderer {
                         }
                     },
                     ..attrs,
-                    if busy { span { class: "almadar-busy-indicator absolute inset-0 flex items-center justify-center", {registry.render_spec(&spinner, None, view)} } }
-                    span { class: "inline-flex flex-1 min-w-0 items-center gap-2",
-                        if let Some(icon) = left_icon.as_ref() { {registry.render_spec(icon, None, view)} }
-                        span { "{label}" }
-                        if let Some(icon) = right_icon.as_ref() { {registry.render_spec(icon, None, view)} }
-                    }
+                    {content}
                 }
             };
         }
         rsx! {
             button {
                 class: "{class}",
+                style: "{style}",
                 r#type: "{html_type}",
                 disabled: disabled,
                 onclick: move |_| {
@@ -149,12 +198,7 @@ impl DioxusPatternRenderer for ButtonRenderer {
                     }
                 },
                 ..attrs,
-                if busy { span { class: "almadar-busy-indicator absolute inset-0 flex items-center justify-center", {registry.render_spec(&spinner, None, view)} } }
-                span { class: "inline-flex flex-1 min-w-0 items-center gap-2",
-                    if let Some(icon) = left_icon.as_ref() { {registry.render_spec(icon, None, view)} }
-                    span { "{label}" }
-                    if let Some(icon) = right_icon.as_ref() { {registry.render_spec(icon, None, view)} }
-                }
+                {content}
             }
         }
     }

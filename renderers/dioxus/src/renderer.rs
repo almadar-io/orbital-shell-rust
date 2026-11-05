@@ -844,3 +844,168 @@ fn diff_middle_snake(a: &[&str], a_lo: usize, a_hi: usize, b: &[&str], b_lo: usi
     }
     unreachable!("compute_line_diff: no middle snake for differing texts")
 }
+
+/// The DOM attributes an atom forwards from its props like the web's `domPassthrough`: `shared_root_attrs` plus `title`, `data-testid` and the remaining `aria-*` values.
+pub(crate) fn passthrough_attrs(props: &Value, defaults: &[(&'static str, Value)]) -> Vec<Attribute> {
+    let mut attrs = crate::registry::shared_root_attrs_with_defaults(props, defaults);
+    let Some(fields) = props.as_object() else {
+        return attrs;
+    };
+    for name in ["title", "data-testid"] {
+        if let Some(Value::String(text)) = fields.get(name) {
+            attrs.push(Attribute::new(name, text.to_string(), None, false));
+        }
+    }
+    for name in [
+        "aria-checked",
+        "aria-controls",
+        "aria-haspopup",
+        "aria-invalid",
+        "aria-required",
+        "aria-readonly",
+        "aria-autocomplete",
+        "aria-modal",
+        "aria-multiline",
+        "aria-multiselectable",
+        "aria-orientation",
+        "aria-owns",
+        "aria-activedescendant",
+        "aria-errormessage",
+        "aria-details",
+        "aria-roledescription",
+        "aria-keyshortcuts",
+        "aria-placeholder",
+        "aria-sort",
+        "aria-atomic",
+        "aria-relevant",
+        "aria-level",
+        "aria-valuenow",
+        "aria-valuemin",
+        "aria-valuemax",
+        "aria-valuetext",
+    ] {
+        let text = match fields.get(name) {
+            Some(Value::String(text)) => text.to_string(),
+            Some(Value::Bool(flag)) => flag.to_string(),
+            Some(Value::Int(number)) => number.to_string(),
+            _ => continue,
+        };
+        attrs.push(Attribute::new(name, text, None, false));
+    }
+    attrs
+}
+
+/// Renders `spec` with a local sink: events for which `handle(event, payload)` returns true stay with the caller, every other event goes to the view's sink with the view's source.
+pub(crate) fn render_with_local_sink(
+    view: &DioxusView<'_>,
+    registry: &DioxusPatternRegistry,
+    spec: &Value,
+    handle: impl Fn(&str, &Value) -> bool + 'static,
+) -> Element {
+    let parent = view.sink;
+    let relay: EventSink = Callback::new(move |(event, payload): (String, Value)| {
+        if handle(&event, &payload) {
+            return;
+        }
+        if let Some(parent) = parent {
+            parent.call((event, payload));
+        }
+    });
+    registry.render_spec(spec, None, &view.for_source(view.source_trait.clone(), relay))
+}
+
+#[derive(serde::Deserialize)]
+#[serde(tag = "kind", rename_all = "lowercase")]
+pub(crate) enum PatternTileElement {
+    Path {
+        d: String,
+        #[serde(default)]
+        opacity: Option<f64>,
+    },
+    Circle {
+        cx: f64,
+        cy: f64,
+        r: f64,
+        #[serde(default)]
+        filled: bool,
+        #[serde(default)]
+        opacity: Option<f64>,
+    },
+}
+
+#[derive(serde::Deserialize)]
+pub(crate) struct PatternTileVariant {
+    pub height: f64,
+    pub elements: Vec<PatternTileElement>,
+}
+
+#[derive(serde::Deserialize)]
+pub(crate) struct PatternTileGeometry {
+    pub unit: f64,
+    pub variants: HashMap<String, PatternTileVariant>,
+}
+
+/// The `pattern-tile` geometry the installed pattern contract declares (the web's `pattern-tile-geometry.json`).
+pub(crate) fn pattern_tile_geometry() -> Result<&'static PatternTileGeometry, String> {
+    static GEOMETRY: std::sync::OnceLock<PatternTileGeometry> = std::sync::OnceLock::new();
+    if let Some(geometry) = GEOMETRY.get() {
+        return Ok(geometry);
+    }
+    let installed = orbital_core::language_data::language_data()
+        .map_err(|error| format!("pattern-tile geometry: {error}"))?;
+    let registry: serde_json::Value = serde_json::from_str(&installed.patterns)
+        .map_err(|error| format!("pattern registry: {error}"))?;
+    let source = registry
+        .pointer("/patterns/pattern-tile/geometry")
+        .cloned()
+        .ok_or_else(|| "pattern-tile geometry missing from installed contract".to_string())?;
+    let parsed: PatternTileGeometry = serde_json::from_value(source)
+        .map_err(|error| format!("pattern-tile geometry invalid: {error}"))?;
+    Ok(GEOMETRY.get_or_init(|| parsed))
+}
+
+/// The web's `getTileDimensions(variant, size)`.
+pub(crate) fn pattern_tile_dimensions(variant: &str, size: f64) -> Option<(f64, f64)> {
+    let geometry = pattern_tile_geometry()
+        .map_err(|error| tracing::error!(%error, "pattern-tile"))
+        .ok()?;
+    let Some(tile) = geometry.variants.get(variant) else {
+        tracing::error!(variant, "pattern-tile variant is not in the installed geometry");
+        return None;
+    };
+    Some((size, size * tile.height / geometry.unit))
+}
+
+/// The web's `<PatternTile>`: a `<g>` of the variant's strokes scaled from the geometry unit to `size`.
+pub(crate) fn pattern_tile_group(variant: &str, size: f64, color: &str, stroke_width: f64) -> Element {
+    let geometry = match pattern_tile_geometry() {
+        Ok(geometry) => geometry,
+        Err(error) => {
+            tracing::error!(%error, "pattern-tile");
+            return rsx! {};
+        }
+    };
+    let Some(tile) = geometry.variants.get(variant) else {
+        tracing::error!(variant, "pattern-tile variant is not in the installed geometry");
+        return rsx! {};
+    };
+    let scale = size / geometry.unit;
+    let unit_stroke = if scale == 0.0 { stroke_width } else { stroke_width / scale };
+    let transform = format!("scale({scale})");
+    rsx! {
+        g {
+            g { transform: "{transform}", fill: "none", stroke: "{color}", stroke_width: "{unit_stroke}",
+                for (index, element) in tile.elements.iter().enumerate() {
+                    match element {
+                        PatternTileElement::Path { d, opacity } => rsx! {
+                            path { key: "{index}", d: "{d}", opacity: opacity.map(|value| value.to_string()) }
+                        },
+                        PatternTileElement::Circle { cx, cy, r, filled, opacity } => rsx! {
+                            circle { key: "{index}", cx: "{cx}", cy: "{cy}", r: "{r}", fill: if *filled { color.to_string() } else { "none".to_string() }, opacity: opacity.map(|value| value.to_string()) }
+                        },
+                    }
+                }
+            }
+        }
+    }
+}
