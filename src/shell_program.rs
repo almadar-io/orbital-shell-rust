@@ -153,6 +153,7 @@ mod tests {
             ir_version: orbital_core::shell_protocol::IR_VERSION,
             module: OirModule::new("App", "1.0.0"),
             resolved: None,
+            lazy: Vec::new(),
             served: None,
             source_path: None,
             write: Default::default(),
