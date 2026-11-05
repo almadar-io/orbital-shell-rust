@@ -76,13 +76,14 @@ impl Backend for RustBackend {
         self.generate_with_mode(module, ShellMode::Full)
     }
 
-    fn generate_with_mode(&self, _module: &OirModule, mode: ShellMode) -> GeneratedOutput {
+    fn generate_with_mode(&self, module: &OirModule, mode: ShellMode) -> GeneratedOutput {
         if let Some(program) = &self.terminal_program {
             return generate_terminal(program);
         }
         let mut files = vec![];
         if mode != ShellMode::Client {
             files.push(GeneratedFile::new("src/main.rs", generate_server_main()));
+            files.extend(crate::models::files(module));
         }
         if mode != ShellMode::Server {
             files.extend(client_bins());
@@ -125,6 +126,9 @@ mod tests {
             paths,
             [
                 "src/main.rs",
+                "src/generated/mod.rs",
+                "src/generated/entities.rs",
+                "src/generated/events.rs",
                 "src/bin/desktop.rs",
                 "src/bin/terminal.rs",
                 "src/bin/game.rs"
@@ -136,7 +140,15 @@ mod tests {
     fn server_mode_omits_client_bins() {
         let output = RustBackend::new().generate_with_mode(&test_module(), ShellMode::Server);
         let paths: Vec<_> = output.files.iter().map(|f| f.path.as_str()).collect();
-        assert_eq!(paths, ["src/main.rs"]);
+        assert_eq!(
+            paths,
+            [
+                "src/main.rs",
+                "src/generated/mod.rs",
+                "src/generated/entities.rs",
+                "src/generated/events.rs"
+            ]
+        );
     }
 
     #[test]

@@ -5,6 +5,7 @@
 //! program and the client entry points.
 
 mod backend;
+mod models;
 pub mod codegen;
 #[path = "../hosts/native/src/lib.rs"]
 pub mod host;

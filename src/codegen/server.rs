@@ -9,6 +9,9 @@ pub fn generate_server_main() -> String {
 //!
 //! Runs the served program (`program.orb`) on the kernel; each locale it declares is read from `locales/<locale>.json`.
 
+#[allow(dead_code)]
+mod generated;
+
 use orbital_shell_rust::host::boot::{boot_embedded, Catalogs};
 use orbital_shell_rust::host::run::{hold, mount_init, stop_on_signal, ProtocolSide};
 use std::path::Path;
@@ -56,6 +59,11 @@ mod tests {
         );
         assert!(main.contains(PROGRAM_FILE));
         assert!(!main.contains("compile_error") && !main.contains("axum"));
+    }
+
+    #[test]
+    fn the_entry_declares_the_generated_models_module() {
+        assert!(generate_server_main().contains("#[allow(dead_code)]\nmod generated;"));
     }
 
     #[test]
