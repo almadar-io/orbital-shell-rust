@@ -1,3 +1,4 @@
+use crate::renderer::{pattern_spec as pattern, object_value as pattern_payload};
 use crate::components::core::atoms::checkbox::CheckboxRenderer;
 use crate::registry::{shared_root_attrs, DioxusPatternRegistry};
 use crate::renderer::{DioxusPatternRenderer, DioxusView, EventSink, OwnedDioxusView};
@@ -15,14 +16,6 @@ struct GridProps {
     registry: DioxusPatternRegistry,
 }
 
-fn pattern(name: &str, fields: impl IntoIterator<Item = (&'static str, Value)>) -> Value {
-    let mut props = ValueMap::new();
-    props.insert("type".into(), Value::string(name));
-    for (key, value) in fields {
-        props.insert(key.into(), value);
-    }
-    Value::Object(props.into())
-}
 
 fn display(value: &Value) -> String {
     value
@@ -96,13 +89,6 @@ fn selection_payload(ids: &[String]) -> Value {
     )])
 }
 
-fn pattern_payload(fields: impl IntoIterator<Item = (&'static str, Value)>) -> Value {
-    let mut payload = ValueMap::new();
-    for (key, value) in fields {
-        payload.insert(key.into(), value);
-    }
-    Value::Object(payload.into())
-}
 
 fn selected_next(current: &[String], id: &str) -> Vec<String> {
     let mut next = current.to_vec();

@@ -45,6 +45,26 @@ pub(crate) fn logged_row_payload(action: &Value, row: &Value) -> Option<Value> {
         .ok()
 }
 
+/// A sub-pattern spec `{ type: name, ..fields }` a body hands to `registry.render_spec`, so it composes the
+/// pattern's own renderer instead of re-drawing it.
+pub(crate) fn pattern_spec<K: AsRef<str>>(name: &str, fields: impl IntoIterator<Item = (K, Value)>) -> Value {
+    let mut spec = orbital_core::ValueMap::new();
+    spec.insert("type".into(), Value::string(name));
+    for (key, value) in fields {
+        spec.insert(key.as_ref().into(), value);
+    }
+    Value::Object(spec.into())
+}
+
+/// An object value from `(key, value)` pairs (an event payload, a nested prop).
+pub(crate) fn object_value<K: AsRef<str>>(fields: impl IntoIterator<Item = (K, Value)>) -> Value {
+    let mut map = orbital_core::ValueMap::new();
+    for (key, value) in fields {
+        map.insert(key.as_ref().into(), value);
+    }
+    Value::Object(map.into())
+}
+
 pub type NavigationSink = Callback<String>;
 
 #[derive(Clone, Copy, PartialEq)]

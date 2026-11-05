@@ -1,3 +1,4 @@
+use crate::renderer::{pattern_spec as pattern};
 use crate::registry::{shared_root_attrs, DioxusPatternRegistry};
 use crate::renderer::{DioxusPatternRenderer, DioxusView, EventSink};
 use dioxus::prelude::*;
@@ -6,14 +7,6 @@ use orbital_core::{Value, ValueMap};
 
 pub struct EmptyStateRenderer;
 
-fn pattern(name: &str, fields: impl IntoIterator<Item = (&'static str, Value)>) -> Value {
-    let mut props = ValueMap::new();
-    props.insert("type".into(), Value::string(name));
-    for (key, value) in fields {
-        props.insert(key.into(), value);
-    }
-    Value::Object(props.into())
-}
 
 impl DioxusPatternRenderer for EmptyStateRenderer {
     fn pattern_name(&self) -> &str {

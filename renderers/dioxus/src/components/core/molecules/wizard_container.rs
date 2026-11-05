@@ -1,3 +1,4 @@
+use crate::renderer::{pattern_spec as pattern};
 use crate::registry::{shared_root_attrs, DioxusPatternRegistry};
 use crate::renderer::{
     emit_empty_event, DioxusPatternRenderer, DioxusView, EventSink, OwnedDioxusView,
@@ -18,14 +19,6 @@ struct WizardContainerProps {
     registry: DioxusPatternRegistry,
 }
 
-fn pattern(name: &str, fields: impl IntoIterator<Item = (&'static str, Value)>) -> Value {
-    let mut spec = ValueMap::new();
-    spec.insert("type".into(), Value::string(name));
-    for (key, value) in fields {
-        spec.insert(key.into(), value);
-    }
-    Value::Object(spec.into())
-}
 
 fn step_event(sink: Option<EventSink>, name: Option<&str>, field: &str, step: usize) {
     if let (Some(sink), Some(name)) = (sink, name.filter(|name| !name.is_empty())) {
@@ -75,7 +68,7 @@ fn WizardContainer(props: WizardContainerProps) -> Element {
     let view = props.view.as_view();
 
     if loading {
-        let state = pattern("loading-state", []);
+        let state = pattern("loading-state", [] as [(&str, Value); 0]);
         return rsx! { div { class: "{class}", ..shared_root_attrs(&props.props), {props.registry.render_spec(&state, None, &view)} } };
     }
     if let Some(error) = error.filter(|error| !matches!(error, Value::Null)) {

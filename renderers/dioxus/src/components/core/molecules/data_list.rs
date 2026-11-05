@@ -1,3 +1,4 @@
+use crate::renderer::{pattern_spec as pattern};
 use crate::registry::{shared_root_attrs, DioxusPatternRegistry};
 use crate::renderer::{DioxusPatternRenderer, DioxusView};
 use dioxus::prelude::*;
@@ -6,14 +7,6 @@ use orbital_core::Value;
 
 pub struct DataListRenderer;
 
-fn pattern(name: &str, fields: impl IntoIterator<Item = (String, Value)>) -> Value {
-    let mut props = orbital_core::ValueMap::new();
-    props.insert("type".into(), Value::string(name));
-    for (key, value) in fields {
-        props.insert(key.into(), value);
-    }
-    Value::Object(props.into())
-}
 
 fn empty_pattern(props: &Value) -> Value {
     let mut fields = vec![(
