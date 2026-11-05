@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use orbital_core::client::bridge::{KernelBridge, ServerBridge};
 use orbital_core::client::ClientKernel;
-use orbital_core::{EntityRef, OrbitalSchema, Persistence, Value};
+use orbital_core::{OrbitalSchema, Value};
 
 use crate::app::{AppState, APP};
 use crate::client_core::ClientCore;
@@ -17,53 +17,6 @@ use crate::client_core::ClientCore;
 /// Log namespace — mirrors `@almadar/logger`'s `almadar:ui-wasm`
 /// (Rust `tracing` targets use `::`).
 pub const NS: &str = "almadar::ui_wasm_dioxus";
-
-/// Seed one `singleton` row per inline entity with no authored `instances`,
-/// from each field's literal `default` — identical to the egui web shell so
-/// `@entity.X` bindings resolve for instance-scoped atoms (e.g. the counter).
-fn seed_singletons(
-    seed: &dyn Fn(&str, Vec<Value>) -> Result<(), String>,
-    schema: &OrbitalSchema,
-) -> Result<(), String> {
-    let mut seen = std::collections::HashSet::new();
-    for orbital in &schema.orbitals {
-        let mut refs: Vec<&EntityRef> = vec![&orbital.entity];
-        if let Some(aux) = &orbital.auxiliary_entities {
-            refs.extend(aux.iter());
-        }
-        for er in refs {
-            let EntityRef::Inline(def) = er else { continue };
-            if !matches!(def.persistence, Some(Persistence::Runtime)) {
-                continue;
-            }
-            if def.instances.as_ref().is_some_and(|v| !v.is_empty()) {
-                continue;
-            }
-            if !seen.insert(def.name.clone()) {
-                continue;
-            }
-            let mut row = orbital_core::ValueMap::new();
-            for f in &def.fields {
-                let Some(name) = f.name.as_ref() else {
-                    continue;
-                };
-                if name == "id" {
-                    continue;
-                }
-                let v = f
-                    .default
-                    .as_ref()
-                    .map(|d| Value::from(d.clone()))
-                    .unwrap_or(Value::Null);
-                row.insert(name.clone().into(), v);
-            }
-            let defaulted = row.len();
-            seed(&def.name, vec![Value::Object(row.into())])?;
-            tracing::debug!(target: NS, entity = %def.name, defaulted, "seeded singleton entity");
-        }
-    }
-    Ok(())
-}
 
 /// Register a program `orb` resolved (`orb resolve`), build the circuit and
 /// registry, and store them in the shared [`APP`] cell. Returns
@@ -73,11 +26,6 @@ pub fn mount_core(schema_json: &str) -> Result<(usize, usize), String> {
     let schema = orbital_core::schema::parse_schema(schema_json)
         .map_err(|e| format!("parse schema: {e}"))?;
     let server = KernelBridge::new(schema.clone()).map_err(|e| format!("server bridge: {e}"))?;
-    seed_singletons(
-        &|entity, rows| server.seed(entity, rows).map_err(|e| e.to_string()),
-        &schema,
-    )
-    .map_err(|e| format!("seed server: {e}"))?;
     Ok(mount_circuit(client_circuit(schema, Arc::new(server))?))
 }
 
@@ -95,8 +43,6 @@ fn client_circuit(
     bridge: Arc<dyn ServerBridge>,
 ) -> Result<ClientCore, String> {
     let kernel = ClientKernel::new(schema.clone(), Some(bridge)).map_err(|e| e.to_string())?;
-    seed_singletons(&|entity, rows| kernel.seed(entity, rows), &schema)
-        .map_err(|e| format!("seed client: {e}"))?;
     Ok(ClientCore::with_client_kernel(schema, Arc::new(kernel)))
 }
 
