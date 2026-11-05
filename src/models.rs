@@ -470,16 +470,13 @@ fn trait_configs(module: &OirModule) -> BTreeMap<String, Vec<OirField>> {
 }
 
 /// `impl Default` building each field from its default fn, or `None` for an optional knob without one.
-fn default_impl(name: &str, fields: &[OirField], types: &RsTypes<'_>) -> String {
+fn default_impl(name: &str, fields: &[OirField], has_default_fn: &[bool]) -> String {
     let inits: Vec<String> = fields
         .iter()
-        .map(|f| {
+        .zip(has_default_fn)
+        .map(|(f, has_fn)| {
             let ident = rs_identifier(&f.name);
-            let value = if field_line(f, name, types).1.is_some() {
-                format!("default_{name}_{ident}()")
-            } else {
-                "None".to_string()
-            };
+            let value = if *has_fn { format!("default_{name}_{ident}()") } else { "None".to_string() };
             format!("            {ident}: {value},")
         })
         .collect();
@@ -504,7 +501,10 @@ pub fn events_file(module: &OirModule) -> GeneratedFile {
             hoisted: &hoisted,
             local: &local,
         };
-        let (lines, fns) = field_lines(&fields, &name, &types);
+        let rendered: Vec<(String, Option<String>)> = fields.iter().map(|f| field_line(f, &name, &types)).collect();
+        let has_default_fn: Vec<bool> = rendered.iter().map(|(_, default_fn)| default_fn.is_some()).collect();
+        let (lines, fns): (Vec<String>, Vec<Option<String>>) = rendered.into_iter().unzip();
+        let fns: Vec<String> = fns.into_iter().flatten().collect();
         for decl in hoisted.take() {
             body.push_str(&decl);
             body.push_str("\n\n");
@@ -512,7 +512,7 @@ pub fn events_file(module: &OirModule) -> GeneratedFile {
         body.push_str(&struct_source(&name, None, &lines, &fns));
         body.push_str("\n\n");
         if is_config {
-            body.push_str(&default_impl(&name, &fields, &types));
+            body.push_str(&default_impl(&name, &fields, &has_default_fn));
             body.push_str("\n\n");
         }
     }
@@ -658,6 +658,25 @@ mod tests {
         let expected = "#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]\npub struct GameConfig {\n    pub label: Option<String>,\n    #[serde(default = \"default_GameConfig_pointsPerKill\")]\n    pub pointsPerKill: f64,\n    #[serde(default = \"default_GameConfig_running\")]\n    pub running: bool,\n}\n\nfn default_GameConfig_pointsPerKill() -> f64 {\n    10.0\n}\n\nfn default_GameConfig_running() -> bool {\n    true\n}\n\nimpl Default for GameConfig {\n    fn default() -> Self {\n        Self {\n            label: None,\n            pointsPerKill: default_GameConfig_pointsPerKill(),\n            running: default_GameConfig_running(),\n        }\n    }\n}";
         let content = events_file(&m).content;
         assert!(content.contains(expected), "{content}");
+    }
+
+    #[test]
+    fn a_config_enum_knob_hoists_its_enum_once() {
+        let mut m = OirModule::new("app", "1.0.0");
+        let mut t = OirTrait::new("Game");
+        let mut schema = orbital_core::ir::OirConfigSchema::new();
+        schema.insert(
+            "mode".into(),
+            OirConfigFieldType { field_type: OirType::String, values: Some(vec!["fast".into(), "slow".into()]) },
+        );
+        t.declared_config_schema = Some(schema);
+        let mut defaults = orbital_core::ir::OirObject::new();
+        defaults.insert("mode".into(), OirValue::String("fast".into()));
+        t.declared_config_defaults = Some(defaults);
+        m.traits.push(t);
+        let content = events_file(&m).content;
+        assert_eq!(content.matches("pub enum GameConfigMode {").count(), 1, "{content}");
+        assert!(content.contains("mode: default_GameConfig_mode(),"), "control: the default is still called: {content}");
     }
 
     #[test]
