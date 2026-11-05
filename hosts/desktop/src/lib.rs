@@ -59,7 +59,7 @@ impl Surface {
         Ok(match renderer {
             Renderer::Dioxus => {
                 dioxus::mount(schema.clone(), bridge)?;
-                orbital_client_dioxus::app::CSS_TEXT.with(|c| *c.borrow_mut() = orbital_client_dioxus::styles::stylesheets());
+                orbital_client_dioxus::app::CSS_TEXT.with(|c| *c.borrow_mut() = orbital_client_dioxus::styles::program_stylesheets(schema));
                 Surface::Dioxus
             }
             Renderer::Tui => Surface::Tui(Box::new(TuiApp::new(schema.clone(), Some(bridge), Vec::new()).map_err(|e| format!("{e:#}"))?)),
@@ -142,19 +142,14 @@ impl DesktopProgram for Desktop {
             Renderer::Tui => orbital_client_tui::run(schema_path, server).map_err(|e| format!("{e:#}")),
             Renderer::Dioxus => {
                 let json = std::fs::read_to_string(schema_path).map_err(|e| format!("{}: {e}", schema_path.display()))?;
-                let title = match server {
-                    Some(url) => {
-                        let schema = orbital_core::schema::parse_schema(&json).map_err(|e| e.to_string())?;
-                        let title = schema.name.clone();
-                        dioxus::mount(schema, Arc::new(SyncServerBridge::new(url)))?;
-                        title
-                    }
-                    None => {
-                        dioxus::mount_core(&json)?;
-                        orbital_core::schema::parse_schema(&json).map_err(|e| e.to_string())?.name
-                    }
+                let schema = orbital_core::schema::parse_schema(&json).map_err(|e| e.to_string())?;
+                let title = schema.name.clone();
+                let css = orbital_client_dioxus::styles::program_stylesheets(&schema);
+                match server {
+                    Some(url) => dioxus::mount(schema, Arc::new(SyncServerBridge::new(url)))?,
+                    None => dioxus::mount_core(&json)?,
                 };
-                orbital_client_dioxus::native::open_window(orbital_client_dioxus::styles::stylesheets(), &title);
+                orbital_client_dioxus::native::open_window(css, &title);
                 Ok(())
             }
         }

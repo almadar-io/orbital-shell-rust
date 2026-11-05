@@ -11,6 +11,11 @@ pub fn stylesheets() -> Vec<String> {
     vec![WEB_CLIENT.to_string(), BASE.to_string()]
 }
 
+pub fn program_stylesheets(schema: &orbital_core::OrbitalSchema) -> Vec<String> {
+    let declared = schema.theme_definitions.as_deref().unwrap_or_default();
+    vec![orbital_core::runtime::theme::program_themes_css(declared), WEB_CLIENT.to_string(), BASE.to_string()]
+}
+
 pub fn themed_stylesheets() -> Vec<String> {
     vec![THEME.to_string(), WEB_CLIENT.to_string(), BASE.to_string()]
 }
@@ -85,8 +90,35 @@ fn css_property_name(name: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::style_with_props;
+    use super::{program_stylesheets, style_with_props};
     use orbital_core::{Value, ValueMap};
+
+    fn schema_with_themes(themes: &str) -> orbital_core::OrbitalSchema {
+        orbital_core::schema::parse_schema(&format!(
+            r#"{{"name":"t","orbitals":[],"themeDefinitions":{themes}}}"#
+        ))
+        .expect("schema parses")
+    }
+
+    #[test]
+    fn a_program_paints_the_themes_it_declares() {
+        let preset = orbital_core::runtime::theme::ThemePresets::installed()
+            .get("almadar")
+            .cloned()
+            .expect("almadar preset installed");
+        let themes = serde_json::to_string(&vec![preset]).expect("theme serializes");
+        let css = &program_stylesheets(&schema_with_themes(&themes))[0];
+        assert!(css.contains(r#"[data-theme="almadar-dark"]"#));
+        assert!(css.contains(r#"[data-theme="almadar-light"]"#));
+        assert!(!css.contains(r#"[data-theme="minimalist-light"]"#));
+    }
+
+    #[test]
+    fn a_program_declaring_no_theme_paints_the_default_preset() {
+        let css = &program_stylesheets(&schema_with_themes("[]"))[0];
+        assert!(css.contains(r#"[data-theme="minimalist-light"]"#));
+        assert!(!css.contains(r#"[data-theme="almadar-dark"]"#));
+    }
 
     #[test]
     fn projects_authored_css_properties_after_component_defaults() {
