@@ -172,21 +172,18 @@ impl TargetTypeRenderer for RsTypes<'_> {
             .iter()
             .map(|v| {
                 let variant = split_to_pascal_case(&v.name);
-                let struct_name = format!("{name}{variant}");
-                let (lines, fns) = match &v.field_type {
-                    OirType::Struct { fields, .. } => field_lines(fields, &struct_name, self),
-                    other => {
-                        let child = self.child(format!("{struct_name}Value"));
-                        (
-                            vec![format!("    pub value: {},", render_type(&child, other, None))],
-                            Vec::new(),
-                        )
+                let arm_ctx = format!("{name}{variant}");
+                let arm_ty = match &v.field_type {
+                    OirType::Struct { fields, .. } => {
+                        let (lines, fns) = field_lines(fields, &arm_ctx, self);
+                        self.hoisted
+                            .borrow_mut()
+                            .push(struct_source(&arm_ctx, None, &lines, &fns));
+                        arm_ctx
                     }
+                    other => render_type(&self.child(arm_ctx), other, None),
                 };
-                self.hoisted
-                    .borrow_mut()
-                    .push(struct_source(&struct_name, None, &lines, &fns));
-                format!("    {variant}({struct_name}),")
+                format!("    {variant}({arm_ty}),")
             })
             .collect();
         self.hoisted.borrow_mut().push(format!(
@@ -264,9 +261,11 @@ impl TargetTypeRenderer for RsTypes<'_> {
     }
 }
 
-struct RsLiteral;
+struct RsLiteral<'a> {
+    union_name: &'a str,
+}
 
-impl TargetLiteralRenderer for RsLiteral {
+impl TargetLiteralRenderer for RsLiteral<'_> {
     type Out = String;
 
     fn null(&self) -> String {
@@ -294,6 +293,9 @@ impl TargetLiteralRenderer for RsLiteral {
     }
     fn array(&self, items: Vec<String>) -> String {
         format!("vec![{}]", items.join(", "))
+    }
+    fn union_arm(&self, arm: &str, inner: String) -> String {
+        format!("{}::{}({inner})", self.union_name, split_to_pascal_case(arm))
     }
 }
 
@@ -352,7 +354,7 @@ fn field_line(f: &OirField, class: &str, types: &RsTypes<'_>) -> (String, Option
     let mut default_fn = None;
     let mut comment = String::new();
     if let Some(value) = &f.default {
-        match render_default(&RsLiteral, value, ty, None) {
+        match render_default(&RsLiteral { union_name: &child.context }, value, ty, None) {
             Ok(Some(expr)) => {
                 let fn_name = format!("default_{class}_{ident}");
                 let body = if optional { format!("Some({expr})") } else { expr };
@@ -714,5 +716,28 @@ mod tests {
         let content = entities_file(&m).content;
         assert!(content.contains("pub enum DocKind {"), "{content}");
         assert!(content.contains("pub kind: DocKind,"), "{content}");
+    }
+
+    #[test]
+    fn a_union_renders_bare_primitive_arms_a_hoisted_struct_arm_and_a_constructed_default() {
+        let mut m = OirModule::new("app", "1.0.0");
+        let mut holder = OirEntity::new("Holder");
+        let env = OirType::Struct { additional: None, fields: vec![OirField::new("anchor", OirType::String)].into() };
+        let mut host = OirField::new(
+            "host",
+            OirType::Union { variants: vec![OirField::new("string", OirType::String), OirField::new("Env", env)].into() },
+        );
+        host.default = Some(OirValue::String("api.example.test".into()));
+        holder.fields.push(host);
+        m.entities.push(holder);
+        let content = entities_file(&m).content;
+        let env_struct = "#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]\npub struct HolderHostEnv {\n    pub anchor: String,\n}";
+        let union = "#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]\n#[serde(untagged)]\npub enum HolderHost {\n    String(String),\n    Env(HolderHostEnv),\n}";
+        let default_fn = "fn default_Holder_host() -> HolderHost {\n    HolderHost::String(\"api.example.test\".to_string())\n}";
+        assert!(content.contains(env_struct), "{content}");
+        assert!(content.contains(union), "{content}");
+        assert!(content.contains(default_fn), "{content}");
+        assert!(content.contains("#[serde(default = \"default_Holder_host\")]\n    pub host: HolderHost,"), "{content}");
+        assert!(!content.contains("HolderHostString"), "{content}");
     }
 }
