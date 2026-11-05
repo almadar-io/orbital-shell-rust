@@ -1,10 +1,10 @@
+use crate::renderer::merge_class_name;
 use crate::components::game::molecules::trait_slot::render_slot;
 use crate::registry::{shared_root_attrs, DioxusPatternRegistry};
 use crate::renderer::{DioxusPatternRenderer, DioxusView};
 use dioxus::prelude::*;
 use orbital_core::client::helpers::{
-    get_array, get_bool_or, get_number_or, get_string, merge_class_name,
-};
+    get_array, get_bool_or, get_number_or, get_string, };
 use orbital_core::{Value, ValueMap};
 
 pub struct SequenceBarRenderer;

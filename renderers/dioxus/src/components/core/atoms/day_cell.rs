@@ -1,8 +1,9 @@
+use crate::renderer::merge_class_name;
 use crate::registry::DioxusPatternRegistry;
 use crate::renderer::{DioxusPatternRenderer, DioxusView};
 use dioxus::prelude::*;
 use orbital_core::client::calendar::calendar_day;
-use orbital_core::client::helpers::{get_bool_or, get_string, merge_class_name};
+use orbital_core::client::helpers::{get_bool_or, get_string, };
 use orbital_core::Value;
 
 pub struct DayCellRenderer;

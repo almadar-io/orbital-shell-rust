@@ -1,11 +1,11 @@
 //! Native Dioxus renderer for the shared pattern contract.
 
+use crate::renderer::merge_class_name;
 use crate::registry::{shared_root_attrs_with_defaults, DioxusPatternRegistry};
 use crate::renderer::{DioxusPatternRenderer, DioxusView};
 use dioxus::prelude::*;
 use orbital_core::client::helpers::{
-    from_json, get_bool_or, get_string, get_string_or, merge_class_name,
-};
+    from_json, get_bool_or, get_string, get_string_or, };
 use orbital_core::{ThemeMode, Value};
 
 /// Dioxus renderer for the `theme-toggle` pattern.

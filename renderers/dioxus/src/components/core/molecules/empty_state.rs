@@ -1,3 +1,4 @@
+use crate::renderer::merge_class_name;
 use crate::renderer::{pattern_spec as pattern};
 use crate::registry::{shared_root_attrs, DioxusPatternRegistry};
 use crate::renderer::{DioxusPatternRenderer, DioxusView, EventSink};

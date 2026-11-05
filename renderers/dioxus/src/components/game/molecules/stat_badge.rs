@@ -1,9 +1,9 @@
+use crate::renderer::merge_class_name;
 use crate::registry::{shared_root_attrs, DioxusPatternRegistry};
 use crate::renderer::{DioxusPatternRenderer, DioxusView};
 use dioxus::prelude::*;
 use orbital_core::client::helpers::{
-    get_number, get_string, get_string_or, icon_name_to_glyph, merge_class_name,
-};
+    get_number, get_string, get_string_or, icon_name_to_glyph, };
 use orbital_core::{Value, ValueMap};
 
 pub struct StatBadgeRenderer;

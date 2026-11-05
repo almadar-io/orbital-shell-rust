@@ -1,3 +1,4 @@
+use crate::renderer::merge_class_name;
 use crate::renderer::{pattern_spec as pattern, object_value as pattern_payload};
 use crate::components::core::atoms::checkbox::CheckboxRenderer;
 use crate::registry::{shared_root_attrs, DioxusPatternRegistry};

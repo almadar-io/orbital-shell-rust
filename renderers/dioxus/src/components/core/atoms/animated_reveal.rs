@@ -1,3 +1,4 @@
+use crate::renderer::merge_class_name;
 use crate::registry::DioxusPatternRegistry;
 use crate::renderer::{DioxusPatternRenderer, DioxusView, EventSink};
 use dioxus::prelude::*;

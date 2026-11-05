@@ -1,10 +1,12 @@
+use crate::renderer::merge_class_name;
 use crate::registry::DioxusPatternRegistry;
-use crate::renderer::{DioxusPatternRenderer, DioxusView, OwnedDioxusView};
+use crate::renderer::{pattern_spec, DioxusPatternRenderer, DioxusView, OwnedDioxusView};
 use dioxus::prelude::*;
 use dioxus_primitives::dropdown_menu::{
     DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 };
-use orbital_core::client::helpers::{get_bool_or, get_string, get_string_or, merge_class_name};
+use orbital_core::client::helpers::{get_bool_or, get_string, get_string_or, };
+use orbital_core::client::recurse::trait_ref_name as trigger_ref_name;
 use orbital_core::{Value, ValueMap};
 
 pub struct MenuRenderer;
@@ -38,29 +40,34 @@ fn Menu(props: MenuProps) -> Element {
         "left-0"
     };
     let class = merge_class_name(
-        &format!("absolute z-50 min-w-48 rounded-container border border-border bg-surface shadow-elevation-popover py-1 {side} {alignment}"),
+        &format!("absolute z-50 bg-card border-[length:var(--border-width)] border-border shadow-elevation-popover rounded-container min-w-0 sm:min-w-[200px] max-w-[calc(100vw-1rem)] py-1 {side} {alignment}"),
         &props.props,
     );
     let sink = view.sink;
     let navigate = view.navigate;
-    let trigger_renderer: Option<Callback<Vec<Attribute>, Element>> = trigger
-        .filter(|value| value.as_str().is_none())
-        .map(|trigger| {
-            let trigger = trigger.clone();
-            let registry = props.registry.clone();
-            let owned_view = props.view.clone();
-            Callback::new(move |attrs: Vec<Attribute>| {
-                rsx! { span { role: "button", tabindex: "0", class: "inline-flex", ..attrs,
-                    {owned_view.as_view().render_node(&registry, &trigger)}
-                } }
-            })
-        });
+    let trigger_renderer: Option<Callback<Vec<Attribute>, Element>> = trigger.map(|trigger| {
+        let trigger = match trigger.as_str() {
+            Some(text) if trigger_ref_name(text).is_none() => {
+                let mut spec = ValueMap::new();
+                spec.insert("type".into(), Value::string("typography"));
+                spec.insert("variant".into(), Value::string("small"));
+                spec.insert("content".into(), trigger.clone());
+                Value::Object(spec.into())
+            }
+            _ => trigger.clone(),
+        };
+        let registry = props.registry.clone();
+        let owned_view = props.view.clone();
+        Callback::new(move |attrs: Vec<Attribute>| {
+            rsx! { span { role: "button", tabindex: "0", class: "inline-flex", ..attrs,
+                {owned_view.as_view().render_node(&registry, &trigger)}
+            } }
+        })
+    });
     rsx! {
         DropdownMenu { default_open: false, class: "relative inline-flex",
             if let Some(trigger_renderer) = trigger_renderer {
                 DropdownMenuTrigger { r#as: trigger_renderer, "" }
-            } else if let Some(trigger) = trigger {
-                DropdownMenuTrigger { {view.render_node(&props.registry, trigger)} }
             }
             DropdownMenuContent { class: "{class}", role: "menu", instant_close: true,
                 if let Some(header) = header {
@@ -70,10 +77,14 @@ fn Menu(props: MenuProps) -> Element {
                     for (index, item) in items.iter().enumerate() {
                         {
                             if get_string(item, "type").as_deref() == Some("divider") {
-                                rsx! { div { key: "divider-{index}", role: "separator", class: "my-1 border-t border-border" } }
+                                rsx! { div { key: "divider-{index}", role: "separator", aria_orientation: "horizontal", class: "w-full h-0 border-t border-border my-1 border-solid" } }
                             } else {
-                                let id = get_string(item, "id").unwrap_or_else(|| index.to_string());
                                 let label = get_string_or(item, "label", "");
+                                let id = get_string(item, "id").unwrap_or_else(|| {
+                                    let slug = label.to_lowercase().split_whitespace().collect::<Vec<_>>().join("-");
+                                    format!("item-{slug}-{index}")
+                                });
+                                let title = get_string(item, "title");
                                 let icon = get_string(item, "icon");
                                 let badge = item.get("badge").cloned();
                                 let disabled = get_bool_or(item, "disabled", false);
@@ -81,28 +92,36 @@ fn Menu(props: MenuProps) -> Element {
                                 let event = get_string(item, "event");
                                 let href = get_string(item, "href");
                                 let has_submenu = item.get("subMenu").and_then(Value::as_array).is_some_and(|items| !items.is_empty());
-                                let row_class = if danger {
-                                    "w-full flex items-center justify-between gap-3 px-4 py-2 text-start text-sm text-foreground hover:bg-error/10 border-s-heavy border-error"
-                                } else {
-                                    "w-full flex items-center justify-between gap-3 px-4 py-2 text-start text-sm hover:bg-muted focus:bg-muted"
-                                };
-                                let mut icon_spec = ValueMap::new();
-                                icon_spec.insert("type".into(), Value::string("icon"));
-                                if let Some(icon) = icon {
-                                    icon_spec.insert("name".into(), Value::String(icon.into()));
-                                }
-                                icon_spec.insert("size".into(), Value::string("sm"));
-                                let icon_spec = Value::Object(icon_spec.into());
-                                let mut badge_spec = ValueMap::new();
-                                badge_spec.insert("type".into(), Value::string("badge"));
-                                if let Some(badge) = badge {
-                                    badge_spec.insert("label".into(), badge);
-                                }
-                                let badge_spec = Value::Object(badge_spec.into());
+                                let row_class = format!(
+                                    "w-full flex items-center justify-between gap-3 px-4 py-2 text-start text-sm transition-colors hover:bg-muted focus:outline-none focus:bg-muted disabled:opacity-50 disabled:cursor-not-allowed {} {}",
+                                    if disabled { "cursor-not-allowed" } else { "" },
+                                    if danger { "text-foreground hover:bg-error/10 border-s-heavy border-error" } else { "" },
+                                );
+                                let icon_class = if danger { "flex-shrink-0 text-error" } else { "flex-shrink-0" };
+                                let icon_spec = pattern_spec("icon", [
+                                    ("name", icon.map(|icon| Value::String(icon.into())).unwrap_or(Value::Null)),
+                                    ("size", Value::string("sm")),
+                                    ("className", Value::string(icon_class)),
+                                ]);
+                                let label_spec = pattern_spec("typography", [
+                                    ("variant", Value::string("small")),
+                                    ("className", Value::string("flex-1")),
+                                    ("content", Value::String(label.clone().into())),
+                                ]);
+                                let badge_spec = pattern_spec("badge", [
+                                    ("variant", Value::string("default")),
+                                    ("size", Value::string("sm")),
+                                    ("label", badge.unwrap_or(Value::Null)),
+                                ]);
+                                let chevron_spec = pattern_spec("icon", [
+                                    ("name", Value::string("chevron-right")),
+                                    ("size", Value::string("sm")),
+                                    ("className", Value::string("flex-shrink-0")),
+                                ]);
                                 let action_label = label.clone();
                                 rsx! {
                                     DropdownMenuItem::<String> { key: "{id}", value: id.clone(), index: index, disabled: disabled,
-                                        class: "{row_class}", role: "menuitem",
+                                        class: "{row_class}", role: "menuitem", title: title,
                                         on_select: move |item_id: String| {
                                             if has_submenu { return; }
                                             if let (Some(sink), Some(event)) = (sink, &event) {
@@ -115,11 +134,11 @@ fn Menu(props: MenuProps) -> Element {
                                                 navigate.call(href.clone());
                                             }
                                         },
-                                        span { class: "flex items-center gap-3 flex-1 min-w-0",
+                                        div { class: "flex items-center gap-3 flex-1 min-w-0",
                                             if item.get("icon").is_some() { {props.registry.render_spec(&icon_spec, None, &view)} }
-                                            span { class: "flex-1", "{label}" }
+                                            {props.registry.render_spec(&label_spec, None, &view)}
                                             if item.get("badge").is_some() { {props.registry.render_spec(&badge_spec, None, &view)} }
-                                            if has_submenu { span { aria_hidden: "true", "›" } }
+                                            if has_submenu { {props.registry.render_spec(&chevron_spec, None, &view)} }
                                         }
                                     }
                                 }

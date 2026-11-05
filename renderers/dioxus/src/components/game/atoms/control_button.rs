@@ -1,9 +1,9 @@
+use crate::renderer::merge_class_name;
 use crate::registry::{shared_root_attrs_with_defaults, DioxusPatternRegistry};
 use crate::renderer::{DioxusPatternRenderer, DioxusView, EventSink};
 use dioxus::prelude::*;
 use orbital_core::client::helpers::{
-    get_bool_or, get_string, get_string_or, icon_name_to_glyph, merge_class_name,
-};
+    get_bool_or, get_string, get_string_or, icon_name_to_glyph, };
 use orbital_core::Value;
 
 pub struct ControlButtonRenderer;

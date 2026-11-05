@@ -7,7 +7,7 @@ use crate::renderer::EventSink;
 #[cfg(all(feature = "native", not(target_arch = "wasm32")))]
 use dioxus::prelude::*;
 #[cfg(all(feature = "native", not(target_arch = "wasm32")))]
-use orbital_core::client::helpers::{get_number, get_string, merge_class_name};
+use orbital_core::client::helpers::{get_number, get_string, };
 #[cfg(all(feature = "native", not(target_arch = "wasm32")))]
 use std::cell::RefCell;
 #[cfg(all(feature = "native", not(target_arch = "wasm32")))]

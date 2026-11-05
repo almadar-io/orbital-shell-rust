@@ -1,8 +1,9 @@
+use crate::renderer::merge_class_name;
 use crate::components::core::molecules::tooltip::{TooltipFrame, TooltipTone};
 use crate::registry::{shared_root_attrs, DioxusPatternRegistry};
 use crate::renderer::{DioxusPatternRenderer, DioxusView};
 use dioxus::prelude::*;
-use orbital_core::client::helpers::{get_string, get_string_or, merge_class_name};
+use orbital_core::client::helpers::{get_string, get_string_or, };
 use orbital_core::client::recurse::child_patterns;
 use orbital_core::Value;
 

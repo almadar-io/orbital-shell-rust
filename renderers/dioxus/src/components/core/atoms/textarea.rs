@@ -1,3 +1,4 @@
+use crate::renderer::merge_class_name;
 use super::field_draft::use_field_draft;
 use crate::registry::{shared_root_attrs, DioxusPatternRegistry};
 use crate::renderer::{DioxusPatternRenderer, DioxusView, OwnedDioxusView};

@@ -1,5 +1,6 @@
 //! Native geometric pattern projection from the shared tile geometry.
 
+use crate::renderer::merge_class_name;
 use crate::registry::DioxusPatternRegistry;
 use crate::renderer::{DioxusPatternRenderer, DioxusView};
 use dioxus::prelude::*;

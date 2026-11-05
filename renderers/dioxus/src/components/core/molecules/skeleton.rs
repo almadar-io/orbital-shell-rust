@@ -1,7 +1,8 @@
+use crate::renderer::merge_class_name;
 use crate::registry::DioxusPatternRegistry;
 use crate::renderer::{DioxusPatternRenderer, DioxusView};
 use dioxus::prelude::*;
-use orbital_core::client::helpers::{get_number_or, get_string, get_string_or, merge_class_name};
+use orbital_core::client::helpers::{get_number_or, get_string, get_string_or, };
 use orbital_core::Value;
 
 pub struct SkeletonRenderer;

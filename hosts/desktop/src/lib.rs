@@ -108,9 +108,20 @@ fn screenshot(renderer: Renderer, item: &str, schema: &OrbitalSchema, out_dir: &
 }
 
 /// The app as a route mount opens `route` (its `$MOUNT` first, then the page's seeds), settled, captured once.
-fn screenshot_route(renderer: Renderer, item: &str, schema: &OrbitalSchema, out_dir: &Path, route: &str) -> Result<PathBuf, String> {
+fn screenshot_route(
+    renderer: Renderer,
+    item: &str,
+    schema: &OrbitalSchema,
+    out_dir: &Path,
+    route: &str,
+    server: Option<&str>,
+) -> Result<PathBuf, String> {
     std::fs::create_dir_all(out_dir).map_err(|e| format!("{}: {e}", out_dir.display()))?;
-    let mut surface = Surface::mount(renderer, schema, kernel(schema)?)?;
+    let bridge: Arc<dyn ServerBridge> = match server {
+        Some(url) => Arc::new(SyncServerBridge::new(url)),
+        None => kernel(schema)?,
+    };
+    let mut surface = Surface::mount(renderer, schema, bridge)?;
     surface.drive(|core| {
         core.navigate_to(route, None);
         core.mount_page_blocking();
@@ -143,8 +154,8 @@ impl DesktopProgram for Desktop {
                 Renderer::Dioxus => orbital_client_dioxus::probe_target::DioxusTarget::new().probe_game_canvas(&pattern, &props),
                 Renderer::Tui => GameCanvasOutcome::Skip(format!("`{pattern}`: the terminal renderer paints no canvases")),
             })),
-            DesktopRequest::Screenshot { renderer, item, schema, out_dir, route } => match route {
-                Some(route) => screenshot_route(Renderer::parse(&renderer)?, &item, &schema, &out_dir, &route)
+            DesktopRequest::Screenshot { renderer, item, schema, out_dir, route, server } => match route {
+                Some(route) => screenshot_route(Renderer::parse(&renderer)?, &item, &schema, &out_dir, &route, server.as_deref())
                     .map(|file| DesktopReply::Files(vec![file]))
                     .map_err(failed),
                 None => screenshot(Renderer::parse(&renderer)?, &item, &schema, &out_dir).map(DesktopReply::Files).map_err(failed),

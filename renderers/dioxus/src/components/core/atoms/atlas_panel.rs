@@ -1,5 +1,6 @@
 //! Dioxus renderer for the shared `atlas-panel` pattern.
 
+use crate::renderer::merge_class_name;
 use crate::registry::shared_root_attrs;
 use crate::registry::DioxusPatternRegistry;
 use crate::renderer::{DioxusPatternRenderer, DioxusView};

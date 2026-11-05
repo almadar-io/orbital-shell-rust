@@ -1,0 +1,2658 @@
+[
+ {
+  "input": "!text-inherit opacity-80",
+  "output": "!text-inherit opacity-80"
+ },
+ {
+  "input": "SlotContentRenderer: patterns inside a declared item array",
+  "output": "SlotContentRenderer: patterns inside a declared item array"
+ },
+ {
+  "input": "a card whose orbital has problems carries an error badge with its own label",
+  "output": "a card whose orbital has problems carries an error badge with its own label"
+ },
+ {
+  "input": "a focused action keeps focus and ignores activation when the header is loading",
+  "output": "a focused action keeps focus and ignores activation when the header is loading"
+ },
+ {
+  "input": "a revealed section drops the layer hint",
+  "output": "a revealed section drops the layer hint"
+ },
+ {
+  "input": "a wide hover panel opened at the right edge settles flush with the edge instead of looping",
+  "output": "a wide hover panel opened at the right edge settles flush with the edge instead of looping"
+ },
+ {
+  "input": "absolute inset-0 bg-gradient-to-br from-primary/90 to-primary-hover/90",
+  "output": "absolute inset-0 bg-gradient-to-br from-primary/90 to-primary-hover/90"
+ },
+ {
+  "input": "absolute left-0 z-50 mt-2 min-w-[16rem] rounded-container border border-[var(--color-border)] bg-[var(--color-card)] p-card-md shadow-elevation-popover surface-material",
+  "output": "absolute left-0 z-50 mt-2 min-w-[16rem] rounded-container border border-[var(--color-border)] bg-[var(--color-card)] p-card-md shadow-elevation-popover surface-material"
+ },
+ {
+  "input": "absolute top-0 bottom-0 z-50 surface-material",
+  "output": "absolute top-0 bottom-0 z-50 surface-material"
+ },
+ {
+  "input": "add a task",
+  "output": "add a task"
+ },
+ {
+  "input": "an item with an href follows it through the nav stack",
+  "output": "an item with an href follows it through the nav stack"
+ },
+ {
+  "input": "aspect-video w-full overflow-hidden rounded-md bg-muted [&>iframe]:h-full [&>iframe]:w-full",
+  "output": "aspect-video w-full overflow-hidden rounded-md bg-muted [&>iframe]:h-full [&>iframe]:w-full"
+ },
+ {
+  "input": "bg-card rounded-interactive",
+  "output": "bg-card rounded-interactive"
+ },
+ {
+  "input": "bg-muted text-foreground",
+  "output": "bg-muted text-foreground"
+ },
+ {
+  "input": "bg-success animate-pulse",
+  "output": "bg-success animate-pulse"
+ },
+ {
+  "input": "block w-full h-auto max-w-full",
+  "output": "block w-full h-auto max-w-full"
+ },
+ {
+  "input": "border-b border-border/50",
+  "output": "border-b border-border/50"
+ },
+ {
+  "input": "border-l-accent text-foreground hover:text-foreground",
+  "output": "border-l-accent text-foreground hover:text-foreground"
+ },
+ {
+  "input": "bottom-2 right-2 pointer-events-none",
+  "output": "bottom-2 right-2 pointer-events-none"
+ },
+ {
+  "input": "center and scale on the vertical axis",
+  "output": "center and scale on the vertical axis"
+ },
+ {
+  "input": "color: transparent",
+  "output": "color: transparent"
+ },
+ {
+  "input": "control: a disabled item is focusable but not activated",
+  "output": "control: a disabled item is focusable but not activated"
+ },
+ {
+  "input": "control: a plain column count is unchanged",
+  "output": "control: a plain column count is unchanged"
+ },
+ {
+  "input": "control: a valid submit emits the submit event with the data",
+  "output": "control: a valid submit emits the submit event with the data"
+ },
+ {
+  "input": "control: arrows with no list open move the caret as usual",
+  "output": "control: arrows with no list open move the caret as usual"
+ },
+ {
+  "input": "control: leaving the slot cancels the hold",
+  "output": "control: leaving the slot cancels the hold"
+ },
+ {
+  "input": "control: profile without a cover value draws no cover band",
+  "output": "control: profile without a cover value draws no cover band"
+ },
+ {
+  "input": "control: the trigger has no description while the tooltip is hidden",
+  "output": "control: the trigger has no description while the tooltip is hidden"
+ },
+ {
+  "input": "controlled: the toggle reports the change and the host decides",
+  "output": "controlled: the toggle reports the change and the host decides"
+ },
+ {
+  "input": "custom values are not theme values",
+  "output": "custom values are not theme values"
+ },
+ {
+  "input": "dims a short-circuited branch",
+  "output": "dims a short-circuited branch"
+ },
+ {
+  "input": "draws every notation symbol standalone in its own svg with a caption",
+  "output": "draws every notation symbol standalone in its own svg with a caption"
+ },
+ {
+  "input": "edge: a zero-length vector on a body still labels outside the body",
+  "output": "edge: a zero-length vector on a body still labels outside the body"
+ },
+ {
+  "input": "edit in source",
+  "output": "edit in source"
+ },
+ {
+  "input": "expands when toggle button is clicked",
+  "output": "expands when toggle button is clicked"
+ },
+ {
+  "input": "fixed top-0 bottom-0 z-[60] surface-material",
+  "output": "fixed top-0 bottom-0 z-[60] surface-material"
+ },
+ {
+  "input": "flex flex-col gap-2 flex-1 min-w-0 pb-3",
+  "output": "flex flex-col gap-2 flex-1 min-w-0 pb-3"
+ },
+ {
+  "input": "flex flex-row gap-2 items-stretch min-w-0",
+  "output": "flex flex-row gap-2 items-stretch min-w-0"
+ },
+ {
+  "input": "flex items-center gap-1 self-start",
+  "output": "flex items-center gap-1 self-start"
+ },
+ {
+  "input": "flex items-center gap-2 w-full py-1",
+  "output": "flex items-center gap-2 w-full py-1"
+ },
+ {
+  "input": "flex items-center justify-center px-3",
+  "output": "flex items-center justify-center px-3"
+ },
+ {
+  "input": "flex min-w-0 flex-1 cursor-pointer items-center gap-2 self-stretch rounded-md px-1 transition-colors duration-150 hover:bg-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+  "output": "flex min-w-0 flex-1 cursor-pointer items-center gap-2 self-stretch rounded-md px-1 transition-colors duration-150 hover:bg-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+ },
+ {
+  "input": "flex-1 min-w-0 min-h-0 text-sm border-0 rounded-none shadow-none bg-transparent resize-none focus:ring-0",
+  "output": "flex-1 min-w-0 min-h-0 text-sm border-0 rounded-none shadow-none bg-transparent resize-none focus:ring-0"
+ },
+ {
+  "input": "flex-col md:flex-row",
+  "output": "flex-col md:flex-row"
+ },
+ {
+  "input": "flips the card to the state a played step reached",
+  "output": "flips the card to the state a played step reached"
+ },
+ {
+  "input": "font-mono font-bold",
+  "output": "font-mono font-bold"
+ },
+ {
+  "input": "four columns come from container breakpoints only",
+  "output": "four columns come from container breakpoints only"
+ },
+ {
+  "input": "grid gap-4",
+  "output": "grid gap-4"
+ },
+ {
+  "input": "groups render as labelled groups",
+  "output": "groups render as labelled groups"
+ },
+ {
+  "input": "h-4 bg-muted rounded w-20",
+  "output": "h-4 bg-muted rounded w-20"
+ },
+ {
+  "input": "h-7 w-48",
+  "output": "h-7 w-48"
+ },
+ {
+  "input": "h-full min-h-12",
+  "output": "h-full min-h-12"
+ },
+ {
+  "input": "hidden @sm/table:grid items-center gap-3 sticky top-0 z-10",
+  "output": "hidden @sm/table:grid items-center gap-3 sticky top-0 z-10"
+ },
+ {
+  "input": "hover:bg-success hover:text-success-foreground hover:shadow-elevation-popover",
+  "output": "hover:bg-success hover:text-success-foreground hover:shadow-elevation-popover"
+ },
+ {
+  "input": "inline-flex items-center justify-center gap-2",
+  "output": "inline-flex items-center justify-center gap-2"
+ },
+ {
+  "input": "is drawn inside the layer that scrolls with the text",
+  "output": "is drawn inside the layer that scrolls with the text"
+ },
+ {
+  "input": "its panel sits above z-50 floating chrome",
+  "output": "its panel sits above z-50 floating chrome"
+ },
+ {
+  "input": "keeps the unknown-pattern fallback for genuinely unknown patterns",
+  "output": "keeps the unknown-pattern fallback for genuinely unknown patterns"
+ },
+ {
+  "input": "list of removable values",
+  "output": "list of removable values"
+ },
+ {
+  "input": "matches against keywords as well as the label",
+  "output": "matches against keywords as well as the label"
+ },
+ {
+  "input": "min-w-0 md:min-w-[160px]",
+  "output": "min-w-0 md:min-w-[160px]"
+ },
+ {
+  "input": "ml-auto text-xs opacity-50",
+  "output": "ml-auto text-xs opacity-50"
+ },
+ {
+  "input": "mx-auto block touch-none rounded-container",
+  "output": "mx-auto block touch-none rounded-container"
+ },
+ {
+  "input": "no filter applied",
+  "output": "no filter applied"
+ },
+ {
+  "input": "opacity-0 max-h-0",
+  "output": "opacity-0 max-h-0"
+ },
+ {
+  "input": "p-0 overflow-hidden",
+  "output": "p-0 overflow-hidden"
+ },
+ {
+  "input": "p-5 border border-border rounded-container",
+  "output": "p-5 border border-border rounded-container"
+ },
+ {
+  "input": "peer h-4 w-4 border-[length:var(--border-width)] border-border",
+  "output": "peer h-4 w-4 border-[length:var(--border-width)] border-border"
+ },
+ {
+  "input": "prefers override title over extracted title",
+  "output": "prefers override title over extracted title"
+ },
+ {
+  "input": "px-2 py-1 text-xs rounded-md bg-card/90 border border-border text-muted-foreground backdrop-blur-sm cursor-pointer hover:bg-card",
+  "output": "px-2 py-1 text-xs rounded-md bg-card/90 border border-border text-muted-foreground backdrop-blur-sm cursor-pointer hover:bg-card"
+ },
+ {
+  "input": "px-4 py-1 border-b border-border bg-muted/10",
+  "output": "px-4 py-1 border-b border-border bg-muted/10"
+ },
+ {
+  "input": "px-6 py-4 shrink-0 bg-muted",
+  "output": "px-6 py-4 shrink-0 bg-muted"
+ },
+ {
+  "input": "relative inline-flex h-[1.5rem] w-[2.75rem] shrink-0 cursor-pointer items-center rounded-full border-heavy border-transparent transition-colors duration-fast",
+  "output": "relative inline-flex h-[1.5rem] w-[2.75rem] shrink-0 cursor-pointer items-center rounded-full border-transparent transition-colors duration-fast"
+ },
+ {
+  "input": "renders a progress field as a progress bar with its label",
+  "output": "renders a progress field as a progress bar with its label"
+ },
+ {
+  "input": "renders multiple secondary buttons correctly",
+  "output": "renders multiple secondary buttons correctly"
+ },
+ {
+  "input": "renders with explicit data prop",
+  "output": "renders with explicit data prop"
+ },
+ {
+  "input": "ring-2 ring-primary ring-offset-2 ring-offset-background",
+  "output": "ring-2 ring-primary ring-offset-2 ring-offset-background"
+ },
+ {
+  "input": "rounded-full flex-shrink-0",
+  "output": "rounded-full flex-shrink-0"
+ },
+ {
+  "input": "rounded-t-sm transition-all duration-slow ease-standard min-h-[4px] cursor-pointer hover:opacity-80",
+  "output": "rounded-t-sm transition-all duration-slow ease-standard min-h-[4px] cursor-pointer hover:opacity-80"
+ },
+ {
+  "input": "s width instead of the viewport",
+  "output": "s width instead of the viewport"
+ },
+ {
+  "input": "sending puts the bar placeholder back",
+  "output": "sending puts the bar placeholder back"
+ },
+ {
+  "input": "should set data attributes on wrapper",
+  "output": "should set data attributes on wrapper"
+ },
+ {
+  "input": "shows the shared error state instead of stale items",
+  "output": "shows the shared error state instead of stale items"
+ },
+ {
+  "input": "sr-only focus:not-sr-only focus:fixed focus:top-2 focus:start-2 focus:z-50 focus:px-3 focus:py-2 focus:bg-card focus:shadow-elevation-popover",
+  "output": "sr-only focus:not-sr-only focus:fixed focus:top-2 focus:start-2 focus:z-50 focus:px-3 focus:py-2 focus:bg-card focus:shadow-elevation-popover"
+ },
+ {
+  "input": "supports padding and margin props",
+  "output": "supports padding and margin props"
+ },
+ {
+  "input": "text-4xl text-primary-foreground leading-tight",
+  "output": "text-4xl text-primary-foreground leading-tight"
+ },
+ {
+  "input": "text-foreground hover:bg-error/10 border-s-heavy border-error",
+  "output": "text-foreground hover:bg-error/10 border-error"
+ },
+ {
+  "input": "text-muted-foreground shrink-0",
+  "output": "text-muted-foreground shrink-0"
+ },
+ {
+  "input": "text-sm font-medium text-muted-foreground",
+  "output": "text-sm font-medium text-muted-foreground"
+ },
+ {
+  "input": "text-white truncate",
+  "output": "text-white truncate"
+ },
+ {
+  "input": "the action emits its declared event",
+  "output": "the action emits its declared event"
+ },
+ {
+  "input": "the mobile variant links the brand too",
+  "output": "the mobile variant links the brand too"
+ },
+ {
+  "input": "toggles selection off on a second click of the already-selected drawable",
+  "output": "toggles selection off on a second click of the already-selected drawable"
+ },
+ {
+  "input": "transition-all duration-500 ease-out",
+  "output": "transition-all duration-500 ease-out"
+ },
+ {
+  "input": "type-ahead with no match leaves the active option unchanged",
+  "output": "type-ahead with no match leaves the active option unchanged"
+ },
+ {
+  "input": "w-1 cursor-col-resize hover:w-1.5 hover:bg-muted-foreground",
+  "output": "w-1 cursor-col-resize hover:w-1.5 hover:bg-muted-foreground"
+ },
+ {
+  "input": "w-24 h-24",
+  "output": "w-24 h-24"
+ },
+ {
+  "input": "w-8 h-8",
+  "output": "w-8 h-8"
+ },
+ {
+  "input": "w-full h-2 bg-muted border border-border overflow-hidden",
+  "output": "w-full h-2 bg-muted border border-border overflow-hidden"
+ },
+ {
+  "input": "w-full sm:max-w-2xl",
+  "output": "w-full sm:max-w-2xl"
+ },
+ {
+  "input": "px-4 py-1 p-2",
+  "output": "p-2"
+ },
+ {
+  "input": "px-4 py-1 my-2",
+  "output": "px-4 py-1 my-2"
+ },
+ {
+  "input": "px-4 py-1 min-h-[200px]",
+  "output": "px-4 py-1 min-h-[200px]"
+ },
+ {
+  "input": "px-4 py-1 text-display-1",
+  "output": "px-4 py-1 text-display-1"
+ },
+ {
+  "input": "px-4 py-1 bg-red-500",
+  "output": "px-4 py-1 bg-red-500"
+ },
+ {
+  "input": "px-4 py-1 rounded-lg",
+  "output": "px-4 py-1 rounded-lg"
+ },
+ {
+  "input": "px-4 py-1 shadow-elevation-card",
+  "output": "px-4 py-1 shadow-elevation-card"
+ },
+ {
+  "input": "px-4 py-1 flex-row",
+  "output": "px-4 py-1 flex-row"
+ },
+ {
+  "input": "px-4 py-1 font-normal",
+  "output": "px-4 py-1 font-normal"
+ },
+ {
+  "input": "px-4 py-1 absolute",
+  "output": "px-4 py-1 absolute"
+ },
+ {
+  "input": "px-4 py-1 underline",
+  "output": "px-4 py-1 underline"
+ },
+ {
+  "input": "px-4 py-1 dark:bg-black",
+  "output": "px-4 py-1 dark:bg-black"
+ },
+ {
+  "input": "p-2 p-2",
+  "output": "p-2"
+ },
+ {
+  "input": "p-2 my-2",
+  "output": "p-2 my-2"
+ },
+ {
+  "input": "p-2 min-h-[200px]",
+  "output": "p-2 min-h-[200px]"
+ },
+ {
+  "input": "p-2 text-display-1",
+  "output": "p-2 text-display-1"
+ },
+ {
+  "input": "p-2 bg-red-500",
+  "output": "p-2 bg-red-500"
+ },
+ {
+  "input": "p-2 rounded-lg",
+  "output": "p-2 rounded-lg"
+ },
+ {
+  "input": "p-2 shadow-elevation-card",
+  "output": "p-2 shadow-elevation-card"
+ },
+ {
+  "input": "p-2 flex-row",
+  "output": "p-2 flex-row"
+ },
+ {
+  "input": "p-2 font-normal",
+  "output": "p-2 font-normal"
+ },
+ {
+  "input": "p-2 absolute",
+  "output": "p-2 absolute"
+ },
+ {
+  "input": "p-2 underline",
+  "output": "p-2 underline"
+ },
+ {
+  "input": "p-2 dark:bg-black",
+  "output": "p-2 dark:bg-black"
+ },
+ {
+  "input": "h-button-md p-2",
+  "output": "h-button-md p-2"
+ },
+ {
+  "input": "h-button-md my-2",
+  "output": "h-button-md my-2"
+ },
+ {
+  "input": "h-button-md min-h-[200px]",
+  "output": "h-button-md min-h-[200px]"
+ },
+ {
+  "input": "h-button-md text-display-1",
+  "output": "h-button-md text-display-1"
+ },
+ {
+  "input": "h-button-md bg-red-500",
+  "output": "h-button-md bg-red-500"
+ },
+ {
+  "input": "h-button-md rounded-lg",
+  "output": "h-button-md rounded-lg"
+ },
+ {
+  "input": "h-button-md shadow-elevation-card",
+  "output": "h-button-md shadow-elevation-card"
+ },
+ {
+  "input": "h-button-md flex-row",
+  "output": "h-button-md flex-row"
+ },
+ {
+  "input": "h-button-md font-normal",
+  "output": "h-button-md font-normal"
+ },
+ {
+  "input": "h-button-md absolute",
+  "output": "h-button-md absolute"
+ },
+ {
+  "input": "h-button-md underline",
+  "output": "h-button-md underline"
+ },
+ {
+  "input": "h-button-md dark:bg-black",
+  "output": "h-button-md dark:bg-black"
+ },
+ {
+  "input": "min-h-input-md p-2",
+  "output": "min-h-input-md p-2"
+ },
+ {
+  "input": "min-h-input-md my-2",
+  "output": "min-h-input-md my-2"
+ },
+ {
+  "input": "min-h-input-md min-h-[200px]",
+  "output": "min-h-[200px]"
+ },
+ {
+  "input": "min-h-input-md text-display-1",
+  "output": "min-h-input-md text-display-1"
+ },
+ {
+  "input": "min-h-input-md bg-red-500",
+  "output": "min-h-input-md bg-red-500"
+ },
+ {
+  "input": "min-h-input-md rounded-lg",
+  "output": "min-h-input-md rounded-lg"
+ },
+ {
+  "input": "min-h-input-md shadow-elevation-card",
+  "output": "min-h-input-md shadow-elevation-card"
+ },
+ {
+  "input": "min-h-input-md flex-row",
+  "output": "min-h-input-md flex-row"
+ },
+ {
+  "input": "min-h-input-md font-normal",
+  "output": "min-h-input-md font-normal"
+ },
+ {
+  "input": "min-h-input-md absolute",
+  "output": "min-h-input-md absolute"
+ },
+ {
+  "input": "min-h-input-md underline",
+  "output": "min-h-input-md underline"
+ },
+ {
+  "input": "min-h-input-md dark:bg-black",
+  "output": "min-h-input-md dark:bg-black"
+ },
+ {
+  "input": "text-sm p-2",
+  "output": "text-sm p-2"
+ },
+ {
+  "input": "text-sm my-2",
+  "output": "text-sm my-2"
+ },
+ {
+  "input": "text-sm min-h-[200px]",
+  "output": "text-sm min-h-[200px]"
+ },
+ {
+  "input": "text-sm text-display-1",
+  "output": "text-display-1"
+ },
+ {
+  "input": "text-sm bg-red-500",
+  "output": "text-sm bg-red-500"
+ },
+ {
+  "input": "text-sm rounded-lg",
+  "output": "text-sm rounded-lg"
+ },
+ {
+  "input": "text-sm shadow-elevation-card",
+  "output": "text-sm shadow-elevation-card"
+ },
+ {
+  "input": "text-sm flex-row",
+  "output": "text-sm flex-row"
+ },
+ {
+  "input": "text-sm font-normal",
+  "output": "text-sm font-normal"
+ },
+ {
+  "input": "text-sm absolute",
+  "output": "text-sm absolute"
+ },
+ {
+  "input": "text-sm underline",
+  "output": "text-sm underline"
+ },
+ {
+  "input": "text-sm dark:bg-black",
+  "output": "text-sm dark:bg-black"
+ },
+ {
+  "input": "text-display-1 p-2",
+  "output": "text-display-1 p-2"
+ },
+ {
+  "input": "text-display-1 my-2",
+  "output": "text-display-1 my-2"
+ },
+ {
+  "input": "text-display-1 min-h-[200px]",
+  "output": "text-display-1 min-h-[200px]"
+ },
+ {
+  "input": "text-display-1 text-display-1",
+  "output": "text-display-1"
+ },
+ {
+  "input": "text-display-1 bg-red-500",
+  "output": "text-display-1 bg-red-500"
+ },
+ {
+  "input": "text-display-1 rounded-lg",
+  "output": "text-display-1 rounded-lg"
+ },
+ {
+  "input": "text-display-1 shadow-elevation-card",
+  "output": "text-display-1 shadow-elevation-card"
+ },
+ {
+  "input": "text-display-1 flex-row",
+  "output": "text-display-1 flex-row"
+ },
+ {
+  "input": "text-display-1 font-normal",
+  "output": "text-display-1 font-normal"
+ },
+ {
+  "input": "text-display-1 absolute",
+  "output": "text-display-1 absolute"
+ },
+ {
+  "input": "text-display-1 underline",
+  "output": "text-display-1 underline"
+ },
+ {
+  "input": "text-display-1 dark:bg-black",
+  "output": "text-display-1 dark:bg-black"
+ },
+ {
+  "input": "rounded-interactive p-2",
+  "output": "rounded-interactive p-2"
+ },
+ {
+  "input": "rounded-interactive my-2",
+  "output": "rounded-interactive my-2"
+ },
+ {
+  "input": "rounded-interactive min-h-[200px]",
+  "output": "rounded-interactive min-h-[200px]"
+ },
+ {
+  "input": "rounded-interactive text-display-1",
+  "output": "rounded-interactive text-display-1"
+ },
+ {
+  "input": "rounded-interactive bg-red-500",
+  "output": "rounded-interactive bg-red-500"
+ },
+ {
+  "input": "rounded-interactive rounded-lg",
+  "output": "rounded-lg"
+ },
+ {
+  "input": "rounded-interactive shadow-elevation-card",
+  "output": "rounded-interactive shadow-elevation-card"
+ },
+ {
+  "input": "rounded-interactive flex-row",
+  "output": "rounded-interactive flex-row"
+ },
+ {
+  "input": "rounded-interactive font-normal",
+  "output": "rounded-interactive font-normal"
+ },
+ {
+  "input": "rounded-interactive absolute",
+  "output": "rounded-interactive absolute"
+ },
+ {
+  "input": "rounded-interactive underline",
+  "output": "rounded-interactive underline"
+ },
+ {
+  "input": "rounded-interactive dark:bg-black",
+  "output": "rounded-interactive dark:bg-black"
+ },
+ {
+  "input": "shadow-elevation-card p-2",
+  "output": "shadow-elevation-card p-2"
+ },
+ {
+  "input": "shadow-elevation-card my-2",
+  "output": "shadow-elevation-card my-2"
+ },
+ {
+  "input": "shadow-elevation-card min-h-[200px]",
+  "output": "shadow-elevation-card min-h-[200px]"
+ },
+ {
+  "input": "shadow-elevation-card text-display-1",
+  "output": "shadow-elevation-card text-display-1"
+ },
+ {
+  "input": "shadow-elevation-card bg-red-500",
+  "output": "shadow-elevation-card bg-red-500"
+ },
+ {
+  "input": "shadow-elevation-card rounded-lg",
+  "output": "shadow-elevation-card rounded-lg"
+ },
+ {
+  "input": "shadow-elevation-card shadow-elevation-card",
+  "output": "shadow-elevation-card"
+ },
+ {
+  "input": "shadow-elevation-card flex-row",
+  "output": "shadow-elevation-card flex-row"
+ },
+ {
+  "input": "shadow-elevation-card font-normal",
+  "output": "shadow-elevation-card font-normal"
+ },
+ {
+  "input": "shadow-elevation-card absolute",
+  "output": "shadow-elevation-card absolute"
+ },
+ {
+  "input": "shadow-elevation-card underline",
+  "output": "shadow-elevation-card underline"
+ },
+ {
+  "input": "shadow-elevation-card dark:bg-black",
+  "output": "shadow-elevation-card dark:bg-black"
+ },
+ {
+  "input": "flex flex-col gap-2 p-2",
+  "output": "flex flex-col gap-2 p-2"
+ },
+ {
+  "input": "flex flex-col gap-2 my-2",
+  "output": "flex flex-col gap-2 my-2"
+ },
+ {
+  "input": "flex flex-col gap-2 min-h-[200px]",
+  "output": "flex flex-col gap-2 min-h-[200px]"
+ },
+ {
+  "input": "flex flex-col gap-2 text-display-1",
+  "output": "flex flex-col gap-2 text-display-1"
+ },
+ {
+  "input": "flex flex-col gap-2 bg-red-500",
+  "output": "flex flex-col gap-2 bg-red-500"
+ },
+ {
+  "input": "flex flex-col gap-2 rounded-lg",
+  "output": "flex flex-col gap-2 rounded-lg"
+ },
+ {
+  "input": "flex flex-col gap-2 shadow-elevation-card",
+  "output": "flex flex-col gap-2 shadow-elevation-card"
+ },
+ {
+  "input": "flex flex-col gap-2 flex-row",
+  "output": "flex gap-2 flex-row"
+ },
+ {
+  "input": "flex flex-col gap-2 font-normal",
+  "output": "flex flex-col gap-2 font-normal"
+ },
+ {
+  "input": "flex flex-col gap-2 absolute",
+  "output": "flex flex-col gap-2 absolute"
+ },
+ {
+  "input": "flex flex-col gap-2 underline",
+  "output": "flex flex-col gap-2 underline"
+ },
+ {
+  "input": "flex flex-col gap-2 dark:bg-black",
+  "output": "flex flex-col gap-2 dark:bg-black"
+ },
+ {
+  "input": "w-icon-default h-icon-default p-2",
+  "output": "w-icon-default h-icon-default p-2"
+ },
+ {
+  "input": "w-icon-default h-icon-default my-2",
+  "output": "w-icon-default h-icon-default my-2"
+ },
+ {
+  "input": "w-icon-default h-icon-default min-h-[200px]",
+  "output": "w-icon-default h-icon-default min-h-[200px]"
+ },
+ {
+  "input": "w-icon-default h-icon-default text-display-1",
+  "output": "w-icon-default h-icon-default text-display-1"
+ },
+ {
+  "input": "w-icon-default h-icon-default bg-red-500",
+  "output": "w-icon-default h-icon-default bg-red-500"
+ },
+ {
+  "input": "w-icon-default h-icon-default rounded-lg",
+  "output": "w-icon-default h-icon-default rounded-lg"
+ },
+ {
+  "input": "w-icon-default h-icon-default shadow-elevation-card",
+  "output": "w-icon-default h-icon-default shadow-elevation-card"
+ },
+ {
+  "input": "w-icon-default h-icon-default flex-row",
+  "output": "w-icon-default h-icon-default flex-row"
+ },
+ {
+  "input": "w-icon-default h-icon-default font-normal",
+  "output": "w-icon-default h-icon-default font-normal"
+ },
+ {
+  "input": "w-icon-default h-icon-default absolute",
+  "output": "w-icon-default h-icon-default absolute"
+ },
+ {
+  "input": "w-icon-default h-icon-default underline",
+  "output": "w-icon-default h-icon-default underline"
+ },
+ {
+  "input": "w-icon-default h-icon-default dark:bg-black",
+  "output": "w-icon-default h-icon-default dark:bg-black"
+ },
+ {
+  "input": "border border-red-500 bg-red-500/10 p-2",
+  "output": "border border-red-500 bg-red-500/10 p-2"
+ },
+ {
+  "input": "border border-red-500 bg-red-500/10 my-2",
+  "output": "border border-red-500 bg-red-500/10 my-2"
+ },
+ {
+  "input": "border border-red-500 bg-red-500/10 min-h-[200px]",
+  "output": "border border-red-500 bg-red-500/10 min-h-[200px]"
+ },
+ {
+  "input": "border border-red-500 bg-red-500/10 text-display-1",
+  "output": "border border-red-500 bg-red-500/10 text-display-1"
+ },
+ {
+  "input": "border border-red-500 bg-red-500/10 bg-red-500",
+  "output": "border border-red-500 bg-red-500"
+ },
+ {
+  "input": "border border-red-500 bg-red-500/10 rounded-lg",
+  "output": "border border-red-500 bg-red-500/10 rounded-lg"
+ },
+ {
+  "input": "border border-red-500 bg-red-500/10 shadow-elevation-card",
+  "output": "border border-red-500 bg-red-500/10 shadow-elevation-card"
+ },
+ {
+  "input": "border border-red-500 bg-red-500/10 flex-row",
+  "output": "border border-red-500 bg-red-500/10 flex-row"
+ },
+ {
+  "input": "border border-red-500 bg-red-500/10 font-normal",
+  "output": "border border-red-500 bg-red-500/10 font-normal"
+ },
+ {
+  "input": "border border-red-500 bg-red-500/10 absolute",
+  "output": "border border-red-500 bg-red-500/10 absolute"
+ },
+ {
+  "input": "border border-red-500 bg-red-500/10 underline",
+  "output": "border border-red-500 bg-red-500/10 underline"
+ },
+ {
+  "input": "border border-red-500 bg-red-500/10 dark:bg-black",
+  "output": "border border-red-500 bg-red-500/10 dark:bg-black"
+ },
+ {
+  "input": "hover:bg-red-500 md:flex p-2",
+  "output": "hover:bg-red-500 md:flex p-2"
+ },
+ {
+  "input": "hover:bg-red-500 md:flex my-2",
+  "output": "hover:bg-red-500 md:flex my-2"
+ },
+ {
+  "input": "hover:bg-red-500 md:flex min-h-[200px]",
+  "output": "hover:bg-red-500 md:flex min-h-[200px]"
+ },
+ {
+  "input": "hover:bg-red-500 md:flex text-display-1",
+  "output": "hover:bg-red-500 md:flex text-display-1"
+ },
+ {
+  "input": "hover:bg-red-500 md:flex bg-red-500",
+  "output": "hover:bg-red-500 md:flex bg-red-500"
+ },
+ {
+  "input": "hover:bg-red-500 md:flex rounded-lg",
+  "output": "hover:bg-red-500 md:flex rounded-lg"
+ },
+ {
+  "input": "hover:bg-red-500 md:flex shadow-elevation-card",
+  "output": "hover:bg-red-500 md:flex shadow-elevation-card"
+ },
+ {
+  "input": "hover:bg-red-500 md:flex flex-row",
+  "output": "hover:bg-red-500 md:flex flex-row"
+ },
+ {
+  "input": "hover:bg-red-500 md:flex font-normal",
+  "output": "hover:bg-red-500 md:flex font-normal"
+ },
+ {
+  "input": "hover:bg-red-500 md:flex absolute",
+  "output": "hover:bg-red-500 md:flex absolute"
+ },
+ {
+  "input": "hover:bg-red-500 md:flex underline",
+  "output": "hover:bg-red-500 md:flex underline"
+ },
+ {
+  "input": "hover:bg-red-500 md:flex dark:bg-black",
+  "output": "hover:bg-red-500 md:flex dark:bg-black"
+ },
+ {
+  "input": "control: distinct pages render as before w-[50%] !hidden",
+  "output": "control: distinct pages render as before w-[50%] !hidden"
+ },
+ {
+  "input": "emits the authored empty-object payload on press and release text-primary text-[#fff]",
+  "output": "emits the authored empty-object payload on press and release text-[#fff]"
+ },
+ {
+  "input": "[&>*+*]:pt-8 [&>*+*]:border-t [&>*+*]:border-border flex-wrap",
+  "output": "[&>*+*]:pt-8 [&>*+*]:border-t [&>*+*]:border-border flex-wrap"
+ },
+ {
+  "input": "bg-muted border border-muted gap-2 sm:hidden",
+  "output": "bg-muted border border-muted gap-2 sm:hidden"
+ },
+ {
+  "input": "bg-primary/10 text-foreground border-[length:var(--border-width)] border-primary text-red-500/50 bg-primary/20",
+  "output": "border-[length:var(--border-width)] border-primary text-red-500/50 bg-primary/20"
+ },
+ {
+  "input": "a bare keydown with no modifier still resolves to the bare entry px-4 max-w-md text-display-2",
+  "output": "a bare keydown with no modifier still resolves to the bare entry px-4 max-w-md text-display-2"
+ },
+ {
+  "input": "bg-muted hover:bg-accent items-center my-2 lg:w-1/3",
+  "output": "bg-muted hover:bg-accent items-center my-2 lg:w-1/3"
+ },
+ {
+  "input": "a clickable card is a keyboard-operable button border-red-500 shadow-elevation-dialog",
+  "output": "a clickable card is a keyboard-operable button border-red-500 shadow-elevation-dialog"
+ },
+ {
+  "input": "px-4 py-2 bg-primary text-primary-foreground rounded-interactive hover:bg-primary-hover text-sm font-medium transition-colors text-red-500/50 text-sm",
+  "output": "px-4 py-2 bg-primary rounded-interactive hover:bg-primary-hover font-medium transition-colors text-red-500/50 text-sm"
+ },
+ {
+  "input": "text-muted-foreground text-xs bg-transparent shadow-none @sm:flex",
+  "output": "text-muted-foreground text-xs bg-transparent shadow-none @sm:flex"
+ },
+ {
+  "input": "bounds the shell to the viewport and scrolls inside main rounded-t-md md:p-4 bg-transparent",
+  "output": "bounds the shell to the viewport and scrolls inside main rounded-t-md md:p-4 bg-transparent"
+ },
+ {
+  "input": "uses the same echo policy for multi-select values border-x-0 shadow-elevation-card",
+  "output": "uses the same echo policy for multi-select values border-x-0 shadow-elevation-card"
+ },
+ {
+  "input": "defaults to md size shadow-none",
+  "output": "defaults to md size shadow-none"
+ },
+ {
+  "input": "search collapses to a named icon that expands the field px-4",
+  "output": "search collapses to a named icon that expands the field px-4"
+ },
+ {
+  "input": "@[30rem]:grid-cols-2 @[42rem]:grid-cols-3 @[56rem]:grid-cols-4 leading-tight md:flex",
+  "output": "@[30rem]:grid-cols-2 @[42rem]:grid-cols-3 @[56rem]:grid-cols-4 leading-tight md:flex"
+ },
+ {
+  "input": "svg.lucide-alert-triangle, svg.lucide-triangle-alert underline w-icon-default md:!p-4",
+  "output": "svg.lucide-alert-triangle, svg.lucide-triangle-alert underline w-icon-default md:!p-4"
+ },
+ {
+  "input": "error count text-display-1 md:!p-4",
+  "output": "error count text-display-1 md:!p-4"
+ },
+ {
+  "input": "fixed bottom-0 inset-x-0 z-40 @sm:flex hidden",
+  "output": "fixed bottom-0 inset-x-0 z-40 @sm:flex hidden"
+ },
+ {
+  "input": "pairs truncate with min-w-0 so it can shrink inside a flex row shadow-elevation-card",
+  "output": "pairs truncate with min-w-0 so it can shrink inside a flex row shadow-elevation-card"
+ },
+ {
+  "input": "a plain badge is not interactive p-2 hover:bg-red-500 outline-none",
+  "output": "a plain badge is not interactive p-2 hover:bg-red-500 outline-none"
+ },
+ {
+  "input": "close behavior @md:p-2 min-h-[200px] @container",
+  "output": "close behavior @md:p-2 min-h-[200px] @container"
+ },
+ {
+  "input": "falls back to the rendered alignment when no class sets it bg-primary/20 text-sm",
+  "output": "falls back to the rendered alignment when no class sets it bg-primary/20 text-sm"
+ },
+ {
+  "input": "border-l-heavy border-border overflow-hidden",
+  "output": "border-border overflow-hidden"
+ },
+ {
+  "input": "fixed top-0 inset-x-0 z-40 py-1 h-[calc(100vh-4rem)]",
+  "output": "fixed top-0 inset-x-0 z-40 py-1 h-[calc(100vh-4rem)]"
+ },
+ {
+  "input": "absolute inset-0 z-50 flex items-center justify-center h-[calc(100vh-4rem)] ring-2 rounded-lg",
+  "output": "absolute inset-0 z-50 flex items-center justify-center h-[calc(100vh-4rem)] ring-2 rounded-lg"
+ },
+ {
+  "input": "control: the canvas still sets its pixel size from the measured viewport bg-red-500",
+  "output": "control: the canvas still sets its pixel size from the measured viewport bg-red-500"
+ },
+ {
+  "input": "flex-1 text-xs font-normal text-sm bg-[#123456]",
+  "output": "flex-1 font-normal text-sm bg-[#123456]"
+ },
+ {
+  "input": "h-4 bg-muted rounded w-24 max-w-md truncate",
+  "output": "h-4 bg-muted rounded w-24 max-w-md truncate"
+ },
+ {
+  "input": "standard mode: copy is named min-h-[200px]",
+  "output": "standard mode: copy is named min-h-[200px]"
+ },
+ {
+  "input": "bg-secondary/80 hover:bg-secondary text-primary text-red-500/50 duration-200",
+  "output": "bg-secondary/80 hover:bg-secondary text-red-500/50 duration-200"
+ },
+ {
+  "input": "a category inserted before others slides them aside truncate",
+  "output": "a category inserted before others slides them aside truncate"
+ },
+ {
+  "input": "not json hover:p-4",
+  "output": "not json hover:p-4"
+ },
+ {
+  "input": "control: no description renders no text alternative and no describedby p-2",
+  "output": "control: no description renders no text alternative and no describedby p-2"
+ },
+ {
+  "input": "a card whose orbital has problems carries an error badge with its own label shadow-elevation-card bg-red-500 text-display-1",
+  "output": "a card whose orbital has problems carries an error badge with its own label shadow-elevation-card bg-red-500 text-display-1"
+ },
+ {
+  "input": "bg-info/80 hover:bg-info m-0 truncate",
+  "output": "bg-info/80 hover:bg-info m-0 truncate"
+ },
+ {
+  "input": "control: a one-column span stays one column at every width [mask-type:alpha] rounded-interactive hidden",
+  "output": "control: a one-column span stays one column at every width [mask-type:alpha] rounded-interactive hidden"
+ },
+ {
+  "input": "control: a resize re-measures border-red-500 duration-200 overflow-hidden",
+  "output": "control: a resize re-measures border-red-500 duration-200 overflow-hidden"
+ },
+ {
+  "input": "control: without a trace every part is idle and there is no narration ring-primary min-h-0",
+  "output": "control: without a trace every part is idle and there is no narration ring-primary min-h-0"
+ },
+ {
+  "input": "picking a step writes that limit and keeps the size transition-all md:flex",
+  "output": "picking a step writes that limit and keeps the size transition-all md:flex"
+ },
+ {
+  "input": "playing: the same click drives the trait machine border-t rounded-full",
+  "output": "playing: the same click drives the trait machine border-t rounded-full"
+ },
+ {
+  "input": "flex min-h-full flex-col lg:flex-row flex-col overflow-hidden",
+  "output": "flex min-h-full lg:flex-row flex-col overflow-hidden"
+ },
+ {
+  "input": "a plain badge is not interactive text-[#fff]",
+  "output": "a plain badge is not interactive text-[#fff]"
+ },
+ {
+  "input": "a route change moves focus to main so the new page is announced min-h-0 flex-1",
+  "output": "a route change moves focus to main so the new page is announced min-h-0 flex-1"
+ },
+ {
+  "input": "flex flex-col gap-2 mt-1 group-hover:opacity-100 rounded-t-md",
+  "output": "flex flex-col gap-2 mt-1 group-hover:opacity-100 rounded-t-md"
+ },
+ {
+  "input": "grid grid-cols-3 gap-1 opacity-50 shadow-[0_0_4px_red] custom-class",
+  "output": "grid grid-cols-3 gap-1 opacity-50 shadow-[0_0_4px_red] custom-class"
+ },
+ {
+  "input": "draws every notation symbol standalone in its own svg with a caption h-auto border",
+  "output": "draws every notation symbol standalone in its own svg with a caption h-auto border"
+ },
+ {
+  "input": "renders every entry and raises no duplicate-key error font-normal",
+  "output": "renders every entry and raises no duplicate-key error font-normal"
+ },
+ {
+  "input": "bg-success/20 border-success text-foreground overflow-y-auto flex-row",
+  "output": "bg-success/20 border-success text-foreground overflow-y-auto flex-row"
+ },
+ {
+  "input": "renders a non-numeric value verbatim [&>*]:p-2 min-h-0",
+  "output": "renders a non-numeric value verbatim [&>*]:p-2 min-h-0"
+ },
+ {
+  "input": "group relative transition-colors duration-fast text-[#fff] cursor-pointer text-center",
+  "output": "group relative transition-colors duration-fast text-[#fff] cursor-pointer text-center"
+ },
+ {
+  "input": "absolute top-2 left-2 z-50 items-center custom-class",
+  "output": "absolute top-2 left-2 z-50 items-center custom-class"
+ },
+ {
+  "input": "border-[length:var(--border-width-thin)] border-border interactive-border sm:hidden",
+  "output": "border-[length:var(--border-width-thin)] border-border interactive-border sm:hidden"
+ },
+ {
+  "input": "border-y-[length:var(--border-width)] border-border w-full sm:hidden text-sm",
+  "output": "border-y-[length:var(--border-width)] border-border w-full sm:hidden text-sm"
+ },
+ {
+  "input": "bg-muted/40 border-border text-foreground hover:bg-muted hover:border-border w-icon-default w-full",
+  "output": "bg-muted/40 border-border text-foreground hover:bg-muted hover:border-border w-full"
+ },
+ {
+  "input": "z-30 flex-shrink-0 bg-card surface-material border-e-[length:var(--border-width)] border-border rounded-pill ring-primary outline-none",
+  "output": "z-30 flex-shrink-0 bg-card surface-material border-e-[length:var(--border-width)] border-border rounded-pill ring-primary outline-none"
+ },
+ {
+  "input": "keeps authored accessibility and locale on the surface sm:hidden w-[50%] hover:p-4",
+  "output": "keeps authored accessibility and locale on the surface sm:hidden w-[50%] hover:p-4"
+ },
+ {
+  "input": "rounded-lg border border-[var(--color-border)] bg-[var(--color-card)] shadow-sm overflow-hidden [&>*]:p-2 gap-card-sm shadow-[0_0_4px_red]",
+  "output": "rounded-lg border border-[var(--color-border)] bg-[var(--color-card)] overflow-hidden [&>*]:p-2 gap-card-sm shadow-[0_0_4px_red]"
+ },
+ {
+  "input": "rounded-lg border border-[var(--color-border)] bg-[var(--color-card)] shadow-sm overflow-hidden uppercase p-2",
+  "output": "rounded-lg border border-[var(--color-border)] bg-[var(--color-card)] shadow-sm overflow-hidden uppercase p-2"
+ },
+ {
+  "input": "flex flex-col gap-2 pt-2 border-t border-border/40 md:!p-4",
+  "output": "flex flex-col gap-2 pt-2 border-t border-border/40 md:!p-4"
+ },
+ {
+  "input": "does not fire when the same key is dispatched on an input in the tree bg-primary/20 shadow-none",
+  "output": "does not fire when the same key is dispatched on an input in the tree bg-primary/20 shadow-none"
+ },
+ {
+  "input": "text-foreground hover:bg-error/10 flex-1",
+  "output": "text-foreground hover:bg-error/10 flex-1"
+ },
+ {
+  "input": "absolute bottom-0 left-0 right-0 p-2 bg-gradient-to-t from-black/60 to-transparent border-x-0",
+  "output": "absolute bottom-0 left-0 right-0 p-2 bg-gradient-to-t from-black/60 to-transparent border-x-0"
+ },
+ {
+  "input": "font-mono flex-1 min-w-0 !hidden",
+  "output": "font-mono flex-1 min-w-0 !hidden"
+ },
+ {
+  "input": "flex items-center gap-2 px-3 py-1.5 rounded-interactive text-sm transition-colors @container inline-flex border",
+  "output": "items-center gap-2 px-3 py-1.5 rounded-interactive text-sm transition-colors @container inline-flex border"
+ },
+ {
+  "input": "border-b border-border bg-muted/30 border-t lg:w-1/3",
+  "output": "border-b border-border bg-muted/30 border-t lg:w-1/3"
+ },
+ {
+  "input": "flex items-center justify-center bg-muted text-muted-foreground shadow-elevation-dialog border outline-none",
+  "output": "flex items-center justify-center bg-muted text-muted-foreground shadow-elevation-dialog border outline-none"
+ },
+ {
+  "input": "control: a dark key in a light viewer turns light underline hidden [&>*]:p-2",
+  "output": "control: a dark key in a light viewer turns light underline hidden [&>*]:p-2"
+ },
+ {
+  "input": "the focused cancel button keeps focus and ignores activation when loading starts h-auto !hidden",
+  "output": "the focused cancel button keeps focus and ignores activation when loading starts h-auto !hidden"
+ },
+ {
+  "input": "absolute rounded-full w-full",
+  "output": "absolute rounded-full w-full"
+ },
+ {
+  "input": "forwards aria-label and lang to the span truncate transition-all",
+  "output": "forwards aria-label and lang to the span truncate transition-all"
+ },
+ {
+  "input": "renders passthrough children after a divider shadow-elevation-dialog shadow-none my-2",
+  "output": "renders passthrough children after a divider shadow-none my-2"
+ },
+ {
+  "input": "falls back to the rendered alignment when no class sets it w-full",
+  "output": "falls back to the rendered alignment when no class sets it w-full"
+ },
+ {
+  "input": "max-h-[36rem] overflow-y-auto w-icon-default md:flex",
+  "output": "max-h-[36rem] overflow-y-auto w-icon-default md:flex"
+ },
+ {
+  "input": "border-r border-border @container leading-tight w-[50%]",
+  "output": "border-r border-border @container leading-tight w-[50%]"
+ },
+ {
+  "input": "group relative overflow-hidden rounded-container cursor-pointer -mt-2 flex-wrap",
+  "output": "group relative overflow-hidden rounded-container cursor-pointer -mt-2 flex-wrap"
+ },
+ {
+  "input": "fixed z-50 max-w-xs w-72 transition-opacity duration-fast @sm:flex",
+  "output": "fixed z-50 max-w-xs w-72 transition-opacity duration-fast @sm:flex"
+ },
+ {
+  "input": "deep trait z-10",
+  "output": "deep trait z-10"
+ },
+ {
+  "input": "entity records surface-content rounded-lg font-bold",
+  "output": "entity records surface-content rounded-lg font-bold"
+ },
+ {
+  "input": "h-4 w-4 shrink-0 transition-transform focus:ring-2",
+  "output": "h-4 w-4 shrink-0 transition-transform focus:ring-2"
+ },
+ {
+  "input": "p-2 text-center cursor-pointer hover:bg-muted transition-colors rounded-lg",
+  "output": "p-2 text-center cursor-pointer hover:bg-muted transition-colors rounded-lg"
+ },
+ {
+  "input": "flex-shrink-0 font-mono font-bold text-sm font-normal min-h-0 ring-2",
+  "output": "flex-shrink-0 font-mono text-sm font-normal min-h-0 ring-2"
+ },
+ {
+  "input": "hover:bg-muted transition-colors shadow-lg text-[#fff] shadow-elevation-dialog",
+  "output": "hover:bg-muted transition-colors text-[#fff] shadow-elevation-dialog"
+ },
+ {
+  "input": "right-full top-1/2 -translate-y-1/2 border-r-white border-t-transparent border-b-transparent border-l-transparent uppercase",
+  "output": "right-full top-1/2 -translate-y-1/2 border-r-white border-t-transparent border-b-transparent border-l-transparent uppercase"
+ },
+ {
+  "input": "control: a second picker opens with the set already loaded w-icon-default @sm:flex text-display-2",
+  "output": "control: a second picker opens with the set already loaded w-icon-default @sm:flex text-display-2"
+ },
+ {
+  "input": "other step titles fold away in narrow containers py-1",
+  "output": "other step titles fold away in narrow containers py-1"
+ },
+ {
+  "input": "text-primary font-medium duration-200",
+  "output": "text-primary font-medium duration-200"
+ },
+ {
+  "input": "labels keep their on-screen size when the canvas is zoomed @sm:flex mx-auto",
+  "output": "labels keep their on-screen size when the canvas is zoomed @sm:flex mx-auto"
+ },
+ {
+  "input": "the change rounded-none surface-content",
+  "output": "the change rounded-none surface-content"
+ },
+ {
+  "input": "control: renders nothing without content rounded-t-md hover:bg-red-500",
+  "output": "control: renders nothing without content rounded-t-md hover:bg-red-500"
+ },
+ {
+  "input": "text-foreground hover:bg-error/10 border-s-heavy border-error w-1/2",
+  "output": "text-foreground hover:bg-error/10 border-error w-1/2"
+ },
+ {
+  "input": "border-l-heavy border-border border-2",
+  "output": "border-border border-2"
+ },
+ {
+  "input": "a hint is linked to its field !p-2",
+  "output": "a hint is linked to its field !p-2"
+ },
+ {
+  "input": "border-l-[3px] border-l-primary border-dotted surface-content bg-[#123456] px-4",
+  "output": "border-l-[3px] border-l-primary border-dotted surface-content bg-[#123456] px-4"
+ },
+ {
+  "input": "relative overflow-hidden shadow-[0_0_4px_red]",
+  "output": "relative overflow-hidden shadow-[0_0_4px_red]"
+ },
+ {
+  "input": "absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 bg-error rounded-full text-xs font-semibold text-error-foreground flex items-center justify-center -mt-2 font-normal",
+  "output": "absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 bg-error rounded-full text-xs text-error-foreground flex items-center justify-center -mt-2 font-normal"
+ },
+ {
+  "input": "p-4 bg-primary hover:bg-muted w-40 [&>*]:p-4 p-card-md",
+  "output": "bg-primary hover:bg-muted w-40 [&>*]:p-4 p-card-md"
+ },
+ {
+  "input": "position: absolute flex-row hover:p-4",
+  "output": "position: absolute flex-row hover:p-4"
+ },
+ {
+  "input": "starts a conversation at each user prompt w-1/2 py-1",
+  "output": "starts a conversation at each user prompt w-1/2 py-1"
+ },
+ {
+  "input": "flex w-full items-center justify-center rounded-container bg-[var(--surface-diagram)] min-h-row-compact",
+  "output": "flex w-full items-center justify-center rounded-container bg-[var(--surface-diagram)] min-h-row-compact"
+ },
+ {
+  "input": "bg-muted text-foreground rounded-container rounded-es-sm text-[#fff]",
+  "output": "bg-muted rounded-container rounded-es-sm text-[#fff]"
+ },
+ {
+  "input": "scale-95 brightness-110 border-foreground my-2 ring-2 hidden",
+  "output": "scale-95 brightness-110 border-foreground my-2 ring-2 hidden"
+ },
+ {
+  "input": "grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)] [&>*]:p-2",
+  "output": "grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)] [&>*]:p-2"
+ },
+ {
+  "input": "control: dismisses after the duration gap-x-4 dark:bg-black",
+  "output": "control: dismisses after the duration gap-x-4 dark:bg-black"
+ },
+ {
+  "input": "ring-2 ring-primary ring-offset-2 ring-offset-background md:p-4 flex",
+  "output": "ring-2 ring-primary ring-offset-2 ring-offset-background md:p-4 flex"
+ },
+ {
+  "input": "flex-1 min-w-0 h-full overflow-auto border-2",
+  "output": "flex-1 min-w-0 h-full overflow-auto border-2"
+ },
+ {
+  "input": "top-6 left-6 text-display-1 rounded-container",
+  "output": "top-6 left-6 text-display-1 rounded-container"
+ },
+ {
+  "input": "cursor-pointer transition-all duration-fast mx-auto flex-col",
+  "output": "cursor-pointer transition-all duration-fast mx-auto flex-col"
+ },
+ {
+  "input": "edge: the chevron still folds a listed node custom-class",
+  "output": "edge: the chevron still folds a listed node custom-class"
+ },
+ {
+  "input": "w-10 h-1 rounded-full bg-border shadow-[0_0_4px_red]",
+  "output": "w-10 h-1 rounded-full bg-border shadow-[0_0_4px_red]"
+ },
+ {
+  "input": "absolute inset-x-0 rounded-full bg-muted w-px",
+  "output": "absolute inset-x-0 rounded-full bg-muted w-px"
+ },
+ {
+  "input": "game-shell__hud pointer-events-auto group-hover:opacity-100",
+  "output": "game-shell__hud pointer-events-auto group-hover:opacity-100"
+ },
+ {
+  "input": "control: a single field section draws no section heading hover:bg-red-500",
+  "output": "control: a single field section draws no section heading hover:bg-red-500"
+ },
+ {
+  "input": "px-3 pt-2 pb-1 block min-h-0 hover:p-4 font-normal",
+  "output": "px-3 pt-2 pb-1 block min-h-0 hover:p-4 font-normal"
+ },
+ {
+  "input": "announces its state on the trigger and links to the panel rounded-interactive bg-red-500 lg:w-1/3",
+  "output": "announces its state on the trigger and links to the panel rounded-interactive bg-red-500 lg:w-1/3"
+ },
+ {
+  "input": "heading-voice text-foreground duration-200 @sm:flex cursor-pointer",
+  "output": "heading-voice text-foreground duration-200 @sm:flex cursor-pointer"
+ },
+ {
+  "input": "a task starting and ending on the same day covers that whole day p-2 duration-200 font-normal",
+  "output": "a task starting and ending on the same day covers that whole day p-2 duration-200 font-normal"
+ },
+ {
+  "input": "counts items where status field matches metric field name w-px max-w-md text-primary",
+  "output": "counts items where status field matches metric field name w-px max-w-md text-primary"
+ },
+ {
+  "input": "shows loading and error states instead of the diagram shadow-[0_0_4px_red] font-normal bg-transparent",
+  "output": "shows loading and error states instead of the diagram shadow-[0_0_4px_red] font-normal bg-transparent"
+ },
+ {
+  "input": "y mandatory p-[3px]",
+  "output": "y mandatory p-[3px]"
+ },
+ {
+  "input": "rounded-container border border-transparent hover:border-border rounded-pill",
+  "output": "border border-transparent hover:border-border rounded-pill"
+ },
+ {
+  "input": "does nothing for a disabled command overflow-hidden",
+  "output": "does nothing for a disabled command overflow-hidden"
+ },
+ {
+  "input": "absolute rounded-xl bg-red-500 h-icon-default",
+  "output": "absolute rounded-xl bg-red-500 h-icon-default"
+ },
+ {
+  "input": "h-8 w-56 bg-red-500 p-2",
+  "output": "h-8 w-56 bg-red-500 p-2"
+ },
+ {
+  "input": "edge: an explicit variant is honoured at any width flex-1 inset-0 items-center",
+  "output": "edge: an explicit variant is honoured at any width flex-1 inset-0 items-center"
+ },
+ {
+  "input": "text-xs uppercase tracking-wider text-muted-foreground font-semibold hover:bg-red-500",
+  "output": "text-xs uppercase tracking-wider text-muted-foreground font-semibold hover:bg-red-500"
+ },
+ {
+  "input": "focus:outline-none focus:ring-1 focus:ring-ring focus:border-ring rounded-full w-1/2 text-[13px]",
+  "output": "focus:outline-none focus:ring-1 focus:ring-ring focus:border-ring rounded-full w-1/2 text-[13px]"
+ },
+ {
+  "input": "uncontrolled ratio inset-0 size-4",
+  "output": "uncontrolled ratio inset-0 size-4"
+ },
+ {
+  "input": "group relative transition-colors duration-fast text-[#fff] [&>*]:p-4",
+  "output": "group relative transition-colors duration-fast text-[#fff] [&>*]:p-4"
+ },
+ {
+  "input": "t rewritten the atom leading-tight",
+  "output": "t rewritten the atom leading-tight"
+ },
+ {
+  "input": "min-h-screen flex leading-tight",
+  "output": "min-h-screen flex leading-tight"
+ },
+ {
+  "input": "absolute inset-0 bg-gradient-to-br from-primary/90 to-primary-hover/90 [&>*]:p-4 flex text-display-1",
+  "output": "absolute inset-0 bg-gradient-to-br from-primary/90 to-primary-hover/90 [&>*]:p-4 flex text-display-1"
+ },
+ {
+  "input": "h-5 w-2/3 w-px overflow-y-auto lg:w-1/3",
+  "output": "h-5 w-px overflow-y-auto lg:w-1/3"
+ },
+ {
+  "input": "flex flex-col gap-3 pt-2 border-t border-border/40 w-[--sidebar]",
+  "output": "flex flex-col gap-3 pt-2 border-t border-border/40 w-[--sidebar]"
+ },
+ {
+  "input": "renders with explicit data prop bg-transparent",
+  "output": "renders with explicit data prop bg-transparent"
+ },
+ {
+  "input": "text-xl heading-voice text-foreground truncate focus:ring-2",
+  "output": "text-xl heading-voice text-foreground truncate focus:ring-2"
+ },
+ {
+  "input": "border-e border-border overflow-auto hover:bg-red-500",
+  "output": "border-e border-border overflow-auto hover:bg-red-500"
+ },
+ {
+  "input": "justify-end gap-3 bg-primary/20 group-hover:opacity-100 h-screen",
+  "output": "justify-end gap-3 bg-primary/20 group-hover:opacity-100 h-screen"
+ },
+ {
+  "input": "reads a serialized trait description without a callback font-normal",
+  "output": "reads a serialized trait description without a callback font-normal"
+ },
+ {
+  "input": "h-9 w-32 rounded-interactive z-10",
+  "output": "h-9 w-32 rounded-interactive z-10"
+ },
+ {
+  "input": "text-sm min-w-[100px] md:flex rounded-pill min-h-[200px]",
+  "output": "text-sm min-w-[100px] md:flex rounded-pill min-h-[200px]"
+ },
+ {
+  "input": "absolute inset-0 z-50 overflow-hidden bg-scrim surface-content p-[3px] block",
+  "output": "absolute inset-0 z-50 overflow-hidden bg-scrim surface-content p-[3px] block"
+ },
+ {
+  "input": "control: a short element still needs the threshold share of itself visible py-1 min-h-[200px] md:hover:bg-blue-500",
+  "output": "control: a short element still needs the threshold share of itself visible py-1 min-h-[200px] md:hover:bg-blue-500"
+ },
+ {
+  "input": "bottom-6 right-6 absolute tracking-wide gap-x-4",
+  "output": "bottom-6 right-6 absolute tracking-wide gap-x-4"
+ },
+ {
+  "input": "the card that slides up into the freed place glides too !hidden",
+  "output": "the card that slides up into the freed place glides too !hidden"
+ },
+ {
+  "input": "compiled system slot outline-none gap-2 rounded-t-md",
+  "output": "compiled system slot outline-none gap-2 rounded-t-md"
+ },
+ {
+  "input": "control: empty arguments add no detail line w-px",
+  "output": "control: empty arguments add no detail line w-px"
+ },
+ {
+  "input": "marks the priority image eager and high priority hover:bg-red-500 shadow-lg text-xs",
+  "output": "marks the priority image eager and high priority hover:bg-red-500 shadow-lg text-xs"
+ },
+ {
+  "input": "s done never settles another orbital justify-between",
+  "output": "s done never settles another orbital justify-between"
+ },
+ {
+  "input": "absolute top-0 bottom-0 z-50 surface-material truncate !hidden",
+  "output": "absolute top-0 bottom-0 z-50 surface-material truncate !hidden"
+ },
+ {
+  "input": "entity: string md:!p-4 border-2 bg-primary/20",
+  "output": "entity: string md:!p-4 border-2 bg-primary/20"
+ },
+ {
+  "input": "inline-flex items-center gap-2 rounded-container border backdrop-blur-sm outline-none focus:ring-2",
+  "output": "inline-flex items-center gap-2 rounded-container border backdrop-blur-sm outline-none focus:ring-2"
+ },
+ {
+  "input": "control: a workflow record without line items draws no line-items block bg-primary/20",
+  "output": "control: a workflow record without line items draws no line-items block bg-primary/20"
+ },
+ {
+  "input": "mt-1 prose prose-sm max-w-none break-words z-10 outline-none text-[#fff]",
+  "output": "mt-1 prose prose-sm max-w-none break-words z-10 outline-none text-[#fff]"
+ },
+ {
+  "input": "px-4 py-2 text-base size-4 relative",
+  "output": "px-4 py-2 text-base size-4 relative"
+ },
+ {
+  "input": "empty graph renders the empty state without buttons w-full rounded-container min-h-0",
+  "output": "empty graph renders the empty state without buttons w-full rounded-container min-h-0"
+ },
+ {
+  "input": "dismissing one stacked toast keeps the other opacity-50 h-button-lg",
+  "output": "dismissing one stacked toast keeps the other opacity-50 h-button-lg"
+ },
+ {
+  "input": "read-only is a labelled image with no slider attributes rounded-interactive",
+  "output": "read-only is a labelled image with no slider attributes rounded-interactive"
+ },
+ {
+  "input": "flex-1 min-w-0 text-[11px] text-[var(--color-danger)] whitespace-pre-wrap break-words grid",
+  "output": "flex-1 min-w-0 text-[11px] text-[var(--color-danger)] whitespace-pre-wrap break-words grid"
+ },
+ {
+  "input": "ui-slot-renderer relative min-h-full [&>*]:p-2 hidden",
+  "output": "ui-slot-renderer relative min-h-full [&>*]:p-2 hidden"
+ },
+ {
+  "input": "a bracket label is in the label voice too px-4 truncate min-h-0",
+  "output": "a bracket label is in the label voice too px-4 truncate min-h-0"
+ },
+ {
+  "input": "h-4 flex-1 mx-2 font-bold h-auto",
+  "output": "flex-1 mx-2 font-bold h-auto"
+ },
+ {
+  "input": "jump to max-w-md",
+  "output": "jump to max-w-md"
+ },
+ {
+  "input": "deals trait items-center",
+  "output": "deals trait items-center"
+ },
+ {
+  "input": "emits UI:CLOSE and UI:CANCEL events when close button is clicked h-[calc(100vh-4rem)] border",
+  "output": "emits UI:CLOSE and UI:CANCEL events when close button is clicked h-[calc(100vh-4rem)] border"
+ },
+ {
+  "input": "flex-shrink-0 border-t border-border px-2 py-1.5 duration-200 h-button-lg text-xs",
+  "output": "flex-shrink-0 border-t border-border px-2 py-1.5 duration-200 h-button-lg text-xs"
+ },
+ {
+  "input": "border-border focus:border-primary shadow-elevation-dialog inset-0 mx-auto",
+  "output": "border-border focus:border-primary shadow-elevation-dialog inset-0 mx-auto"
+ },
+ {
+  "input": "sets the text direction on its root h-[calc(100vh-4rem)] ring-2",
+  "output": "sets the text direction on its root h-[calc(100vh-4rem)] ring-2"
+ },
+ {
+  "input": "mt-2 text-sm px-3 py-1 bg-warning text-warning-foreground rounded-interactive hover:opacity-90 transition-colors bg-red-500 @container",
+  "output": "mt-2 text-sm px-3 py-1 text-warning-foreground rounded-interactive hover:opacity-90 transition-colors bg-red-500 @container"
+ },
+ {
+  "input": "flex-1 text-center font-medium transition-colors duration-instant text-primary [mask-type:alpha] bg-transparent",
+  "output": "flex-1 text-center font-medium transition-colors duration-instant text-primary [mask-type:alpha] bg-transparent"
+ },
+ {
+  "input": "block text-sm font-medium text-foreground mb-1 overflow-hidden",
+  "output": "block text-sm font-medium text-foreground mb-1 overflow-hidden"
+ },
+ {
+  "input": "draws each measurement with its length in pixels leading-tight",
+  "output": "draws each measurement with its length in pixels leading-tight"
+ },
+ {
+  "input": "inside a frame scaled to half size the ease runs in layout pixels w-[--sidebar]",
+  "output": "inside a frame scaled to half size the ease runs in layout pixels w-[--sidebar]"
+ },
+ {
+  "input": "py-section min-h-[200px] [&_h1]:text-display-1 font-normal",
+  "output": "py-section min-h-[200px] [&_h1]:text-display-1 font-normal"
+ },
+ {
+  "input": "flex items-center justify-center px-3 border-x-0 shadow-lg text-xs",
+  "output": "flex items-center justify-center px-3 border-x-0 shadow-lg text-xs"
+ },
+ {
+  "input": "draws layered pills with their health and metric duration-200 overflow-y-auto size-4",
+  "output": "draws layered pills with their health and metric duration-200 overflow-y-auto size-4"
+ },
+ {
+  "input": "sticky bottom-0 bg-card py-4 -mx-6 px-6 shadow-[0_-4px_6px_-1px_rgb(0,0,0,0.05)] sm:hidden text-[#fff] shadow-elevation-card",
+  "output": "sticky bottom-0 bg-card py-4 -mx-6 px-6 sm:hidden text-[#fff] shadow-elevation-card"
+ },
+ {
+  "input": "second gravity uppercase group-hover:opacity-100 flex-col",
+  "output": "second gravity uppercase group-hover:opacity-100 flex-col"
+ },
+ {
+  "input": "vertical direction h-icon-default !p-2",
+  "output": "vertical direction h-icon-default !p-2"
+ },
+ {
+  "input": "text-sm px-2 py-1 overflow-y-auto",
+  "output": "text-sm px-2 py-1 overflow-y-auto"
+ },
+ {
+  "input": "px-2 py-1 text-xs border-x-0 pt-section flex-col",
+  "output": "px-2 py-1 text-xs border-x-0 pt-section flex-col"
+ },
+ {
+  "input": "control: the first size report only records the height overflow-y-auto",
+  "output": "control: the first size report only records the height overflow-y-auto"
+ },
+ {
+  "input": "each effect header names and explains its effect on hover underline",
+  "output": "each effect header names and explains its effect on hover underline"
+ },
+ {
+  "input": "a caller-supplied label wins group-hover:opacity-100",
+  "output": "a caller-supplied label wins group-hover:opacity-100"
+ },
+ {
+  "input": "renders mixed filter types correctly flex-1 rounded-container",
+  "output": "renders mixed filter types correctly flex-1 rounded-container"
+ },
+ {
+  "input": "border-b border-[var(--color-border)] shadow-elevation-card",
+  "output": "border-b border-[var(--color-border)] shadow-elevation-card"
+ },
+ {
+  "input": "you are here gap-2 flex-wrap relative",
+  "output": "you are here gap-2 flex-wrap relative"
+ },
+ {
+  "input": "global: per-side padding has no single token rounded-lg flex-row my-2",
+  "output": "global: per-side padding has no single token rounded-lg flex-row my-2"
+ },
+ {
+  "input": "flex flex-wrap items-center gap-2 custom-class",
+  "output": "flex flex-wrap items-center gap-2 custom-class"
+ },
+ {
+  "input": "a transition note opens on hover of its label custom-class flex-col flex-col",
+  "output": "a transition note opens on hover of its label custom-class flex-col"
+ },
+ {
+  "input": "fixed z-[45] bg-scrim md:p-4 relative p-2",
+  "output": "z-[45] bg-scrim md:p-4 relative p-2"
+ },
+ {
+  "input": "flex-1 text-xs h-6 !hidden font-normal grid",
+  "output": "flex-1 text-xs h-6 !hidden font-normal grid"
+ },
+ {
+  "input": "world view shows every orbital w-full",
+  "output": "world view shows every orbital w-full"
+ },
+ {
+  "input": "absolute left-full top-0 ml-2 w-48 bg-card surface-material rounded-container shadow-elevation-popover border border-border py-1 z-30 rounded-interactive block focus:ring-2",
+  "output": "absolute left-full top-0 ml-2 w-48 bg-card surface-material shadow-elevation-popover border border-border py-1 z-30 rounded-interactive block focus:ring-2"
+ },
+ {
+  "input": "state markers gap-2",
+  "output": "state markers gap-2"
+ },
+ {
+  "input": "destroys the player when it unmounts text-display-2",
+  "output": "destroys the player when it unmounts text-display-2"
+ },
+ {
+  "input": "flex flex-wrap items-center gap-2 w-px @sm:flex",
+  "output": "flex flex-wrap items-center gap-2 w-px @sm:flex"
+ },
+ {
+  "input": "multiple metrics w-px",
+  "output": "multiple metrics w-px"
+ },
+ {
+  "input": "relative isolate z-0 w-full overflow-hidden rounded-container surface-content surface-content",
+  "output": "relative isolate z-0 w-full overflow-hidden rounded-container surface-content surface-content"
+ },
+ {
+  "input": "p-4 bg-primary hover:bg-muted w-40 focus:ring-2 size-4 rounded-container",
+  "output": "p-4 bg-primary hover:bg-muted focus:ring-2 size-4 rounded-container"
+ },
+ {
+  "input": "draws each measurement with its length in pixels h-[calc(100vh-4rem)] justify-between h-full",
+  "output": "draws each measurement with its length in pixels justify-between h-full"
+ },
+ {
+  "input": "text-sm px-2 py-0.5 z-10 [&>*]:p-2 leading-tight",
+  "output": "text-sm px-2 py-0.5 z-10 [&>*]:p-2 leading-tight"
+ },
+ {
+  "input": "bottom-[15%] left-[15%] h-8 w-8 border-b-heavy border-l-heavy border-white text-red-500/50",
+  "output": "bottom-[15%] left-[15%] h-8 w-8 border-white text-red-500/50"
+ },
+ {
+  "input": "flex-1 text-xs font-mono h-6 gap-x-4 overflow-y-auto grid",
+  "output": "flex-1 text-xs font-mono h-6 gap-x-4 overflow-y-auto grid"
+ },
+ {
+  "input": "local: gap and padding steps write the smallest class set text-xs md:!p-4",
+  "output": "local: gap and padding steps write the smallest class set text-xs md:!p-4"
+ },
+ {
+  "input": "flex flex-1 min-w-0 flex-col h-[calc(100vh-4rem)]",
+  "output": "flex flex-1 min-w-0 flex-col h-[calc(100vh-4rem)]"
+ },
+ {
+  "input": "workspace tab with composed content shows it when chosen border-t",
+  "output": "workspace tab with composed content shows it when chosen border-t"
+ },
+ {
+  "input": "guest dialog -mt-2",
+  "output": "guest dialog -mt-2"
+ },
+ {
+  "input": "absolute left-0 top-0 overflow-visible text-red-500/50",
+  "output": "absolute left-0 top-0 overflow-visible text-red-500/50"
+ },
+ {
+  "input": "control: compact screens pinch-zoom, so the controls are hidden shadow-elevation-dialog",
+  "output": "control: compact screens pinch-zoom, so the controls are hidden shadow-elevation-dialog"
+ },
+ {
+  "input": "text-xs uppercase tracking-wide font-bold text-muted-foreground -mt-2",
+  "output": "text-xs uppercase tracking-wide font-bold text-muted-foreground -mt-2"
+ },
+ {
+  "input": "self-start text-muted-foreground [mask-type:alpha]",
+  "output": "self-start text-muted-foreground [mask-type:alpha]"
+ },
+ {
+  "input": "top-4 left-4 ring-primary flex-col",
+  "output": "top-4 left-4 ring-primary flex-col"
+ },
+ {
+  "input": "grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 @max-xl:!grid-cols-4 @max-lg:!grid-cols-3 @max-md:!grid-cols-2 @max-sm:!grid-cols-1 [&>*]:p-4 text-sm",
+  "output": "grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 @max-xl:!grid-cols-4 @max-lg:!grid-cols-3 @max-md:!grid-cols-2 @max-sm:!grid-cols-1 [&>*]:p-4 text-sm"
+ },
+ {
+  "input": "keeps authored accessibility and locale on the tile p-[3px] text-[13px] border-red-500",
+  "output": "keeps authored accessibility and locale on the tile p-[3px] text-[13px] border-red-500"
+ },
+ {
+  "input": "renders a disabled item with its title as a tooltip and aria-disabled !hidden truncate",
+  "output": "renders a disabled item with its title as a tooltip and aria-disabled !hidden truncate"
+ },
+ {
+  "input": "compact: the items become labelled menu rows inside the dock drawer overflow-hidden w-full font-normal",
+  "output": "compact: the items become labelled menu rows inside the dock drawer overflow-hidden w-full font-normal"
+ },
+ {
+  "input": "rounded-lg border border-[var(--color-border)] bg-[var(--color-card)] shadow-sm overflow-hidden justify-between block",
+  "output": "rounded-lg border border-[var(--color-border)] bg-[var(--color-card)] shadow-sm overflow-hidden justify-between block"
+ },
+ {
+  "input": "single radio carries aria-required and keeps its error description inset-0",
+  "output": "single radio carries aria-required and keeps its error description inset-0"
+ },
+ {
+  "input": "ui-slot-sidebar min-w-0 lg:shrink-0 uppercase",
+  "output": "ui-slot-sidebar min-w-0 lg:shrink-0 uppercase"
+ },
+ {
+  "input": "a bound error replaces the output body flex hover:p-4",
+  "output": "a bound error replaces the output body flex hover:p-4"
+ },
+ {
+  "input": "inline-flex items-center gap-1 justify-center rounded-container inset-0 w-1/2",
+  "output": "inline-flex items-center gap-1 justify-center rounded-container inset-0 w-1/2"
+ },
+ {
+  "input": "pausing again stops interaction flex",
+  "output": "pausing again stops interaction flex"
+ },
+ {
+  "input": "default: a fresh ring-primary group-hover:opacity-100",
+  "output": "default: a fresh ring-primary group-hover:opacity-100"
+ },
+ {
+  "input": "flex-1 overflow-y-auto border-t-[length:var(--border-width)] border-border px-2 py-3 h-full rounded-full",
+  "output": "flex-1 overflow-y-auto border-t-[length:var(--border-width)] border-border px-2 py-3 h-full rounded-full"
+ },
+ {
+  "input": "w-3 h-3 text-xs focus:ring-2",
+  "output": "w-3 h-3 text-xs focus:ring-2"
+ },
+ {
+  "input": "text-error truncate max-w-[120px] bg-primary/20 md:hover:bg-blue-500",
+  "output": "text-error truncate max-w-[120px] bg-primary/20 md:hover:bg-blue-500"
+ },
+ {
+  "input": "absolute inset-y-0 right-0 pr-3 flex items-center gap-1 pointer-events-none flex-wrap @md:p-2 h-auto",
+  "output": "absolute inset-y-0 right-0 pr-3 flex items-center gap-1 pointer-events-none flex-wrap @md:p-2 h-auto"
+ },
+ {
+  "input": "other step titles fold away in narrow containers outline-none",
+  "output": "other step titles fold away in narrow containers outline-none"
+ },
+ {
+  "input": "a layout container gets one gap handle per gap and four padding bands outline-none",
+  "output": "a layout container gets one gap handle per gap and four padding bands outline-none"
+ },
+ {
+  "input": "declared filter bg-transparent rounded-lg",
+  "output": "declared filter bg-transparent rounded-lg"
+ },
+ {
+  "input": "flips the card to the state a played step reached px-4 border-t",
+  "output": "flips the card to the state a played step reached px-4 border-t"
+ },
+ {
+  "input": "flex items-center justify-center text-sm text-muted-foreground inset-0 border-red-500 bg-[#123456]",
+  "output": "flex items-center justify-center text-sm text-muted-foreground inset-0 border-red-500 bg-[#123456]"
+ },
+ {
+  "input": "underline-offset-4 hover:text-foreground hover:underline text-[#fff] hidden",
+  "output": "underline-offset-4 hover:text-foreground hover:underline text-[#fff] hidden"
+ },
+ {
+  "input": "heading-voice text-foreground rounded-lg",
+  "output": "heading-voice text-foreground rounded-lg"
+ },
+ {
+  "input": "text-error border-error/50 animate-pulse text-[13px] shadow-lg [&>*]:p-4",
+  "output": "text-error border-error/50 animate-pulse text-[13px] shadow-lg [&>*]:p-4"
+ },
+ {
+  "input": "marks exactly the range and centres it in the scroller !p-2 top-0 p-[3px]",
+  "output": "marks exactly the range and centres it in the scroller !p-2 top-0 p-[3px]"
+ },
+ {
+  "input": "bg-muted text-foreground font-medium mx-auto custom-class",
+  "output": "bg-muted text-foreground font-medium mx-auto custom-class"
+ },
+ {
+  "input": "h-6 rounded-interactive bg-muted text-muted-foreground text-[10px] font-mono px-1 flex items-center text-red-500/50 @container my-2",
+  "output": "h-6 rounded-interactive bg-muted text-[10px] font-mono px-1 flex items-center text-red-500/50 @container my-2"
+ },
+ {
+  "input": "bg-card/80 border-border text-foreground text-display-2 min-h-0",
+  "output": "bg-card/80 border-border text-foreground text-display-2 min-h-0"
+ },
+ {
+  "input": "rounded-container border border-transparent hover:border-border md:p-4",
+  "output": "rounded-container border border-transparent hover:border-border md:p-4"
+ },
+ {
+  "input": "text-muted-foreground mt-1 tracking-wide w-1/2",
+  "output": "text-muted-foreground mt-1 tracking-wide w-1/2"
+ },
+ {
+  "input": "declared filter h-screen truncate",
+  "output": "declared filter h-screen truncate"
+ },
+ {
+  "input": "a command palette option shows a focus-visible ring h-screen font-bold rounded-none",
+  "output": "a command palette option shows a focus-visible ring h-screen font-bold rounded-none"
+ },
+ {
+  "input": "control: without a verify host the card shows no verify controls -mt-2 text-display-1 border",
+  "output": "control: without a verify host the card shows no verify controls -mt-2 text-display-1 border"
+ },
+ {
+  "input": "absolute top-2 left-2 z-10 bg-surface/80 backdrop-blur rounded-md px-3 py-1.5 bg-transparent grid p-card-md",
+  "output": "absolute top-2 left-2 z-10 backdrop-blur rounded-md bg-transparent grid p-card-md"
+ },
+ {
+  "input": "text-left font-normal text-foreground h-screen",
+  "output": "text-left font-normal text-foreground h-screen"
+ },
+ {
+  "input": "@sm/table:justify-end @sm/table:text-right rounded-full font-normal hidden",
+  "output": "@sm/table:justify-end @sm/table:text-right rounded-full font-normal hidden"
+ },
+ {
+  "input": "rounded-full cursor-help focus:outline-none focus-visible:ring-2 focus-visible:ring-ring border-red-500 rounded-pill",
+  "output": "cursor-help focus:outline-none focus-visible:ring-2 focus-visible:ring-ring border-red-500 rounded-pill"
+ },
+ {
+  "input": "renders one row per activity type hidden custom-class bg-red-500",
+  "output": "renders one row per activity type hidden custom-class bg-red-500"
+ },
+ {
+  "input": "flex-1 rounded-container border border-error/20 bg-error/5 p-2 border-2 text-display-2",
+  "output": "flex-1 rounded-container border-error/20 bg-error/5 p-2 border-2 text-display-2"
+ },
+ {
+  "input": "",
+  "output": ""
+ },
+ {
+  "input": "p-2",
+  "output": "p-2"
+ },
+ {
+  "input": "p-2 p-4",
+  "output": "p-4"
+ },
+ {
+  "input": "px-2 px-4",
+  "output": "px-4"
+ },
+ {
+  "input": "p-4 px-2",
+  "output": "p-4 px-2"
+ },
+ {
+  "input": "px-2 p-4",
+  "output": "p-4"
+ },
+ {
+  "input": "inset-x-1 inset-1",
+  "output": "inset-1"
+ },
+ {
+  "input": "inset-1 inset-x-2",
+  "output": "inset-1 inset-x-2"
+ },
+ {
+  "input": "-inset-1 inset-2",
+  "output": "inset-2"
+ },
+ {
+  "input": "text-lg text-display-1",
+  "output": "text-display-1"
+ },
+ {
+  "input": "text-display-1 text-lg",
+  "output": "text-lg"
+ },
+ {
+  "input": "text-red-500 text-sm text-blue-400",
+  "output": "text-sm text-blue-400"
+ },
+ {
+  "input": "text-[length:var(--x)] text-red-500",
+  "output": "text-[length:var(--x)] text-red-500"
+ },
+ {
+  "input": "text-[color:var(--x)] text-lg",
+  "output": "text-[color:var(--x)] text-lg"
+ },
+ {
+  "input": "bg-red-500 bg-[url(foo.png)]",
+  "output": "bg-red-500 bg-[url(foo.png)]"
+ },
+ {
+  "input": "bg-[length:10px] bg-cover",
+  "output": "bg-cover"
+ },
+ {
+  "input": "border-[3px] border-red-500",
+  "output": "border-[3px] border-red-500"
+ },
+ {
+  "input": "border-[color:red] border-2",
+  "output": "border-[color:red] border-2"
+ },
+ {
+  "input": "shadow-[inset_0_1px_2px_black] shadow-md",
+  "output": "shadow-md"
+ },
+ {
+  "input": "shadow-md shadow-red-500",
+  "output": "shadow-md shadow-red-500"
+ },
+ {
+  "input": "shadow-elevation-card shadow-lg",
+  "output": "shadow-lg"
+ },
+ {
+  "input": "rounded-s-lg rounded-l-md",
+  "output": "rounded-s-lg rounded-l-md"
+ },
+ {
+  "input": "rounded-lg rounded-tl-none",
+  "output": "rounded-lg rounded-tl-none"
+ },
+ {
+  "input": "rounded-container rounded-pill",
+  "output": "rounded-pill"
+ },
+ {
+  "input": "w-1/2 w-3/4",
+  "output": "w-3/4"
+ },
+ {
+  "input": "w-icon-default w-4",
+  "output": "w-4"
+ },
+ {
+  "input": "size-4 w-6",
+  "output": "size-4 w-6"
+ },
+ {
+  "input": "w-6 size-4",
+  "output": "size-4"
+ },
+ {
+  "input": "h-button-sm min-h-button-sm h-auto",
+  "output": "min-h-button-sm h-auto"
+ },
+ {
+  "input": "leading-4 text-sm",
+  "output": "text-sm"
+ },
+ {
+  "input": "text-sm leading-4",
+  "output": "text-sm leading-4"
+ },
+ {
+  "input": "font-sans font-bold",
+  "output": "font-sans font-bold"
+ },
+ {
+  "input": "font-bold font-[600]",
+  "output": "font-[600]"
+ },
+ {
+  "input": "font-[600] font-bold",
+  "output": "font-bold"
+ },
+ {
+  "input": "hover:p-2 p-4 focus:p-2",
+  "output": "hover:p-2 p-4 focus:p-2"
+ },
+ {
+  "input": "p-4 hover:p-2 hover:p-3",
+  "output": "p-4 hover:p-3"
+ },
+ {
+  "input": "md:hover:p-2 hover:md:p-3",
+  "output": "hover:md:p-3"
+ },
+ {
+  "input": "[&>*]:p-2 [&>*]:p-3 p-1",
+  "output": "[&>*]:p-3 p-1"
+ },
+ {
+  "input": "[&_p]:mt-2 [&_p]:mt-4",
+  "output": "[&_p]:mt-4"
+ },
+ {
+  "input": "group-hover:flex group-hover:hidden",
+  "output": "group-hover:hidden"
+ },
+ {
+  "input": "data-[state=open]:p-2 data-[state=open]:p-4 data-[state=closed]:p-1",
+  "output": "data-[state=open]:p-4 data-[state=closed]:p-1"
+ },
+ {
+  "input": "!p-2 !p-4",
+  "output": "!p-4"
+ },
+ {
+  "input": "!p-2 p-4 p-6",
+  "output": "!p-2 p-6"
+ },
+ {
+  "input": "p-2! p-4",
+  "output": "p-2! p-4"
+ },
+ {
+  "input": "hover:!p-2 hover:p-4",
+  "output": "hover:!p-2 hover:p-4"
+ },
+ {
+  "input": "w-1/2",
+  "output": "w-1/2"
+ },
+ {
+  "input": "w-[calc(100%-2rem)] w-full",
+  "output": "w-full"
+ },
+ {
+  "input": "translate-x-1/2 -translate-x-1/2",
+  "output": "-translate-x-1/2"
+ },
+ {
+  "input": "-translate-x-1/2 translate-x-4",
+  "output": "translate-x-4"
+ },
+ {
+  "input": "bg-red-500/50 bg-red-600",
+  "output": "bg-red-600"
+ },
+ {
+  "input": "bg-red-500/50 bg-red-600/20",
+  "output": "bg-red-600/20"
+ },
+ {
+  "input": "text-white/80 text-black",
+  "output": "text-black"
+ },
+ {
+  "input": "flex grid",
+  "output": "grid"
+ },
+ {
+  "input": "hidden flex",
+  "output": "flex"
+ },
+ {
+  "input": "block inline-block",
+  "output": "inline-block"
+ },
+ {
+  "input": "flex-1 flex-none",
+  "output": "flex-none"
+ },
+ {
+  "input": "flex-col flex-row",
+  "output": "flex-row"
+ },
+ {
+  "input": "flex-wrap flex-nowrap",
+  "output": "flex-nowrap"
+ },
+ {
+  "input": "items-start items-center",
+  "output": "items-center"
+ },
+ {
+  "input": "justify-start justify-end",
+  "output": "justify-end"
+ },
+ {
+  "input": "self-auto self-center",
+  "output": "self-center"
+ },
+ {
+  "input": "gap-1 gap-x-2 gap-y-3 gap-4",
+  "output": "gap-4"
+ },
+ {
+  "input": "gap-x-2 gap-4",
+  "output": "gap-4"
+ },
+ {
+  "input": "space-x-2 space-x-4",
+  "output": "space-x-4"
+ },
+ {
+  "input": "space-y-1 space-y-2",
+  "output": "space-y-2"
+ },
+ {
+  "input": "overflow-hidden overflow-x-auto",
+  "output": "overflow-hidden overflow-x-auto"
+ },
+ {
+  "input": "overflow-x-auto overflow-hidden",
+  "output": "overflow-hidden"
+ },
+ {
+  "input": "overflow-auto overflow-y-hidden",
+  "output": "overflow-auto overflow-y-hidden"
+ },
+ {
+  "input": "truncate text-ellipsis",
+  "output": "text-ellipsis"
+ },
+ {
+  "input": "text-ellipsis truncate",
+  "output": "truncate"
+ },
+ {
+  "input": "line-clamp-2 line-clamp-3",
+  "output": "line-clamp-3"
+ },
+ {
+  "input": "transition transition-colors",
+  "output": "transition-colors"
+ },
+ {
+  "input": "duration-100 duration-300",
+  "output": "duration-300"
+ },
+ {
+  "input": "ease-in ease-out",
+  "output": "ease-out"
+ },
+ {
+  "input": "opacity-0 opacity-100",
+  "output": "opacity-100"
+ },
+ {
+  "input": "z-10 z-50",
+  "output": "z-50"
+ },
+ {
+  "input": "z-[999] z-10",
+  "output": "z-10"
+ },
+ {
+  "input": "grid-cols-2 grid-cols-3",
+  "output": "grid-cols-3"
+ },
+ {
+  "input": "col-span-2 col-span-full",
+  "output": "col-span-full"
+ },
+ {
+  "input": "row-span-2 row-start-1",
+  "output": "row-span-2 row-start-1"
+ },
+ {
+  "input": "mx-auto mr-2",
+  "output": "mx-auto mr-2"
+ },
+ {
+  "input": "mr-2 mx-auto",
+  "output": "mx-auto"
+ },
+ {
+  "input": "m-1 mx-2 mt-3",
+  "output": "m-1 mx-2 mt-3"
+ },
+ {
+  "input": "-m-1 m-2",
+  "output": "m-2"
+ },
+ {
+  "input": "ring-1 ring-2 ring-offset-2",
+  "output": "ring-2 ring-offset-2"
+ },
+ {
+  "input": "ring-red-500 ring-offset-red-200",
+  "output": "ring-red-500 ring-offset-red-200"
+ },
+ {
+  "input": "outline outline-2 outline-red-500",
+  "output": "outline outline-2 outline-red-500"
+ },
+ {
+  "input": "underline line-through",
+  "output": "line-through"
+ },
+ {
+  "input": "uppercase lowercase",
+  "output": "lowercase"
+ },
+ {
+  "input": "italic not-italic",
+  "output": "not-italic"
+ },
+ {
+  "input": "sr-only not-sr-only",
+  "output": "not-sr-only"
+ },
+ {
+  "input": "pointer-events-none pointer-events-auto",
+  "output": "pointer-events-auto"
+ },
+ {
+  "input": "select-none select-text",
+  "output": "select-text"
+ },
+ {
+  "input": "cursor-pointer cursor-not-allowed",
+  "output": "cursor-not-allowed"
+ },
+ {
+  "input": "animate-spin animate-pulse",
+  "output": "animate-pulse"
+ },
+ {
+  "input": "bg-gradient-to-r from-red-500 to-blue-500 bg-none",
+  "output": "from-red-500 to-blue-500 bg-none"
+ },
+ {
+  "input": "from-red-500 from-10%",
+  "output": "from-red-500 from-10%"
+ },
+ {
+  "input": "via-red-500 via-blue-500",
+  "output": "via-blue-500"
+ },
+ {
+  "input": "[mask-type:alpha] [mask-type:luminance]",
+  "output": "[mask-type:luminance]"
+ },
+ {
+  "input": "[--foo:1px] [--foo:2px]",
+  "output": "[--foo:2px]"
+ },
+ {
+  "input": "[--foo:1px] [--bar:2px]",
+  "output": "[--foo:1px] [--bar:2px]"
+ },
+ {
+  "input": "p-px p-0.5 p-1.5",
+  "output": "p-1.5"
+ },
+ {
+  "input": "p-card-sm p-card-md",
+  "output": "p-card-md"
+ },
+ {
+  "input": "px-dialog px-4",
+  "output": "px-4"
+ },
+ {
+  "input": "pt-section pt-2",
+  "output": "pt-2"
+ },
+ {
+  "input": "m-section m-2",
+  "output": "m-2"
+ },
+ {
+  "input": "text-display-2 text-display-1 text-xl",
+  "output": "text-xl"
+ },
+ {
+  "input": "text-base text-display-1",
+  "output": "text-display-1"
+ },
+ {
+  "input": "h-icon-default h-4",
+  "output": "h-4"
+ },
+ {
+  "input": "h-4 h-icon-default",
+  "output": "h-icon-default"
+ },
+ {
+  "input": "min-h-row-compact min-h-0",
+  "output": "min-h-0"
+ },
+ {
+  "input": "min-h-0 min-h-row-spacious",
+  "output": "min-h-row-spacious"
+ },
+ {
+  "input": "h-row-normal h-full",
+  "output": "h-full"
+ },
+ {
+  "input": "h-[10px] h-button-lg",
+  "output": "h-button-lg"
+ },
+ {
+  "input": "font-[family-name:var(--f)] font-bold",
+  "output": "font-[family-name:var(--f)] font-bold"
+ },
+ {
+  "input": "tabular-nums slashed-zero",
+  "output": "tabular-nums slashed-zero"
+ },
+ {
+  "input": "normal-nums oldstyle-nums",
+  "output": "oldstyle-nums"
+ },
+ {
+  "input": "sm:p-2 md:p-4 lg:p-6 xl:p-8 p-1",
+  "output": "sm:p-2 md:p-4 lg:p-6 xl:p-8 p-1"
+ },
+ {
+  "input": "@sm:p-2 @sm:p-4",
+  "output": "@sm:p-4"
+ },
+ {
+  "input": "@container/main @container",
+  "output": "@container/main @container"
+ },
+ {
+  "input": "aspect-square aspect-video",
+  "output": "aspect-video"
+ },
+ {
+  "input": "object-cover object-contain",
+  "output": "object-contain"
+ },
+ {
+  "input": "object-center object-top",
+  "output": "object-top"
+ },
+ {
+  "input": "break-words break-all",
+  "output": "break-all"
+ },
+ {
+  "input": "whitespace-nowrap whitespace-normal",
+  "output": "whitespace-normal"
+ },
+ {
+  "input": "w-[10px] h-[10px] size-[20px]",
+  "output": "size-[20px]"
+ },
+ {
+  "input": "w-[20px] size-[10px]",
+  "output": "size-[10px]"
+ },
+ {
+  "input": "size-[10px] w-[20px]",
+  "output": "size-[10px] w-[20px]"
+ },
+ {
+  "input": "divide-x divide-x-2",
+  "output": "divide-x-2"
+ },
+ {
+  "input": "divide-red-500 divide-blue-500",
+  "output": "divide-blue-500"
+ },
+ {
+  "input": "content-[\"\"] content-[\"x\"]",
+  "output": "content-[\"x\"]"
+ },
+ {
+  "input": "fill-red-500 fill-current",
+  "output": "fill-current"
+ },
+ {
+  "input": "stroke-2 stroke-red-500",
+  "output": "stroke-2 stroke-red-500"
+ },
+ {
+  "input": "stroke-red-500 stroke-[3px]",
+  "output": "stroke-red-500 stroke-[3px]"
+ },
+ {
+  "input": "backdrop-blur-sm backdrop-blur",
+  "output": "backdrop-blur"
+ },
+ {
+  "input": "blur-sm blur-lg",
+  "output": "blur-lg"
+ },
+ {
+  "input": "brightness-50 brightness-[0.3]",
+  "output": "brightness-[0.3]"
+ },
+ {
+  "input": "scroll-m-2 scroll-mx-4",
+  "output": "scroll-m-2 scroll-mx-4"
+ },
+ {
+  "input": "snap-x snap-y",
+  "output": "snap-y"
+ },
+ {
+  "input": "touch-none touch-pan-x",
+  "output": "touch-pan-x"
+ },
+ {
+  "input": "order-1 order-last",
+  "output": "order-last"
+ },
+ {
+  "input": "basis-1/2 basis-full",
+  "output": "basis-full"
+ },
+ {
+  "input": "grow grow-0",
+  "output": "grow-0"
+ },
+ {
+  "input": "shrink shrink-0",
+  "output": "shrink-0"
+ },
+ {
+  "input": "top-0 inset-0",
+  "output": "inset-0"
+ },
+ {
+  "input": "inset-0 top-0",
+  "output": "inset-0 top-0"
+ },
+ {
+  "input": "start-0 left-0 inset-x-0",
+  "output": "start-0 inset-x-0"
+ },
+ {
+  "input": "will-change-auto will-change-transform",
+  "output": "will-change-transform"
+ },
+ {
+  "input": "bg-clip-text bg-clip-border",
+  "output": "bg-clip-border"
+ },
+ {
+  "input": "bg-origin-border bg-origin-padding",
+  "output": "bg-origin-padding"
+ },
+ {
+  "input": "table-auto table-fixed",
+  "output": "table-fixed"
+ },
+ {
+  "input": "border-collapse border-separate",
+  "output": "border-separate"
+ },
+ {
+  "input": "float-left float-right",
+  "output": "float-right"
+ },
+ {
+  "input": "clear-both clear-none",
+  "output": "clear-none"
+ },
+ {
+  "input": "isolate isolation-auto",
+  "output": "isolation-auto"
+ },
+ {
+  "input": "mix-blend-multiply mix-blend-screen",
+  "output": "mix-blend-screen"
+ },
+ {
+  "input": "resize-none resize",
+  "output": "resize"
+ },
+ {
+  "input": "list-disc list-decimal",
+  "output": "list-decimal"
+ },
+ {
+  "input": "appearance-none appearance-auto",
+  "output": "appearance-auto"
+ },
+ {
+  "input": "caret-red-500 caret-blue-500",
+  "output": "caret-blue-500"
+ },
+ {
+  "input": "accent-red-500 accent-auto",
+  "output": "accent-auto"
+ },
+ {
+  "input": "hover:text-red-500 hover:text-blue-500 text-green-500",
+  "output": "hover:text-blue-500 text-green-500"
+ },
+ {
+  "input": "focus-visible:ring-2 focus-visible:ring-4",
+  "output": "focus-visible:ring-4"
+ },
+ {
+  "input": "disabled:opacity-50 disabled:opacity-100",
+  "output": "disabled:opacity-100"
+ },
+ {
+  "input": "aria-[sort=ascending]:bg-red-500 aria-[sort=ascending]:bg-blue-500",
+  "output": "aria-[sort=ascending]:bg-blue-500"
+ },
+ {
+  "input": "supports-[display:grid]:grid supports-[display:grid]:flex",
+  "output": "supports-[display:grid]:flex"
+ },
+ {
+  "input": "min-w-0 min-w-full",
+  "output": "min-w-full"
+ },
+ {
+  "input": "max-w-sm max-w-[10px]",
+  "output": "max-w-[10px]"
+ },
+ {
+  "input": "max-h-screen max-h-full",
+  "output": "max-h-full"
+ },
+ {
+  "input": "min-h-screen h-screen",
+  "output": "min-h-screen h-screen"
+ }
+]

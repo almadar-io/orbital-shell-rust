@@ -1,10 +1,10 @@
+use crate::renderer::merge_class_name;
 use crate::registry::DioxusPatternRegistry;
 use crate::renderer::DockCommand;
 use crate::renderer::{DioxusPatternRenderer, DioxusView};
 use dioxus::prelude::*;
 use orbital_core::client::helpers::{
-    get_array, get_bool_or, get_string, get_string_or, icon_name_to_glyph, merge_class_name,
-};
+    get_array, get_bool_or, get_string, get_string_or, icon_name_to_glyph, };
 use orbital_core::Value;
 
 pub struct ActivityRailRenderer;

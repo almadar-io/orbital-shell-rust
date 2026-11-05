@@ -65,6 +65,442 @@ pub(crate) fn object_value<K: AsRef<str>>(fields: impl IntoIterator<Item = (K, V
     Value::Object(map.into())
 }
 
+/// An array value (a `children` list) from specs.
+pub(crate) fn array_value(items: Vec<Value>) -> Value {
+    Value::Array(items.into())
+}
+
+/// The web's `domPassthrough`: the `aria-*`, `role`, `id`, `lang`, `dir` and `tabIndex` props a layout primitive forwards to its element.
+pub(crate) fn dom_passthrough(props: &Value) -> Vec<(String, Value)> {
+    let Some(fields) = props.as_object() else {
+        return Vec::new();
+    };
+    fields
+        .iter()
+        .filter(|(key, value)| {
+            let key: &str = key.as_ref();
+            (key.starts_with("aria-") || matches!(key, "role" | "id" | "lang" | "dir" | "tabIndex"))
+                && matches!(value, Value::String(_) | Value::Int(_) | Value::Bool(_))
+        })
+        .map(|(key, value)| (key.to_string(), value.clone()))
+        .collect()
+}
+
+/// A `typography` spec for the text a body writes where the web writes `<Typography>`.
+pub(crate) fn typography_spec(variant: &str, color: Option<&str>, class: &str, content: &str) -> Value {
+    let mut fields = vec![
+        ("variant", Value::string(variant)),
+        ("content", Value::string(content)),
+    ];
+    if let Some(color) = color {
+        fields.push(("color", Value::string(color)));
+    }
+    if !class.is_empty() {
+        fields.push(("className", Value::string(class)));
+    }
+    pattern_spec("typography", fields)
+}
+
+/// Joins the non-empty class fragments, as the web's `cn(...)`.
+/// A body's base classes merged with its `className` prop the way the web's `cn` does (tailwind-merge: a later
+/// conflicting utility replaces the earlier one).
+pub fn merge_class_name(base: &str, props: &Value) -> String {
+    let extra = orbital_core::client::helpers::get_string_or(props, "className", "");
+    cn(&[base, extra.trim()])
+}
+
+pub(crate) fn cn(parts: &[&str]) -> String {
+    let joined = parts.iter().filter(|part| !part.is_empty()).copied().collect::<Vec<_>>().join(" ");
+    crate::tw_merge::tw_merge(&joined)
+}
+
+/// A `box` spec for the web's `<Box className=...>`: `extra` carries forwarded DOM attributes, `style` an optional style object.
+pub(crate) fn layout_box_spec(
+    class: &str,
+    style: Option<Value>,
+    extra: Vec<(String, Value)>,
+    children: Vec<Value>,
+) -> Value {
+    let mut fields = extra;
+    if !class.is_empty() {
+        fields.push(("className".to_string(), Value::string(class)));
+    }
+    if let Some(style) = style {
+        fields.push(("style".to_string(), style));
+    }
+    fields.push(("children".to_string(), array_value(children)));
+    pattern_spec("box", fields)
+}
+
+/// A row field read by dot path (`a.b.c`), as the web's `getNestedValue` does.
+pub(crate) fn nested_value(row: &Value, path: &str) -> Option<Value> {
+    let mut current = row.clone();
+    for part in path.split('.') {
+        let next = current.as_object()?.get(part)?.clone();
+        current = next;
+    }
+    Some(current)
+}
+
+fn group_thousands(digits: &str) -> String {
+    let mut out = String::new();
+    for (index, ch) in digits.chars().enumerate() {
+        if index > 0 && (digits.len() - index) % 3 == 0 {
+            out.push(',');
+        }
+        out.push(ch);
+    }
+    out
+}
+
+/// `Intl.NumberFormat('en')` with at least `min_fraction` and at most `max_fraction` fraction digits.
+pub(crate) fn format_grouped_number(value: f64, min_fraction: usize, max_fraction: usize) -> String {
+    if !value.is_finite() {
+        return value.to_string();
+    }
+    let rounded = format!("{:.*}", max_fraction, value.abs());
+    let (whole, fraction) = rounded.split_once('.').unwrap_or((rounded.as_str(), ""));
+    let mut fraction = fraction.to_string();
+    while fraction.len() > min_fraction && fraction.ends_with('0') {
+        fraction.pop();
+    }
+    let negative = value < 0.0 && rounded.chars().any(|ch| ch != '0' && ch != '.');
+    let sign = if negative { "-" } else { "" };
+    if fraction.is_empty() {
+        format!("{sign}{}", group_thousands(whole))
+    } else {
+        format!("{sign}{}.{fraction}", group_thousands(whole))
+    }
+}
+
+fn date_parts(text: &str) -> Option<(i32, u32, u32, Option<(u32, u32)>)> {
+    let (date, time) = match text.split_once(['T', ' ']) {
+        Some((date, time)) => (date, Some(time)),
+        None => (text, None),
+    };
+    let mut parts = date.split('-');
+    let year: i32 = parts.next()?.parse().ok()?;
+    let month: u32 = parts.next()?.parse().ok()?;
+    let day: u32 = parts.next()?.parse().ok()?;
+    if parts.next().is_some() || !(1..=12).contains(&month) || !(1..=31).contains(&day) {
+        return None;
+    }
+    let clock = time.and_then(|time| {
+        let mut parts = time.split([':', '.', 'Z', '+']);
+        let hour: u32 = parts.next()?.parse().ok()?;
+        let minute: u32 = parts.next()?.parse().ok()?;
+        (hour < 24 && minute < 60).then_some((hour, minute))
+    });
+    Some((year, month, day, clock))
+}
+
+fn month_name(month: u32) -> &'static str {
+    [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ][(month as usize - 1) % 12]
+}
+
+fn clock_text(hour: u32, minute: u32) -> String {
+    let suffix = if hour < 12 { "AM" } else { "PM" };
+    let hour12 = match hour % 12 {
+        0 => 12,
+        other => other,
+    };
+    format!("{hour12}:{minute:02} {suffix}")
+}
+
+/// The stored text of a value, as JavaScript's `String(value)` reads it.
+pub(crate) fn plain_text(value: &Value) -> String {
+    match value {
+        Value::Array(items) => items
+            .iter()
+            .map(|item| match item {
+                Value::Null => String::new(),
+                other => plain_text(other),
+            })
+            .collect::<Vec<_>>()
+            .join(","),
+        Value::Object(_) => "[object Object]".to_string(),
+        Value::String(text) => text.to_string(),
+        Value::Int(whole) => whole.to_string(),
+        Value::Number(float) => float.to_string(),
+        Value::Bool(flag) => flag.to_string(),
+        _ => String::new(),
+    }
+}
+
+/// The web's shared `formatValue(value, format)`: a declared format shapes the value; booleans always read Yes/No; no format is the stored text.
+pub(crate) fn format_display_value(value: &Value, format: Option<&str>) -> String {
+    let number = match value {
+        Value::Int(whole) => Some(*whole as f64),
+        Value::Number(float) => Some(*float),
+        _ => None,
+    };
+    match value {
+        Value::Null => return String::new(),
+        Value::Bool(flag) => return if *flag { "Yes" } else { "No" }.to_string(),
+        _ => {}
+    }
+    let text = plain_text(value);
+    match format {
+        Some(kind @ ("date" | "time" | "datetime")) => {
+            if text.is_empty() {
+                return text;
+            }
+            let Some((year, month, day, clock)) = date_parts(&text) else {
+                return text;
+            };
+            let date = format!("{} {day}, {year}", month_name(month));
+            let time = clock.map(|(hour, minute)| clock_text(hour, minute));
+            match (kind, time) {
+                ("date", _) => date,
+                ("time", Some(time)) => time,
+                ("datetime", Some(time)) => format!("{date} {time}"),
+                ("datetime", None) => format!("{date} 12:00 AM"),
+                _ => text,
+            }
+        }
+        Some("currency") => match number {
+            Some(amount) => {
+                let body = format_grouped_number(amount.abs(), 2, 2);
+                if amount < 0.0 && body != "0.00" {
+                    format!("-${body}")
+                } else {
+                    format!("${body}")
+                }
+            }
+            None => text,
+        },
+        Some("number") => match number {
+            Some(amount) => format_grouped_number(amount, 0, 3),
+            None => text,
+        },
+        Some("percent") => match number {
+            Some(amount) => format!("{}%", format_grouped_number(amount, 0, 0)),
+            None => text,
+        },
+        Some("boolean") => {
+            let falsy = text == "false" || text == "0";
+            if falsy { "No" } else { "Yes" }.to_string()
+        }
+        _ => text,
+    }
+}
+
+fn relation_option_label(options: Option<&[Value]>, key: &str) -> Option<String> {
+    options?
+        .iter()
+        .find(|option| option.get("value").map(plain_text).as_deref() == Some(key))
+        .and_then(|option| option.get("label").map(plain_text))
+}
+
+fn relation_labels(value: &Value, options: Option<&[Value]>, out: &mut Vec<String>) {
+    match value {
+        Value::Null => {}
+        Value::String(text) if text.is_empty() => {}
+        Value::Array(items) => items.iter().for_each(|item| relation_labels(item, options, out)),
+        Value::Object(_) => {
+            if let Some(id) = value.get("id").filter(|id| !id.is_null()) {
+                let key = plain_text(&id);
+                out.push(relation_option_label(options, &key).unwrap_or(key));
+            }
+        }
+        scalar => {
+            let raw = plain_text(scalar);
+            out.push(relation_option_label(options, &raw).unwrap_or(raw));
+        }
+    }
+}
+
+/// The web's `resolveRelationCellDisplay`: a hydrated relation row, or a bare foreign id with declared `relationsData` options, reads by label.
+pub(crate) fn relation_cell_display(value: &Value, options: Option<&[Value]>) -> Option<String> {
+    let object_shaped = match value {
+        Value::Object(_) => true,
+        Value::Array(items) => items.iter().any(|item| matches!(item, Value::Object(_))),
+        _ => false,
+    };
+    if matches!(value, Value::Null) || matches!(value, Value::String(text) if text.is_empty()) {
+        return None;
+    }
+    if !object_shaped && options.is_none() {
+        return None;
+    }
+    let mut labels = Vec::new();
+    relation_labels(value, options, &mut labels);
+    (!labels.is_empty()).then(|| labels.join(", "))
+}
+
+/// A field's display text: relation label first, then the declared format.
+pub(crate) fn format_cell_text(value: &Value, format: Option<&str>, options: Option<&[Value]>) -> String {
+    relation_cell_display(value, options).unwrap_or_else(|| format_display_value(value, format))
+}
+
+/// The web `String(value)` of a scalar field value.
+pub(crate) fn js_string(value: &Value) -> String {
+    match value {
+        Value::Null => String::new(),
+        Value::Bool(flag) => flag.to_string(),
+        Value::Int(number) => number.to_string(),
+        Value::Number(number) => {
+            if number.fract() == 0.0 && number.abs() < 1e21 {
+                format!("{}", *number as i64)
+            } else {
+                number.to_string()
+            }
+        }
+        Value::String(text) => text.to_string(),
+        other => orbital_core::client::helpers::format_value(other),
+    }
+}
+
+fn grouped_number(number: f64, max_fraction: usize, min_fraction: usize) -> String {
+    let negative = number < 0.0;
+    let fixed = format!("{:.*}", max_fraction, number.abs());
+    let (int_part, frac_part) = match fixed.split_once('.') {
+        Some((int_part, frac)) => (int_part.to_string(), frac.to_string()),
+        None => (fixed.clone(), String::new()),
+    };
+    let mut frac = frac_part;
+    while frac.len() > min_fraction && frac.ends_with('0') {
+        frac.pop();
+    }
+    let mut out = String::new();
+    if negative {
+        out.push('-');
+    }
+    out.push_str(&group_thousands(&int_part));
+    if !frac.is_empty() {
+        out.push('.');
+        out.push_str(&frac);
+    }
+    out
+}
+
+const MONTHS: [&str; 12] = [
+    "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+];
+
+fn iso_parts(text: &str) -> Option<(i64, usize, i64, Option<(i64, i64)>)> {
+    let (date, time) = match text.split_once(['T', ' ']) {
+        Some((date, time)) => (date, Some(time)),
+        None => (text, None),
+    };
+    let mut parts = date.split('-');
+    let year = parts.next()?.parse::<i64>().ok()?;
+    let month = parts.next()?.parse::<usize>().ok()?;
+    let day = parts.next()?.parse::<i64>().ok()?;
+    if !(1..=12).contains(&month) || parts.next().is_some() {
+        return None;
+    }
+    let clock = time.and_then(|time| {
+        let mut parts = time.split([':', '.', 'Z', '+']);
+        let hour = parts.next()?.parse::<i64>().ok()?;
+        let minute = parts.next()?.parse::<i64>().ok()?;
+        Some((hour, minute))
+    });
+    Some((year, month, day, clock))
+}
+
+fn clock_label(hour: i64, minute: i64) -> String {
+    let suffix = if hour >= 12 { "PM" } else { "AM" };
+    let hour12 = if hour % 12 == 0 { 12 } else { hour % 12 };
+    format!("{hour12}:{minute:02} {suffix}")
+}
+
+/// The web `formatValue(value, format)` in the en-US, USD default context.
+pub(crate) fn format_field_value(value: &Value, format: Option<&str>) -> String {
+    match value {
+        Value::Null => return String::new(),
+        Value::Bool(flag) => return if *flag { "Yes" } else { "No" }.to_string(),
+        _ => {}
+    }
+    let raw = js_string(value);
+    let numeric = value.as_number().filter(|_| value.is_numeric());
+    match format {
+        Some("date") | Some("datetime") | Some("time") => {
+            if raw.is_empty() {
+                return String::new();
+            }
+            let Some((year, month, day, clock)) = iso_parts(&raw) else {
+                return raw;
+            };
+            let date = format!("{} {day}, {year}", MONTHS[month - 1]);
+            match (format, clock) {
+                (Some("date"), _) => date,
+                (Some("time"), Some((hour, minute))) => clock_label(hour, minute),
+                (Some("datetime"), Some((hour, minute))) => format!("{date} {}", clock_label(hour, minute)),
+                (Some("datetime"), None) => format!("{date} 12:00 AM"),
+                _ => raw,
+            }
+        }
+        Some("currency") => match numeric {
+            Some(number) => {
+                let body = grouped_number(number.abs(), 2, 2);
+                if number < 0.0 {
+                    format!("-${body}")
+                } else {
+                    format!("${body}")
+                }
+            }
+            None => raw,
+        },
+        Some("number") => match numeric {
+            Some(number) => grouped_number(number, 3, 0),
+            None => raw,
+        },
+        Some("percent") => match numeric {
+            Some(number) => format!("{}%", grouped_number(number, 0, 0)),
+            None => raw,
+        },
+        _ => raw,
+    }
+}
+
+/// The label of a hydrated relation row: its injected option label for its id, else its id.
+pub(crate) fn relation_label(value: &Value, options: Option<&Value>) -> Option<String> {
+    let Value::Object(_) = value else { return None };
+    let id = value.get("id").filter(|id| !id.is_null())?;
+    let key = js_string(id);
+    let label = options
+        .and_then(Value::as_array)
+        .and_then(|options| {
+            options
+                .iter()
+                .find(|option| option.get("value").map(js_string).as_deref() == Some(key.as_str()))
+        })
+        .and_then(|option| option.get("label"))
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    Some(label.unwrap_or(key))
+}
+
+/// Every display label a relation-shaped value resolves to.
+pub(crate) fn relation_display_labels(value: &Value, options: Option<&Value>) -> Vec<String> {
+    match value {
+        Value::Null => Vec::new(),
+        Value::String(text) if text.is_empty() => Vec::new(),
+        Value::Array(items) => items
+            .iter()
+            .flat_map(|item| relation_display_labels(item, options))
+            .collect(),
+        other => {
+            if let Some(label) = relation_label(other, options) {
+                return vec![label];
+            }
+            let raw = js_string(other);
+            let matched = options.and_then(Value::as_array).and_then(|options| {
+                options
+                    .iter()
+                    .find(|option| option.get("value").map(js_string).as_deref() == Some(raw.as_str()))
+                    .and_then(|option| option.get("label"))
+                    .and_then(Value::as_str)
+                    .map(str::to_string)
+            });
+            vec![matched.unwrap_or(raw)]
+        }
+    }
+}
+
 pub type NavigationSink = Callback<String>;
 
 #[derive(Clone, Copy, PartialEq)]
@@ -247,4 +683,164 @@ pub trait DioxusPatternRenderer: Send + Sync {
         view: &DioxusView<'_>,
         registry: &DioxusPatternRegistry,
     ) -> Element;
+}
+
+/// A sink for a body's own controls: `trigger` sends each of `events` (no payload) to `sink`, every other event passes through. Make it once per component (inside `use_hook`).
+pub(crate) fn fanout_sink(sink: Option<EventSink>, trigger: &'static str, events: &'static [&'static str]) -> EventSink {
+    Callback::new(move |(event, payload): (String, Value)| {
+        let Some(sink) = sink else {
+            return;
+        };
+        if event == trigger {
+            for name in events {
+                sink.call(((*name).to_string(), object_value::<&str>([])));
+            }
+        } else {
+            sink.call((event, payload));
+        }
+    })
+}
+
+/// The classes the web `Box` applies for its default `bg`, `rounded` and `shadow` props.
+pub(crate) const BOX_ATOM_BASE: &str = "bg-transparent rounded-none shadow-none";
+
+/// A JS-number payload field (the web emits `number`, not an integer variant).
+pub(crate) fn number_value(number: f64) -> Value {
+    Value::Number(number)
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum LineDiffKind {
+    Added,
+    Removed,
+    Unchanged,
+}
+
+#[derive(Clone, PartialEq, Debug)]
+pub(crate) struct LineDiffLine {
+    pub kind: LineDiffKind,
+    pub before_line_number: Option<usize>,
+    pub after_line_number: Option<usize>,
+    pub content: String,
+}
+
+fn diff_lines_of(text: &str) -> Vec<&str> {
+    if text.is_empty() {
+        Vec::new()
+    } else {
+        text.split('\n').collect()
+    }
+}
+
+/// The web's `computeLineDiff`: Myers' O(ND) line diff with the linear-space middle snake.
+pub(crate) fn compute_line_diff(before: &str, after: &str) -> Vec<LineDiffLine> {
+    let a = diff_lines_of(before);
+    let b = diff_lines_of(after);
+    let mut ops: Vec<(LineDiffKind, usize)> = Vec::new();
+    diff_range(&a, 0, a.len(), &b, 0, b.len(), &mut ops);
+    let mut out = Vec::with_capacity(ops.len());
+    let (mut bn, mut an) = (1usize, 1usize);
+    for (kind, index) in ops {
+        match kind {
+            LineDiffKind::Unchanged => {
+                out.push(LineDiffLine { kind, before_line_number: Some(bn), after_line_number: Some(an), content: a[index].to_string() });
+                bn += 1;
+                an += 1;
+            }
+            LineDiffKind::Removed => {
+                out.push(LineDiffLine { kind, before_line_number: Some(bn), after_line_number: None, content: a[index].to_string() });
+                bn += 1;
+            }
+            LineDiffKind::Added => {
+                out.push(LineDiffLine { kind, before_line_number: None, after_line_number: Some(an), content: b[index].to_string() });
+                an += 1;
+            }
+        }
+    }
+    out
+}
+
+fn diff_range(a: &[&str], mut a_lo: usize, mut a_hi: usize, b: &[&str], mut b_lo: usize, mut b_hi: usize, ops: &mut Vec<(LineDiffKind, usize)>) {
+    let mut prefix = 0;
+    while a_lo + prefix < a_hi && b_lo + prefix < b_hi && a[a_lo + prefix] == b[b_lo + prefix] {
+        prefix += 1;
+    }
+    for i in 0..prefix {
+        ops.push((LineDiffKind::Unchanged, a_lo + i));
+    }
+    a_lo += prefix;
+    b_lo += prefix;
+    let mut suffix = 0;
+    while a_hi - suffix > a_lo && b_hi - suffix > b_lo && a[a_hi - suffix - 1] == b[b_hi - suffix - 1] {
+        suffix += 1;
+    }
+    let tail = a_hi - suffix;
+    a_hi -= suffix;
+    b_hi -= suffix;
+    if a_lo == a_hi {
+        for j in b_lo..b_hi {
+            ops.push((LineDiffKind::Added, j));
+        }
+    } else if b_lo == b_hi {
+        for i in a_lo..a_hi {
+            ops.push((LineDiffKind::Removed, i));
+        }
+    } else {
+        let (x, y, u, v) = diff_middle_snake(a, a_lo, a_hi, b, b_lo, b_hi);
+        diff_range(a, a_lo, x, b, b_lo, y, ops);
+        for i in x..u {
+            ops.push((LineDiffKind::Unchanged, i));
+        }
+        diff_range(a, u, a_hi, b, v, b_hi, ops);
+    }
+    for i in 0..suffix {
+        ops.push((LineDiffKind::Unchanged, tail + i));
+    }
+}
+
+fn diff_middle_snake(a: &[&str], a_lo: usize, a_hi: usize, b: &[&str], b_lo: usize, b_hi: usize) -> (usize, usize, usize, usize) {
+    let n = (a_hi - a_lo) as i64;
+    let m = (b_hi - b_lo) as i64;
+    let delta = n - m;
+    let odd = delta & 1 != 0;
+    let max = (n + m + 1) / 2;
+    let offset = max + 1;
+    let mut forward = vec![0i64; (2 * max + 3) as usize];
+    let mut backward = vec![0i64; (2 * max + 3) as usize];
+    let at = |k: i64| (offset + k) as usize;
+    for d in 0..=max {
+        let mut k = -d;
+        while k <= d {
+            let mut x = if k == -d || (k != d && forward[at(k - 1)] < forward[at(k + 1)]) { forward[at(k + 1)] } else { forward[at(k - 1)] + 1 };
+            let mut y = x - k;
+            let (x0, y0) = (x, y);
+            while x < n && y < m && a[a_lo + x as usize] == b[b_lo + y as usize] {
+                x += 1;
+                y += 1;
+            }
+            forward[at(k)] = x;
+            let kb = delta - k;
+            if odd && kb >= -(d - 1) && kb <= d - 1 && x + backward[at(kb)] >= n {
+                return (a_lo + x0 as usize, b_lo + y0 as usize, a_lo + x as usize, b_lo + y as usize);
+            }
+            k += 2;
+        }
+        let mut k = -d;
+        while k <= d {
+            let mut x = if k == -d || (k != d && backward[at(k - 1)] < backward[at(k + 1)]) { backward[at(k + 1)] } else { backward[at(k - 1)] + 1 };
+            let mut y = x - k;
+            let (x0, y0) = (x, y);
+            while x < n && y < m && a[a_hi - 1 - x as usize] == b[b_hi - 1 - y as usize] {
+                x += 1;
+                y += 1;
+            }
+            backward[at(k)] = x;
+            let kf = delta - k;
+            if !odd && kf >= -d && kf <= d && x + forward[at(kf)] >= n {
+                return (a_hi - x as usize, b_hi - y as usize, a_hi - x0 as usize, b_hi - y0 as usize);
+            }
+            k += 2;
+        }
+    }
+    unreachable!("compute_line_diff: no middle snake for differing texts")
 }

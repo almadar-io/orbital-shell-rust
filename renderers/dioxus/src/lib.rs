@@ -24,6 +24,7 @@ pub mod renderer;
 pub mod offscreen;
 pub mod probe_target;
 pub mod styles;
+pub mod tw_merge;
 pub(crate) mod timer;
 #[path = "../../../runtime/dioxus/src/shell.rs"]
 pub mod shell;

@@ -24,7 +24,7 @@ use dioxus::prelude::*;
 use dioxus_native::use_wgpu;
 use orbital_canvas::mappers::scene;
 use orbital_canvas::{SceneHost, SharedDeviceRenderer};
-use orbital_core::client::helpers::merge_class_name;
+use crate::renderer::merge_class_name;
 use orbital_core::Value;
 use std::sync::{Arc, Mutex};
 use web_time::Instant;

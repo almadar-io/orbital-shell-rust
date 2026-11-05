@@ -1,5 +1,6 @@
 //! Dioxus renderer for the shared `breadcrumb` pattern.
 
+use crate::renderer::merge_class_name;
 use crate::registry::{shared_root_attrs, DioxusPatternRegistry};
 use crate::renderer::{DioxusPatternRenderer, DioxusView};
 use dioxus::prelude::*;

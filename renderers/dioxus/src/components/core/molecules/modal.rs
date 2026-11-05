@@ -1,7 +1,8 @@
+use crate::renderer::merge_class_name;
 use crate::registry::{shared_root_attrs, DioxusPatternRegistry};
 use crate::renderer::{DioxusPatternRenderer, DioxusView};
 use dioxus::prelude::*;
-use orbital_core::client::helpers::{get_bool_or, get_string, get_string_or, merge_class_name};
+use orbital_core::client::helpers::{get_bool_or, get_string, get_string_or, };
 use orbital_core::client::recurse::child_patterns;
 use orbital_core::{Value, ValueMap};
 

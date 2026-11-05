@@ -1,7 +1,7 @@
 use crate::registry::DioxusPatternRegistry;
 use crate::renderer::{DioxusPatternRenderer, DioxusView, OwnedDioxusView};
 use dioxus::prelude::*;
-use orbital_core::client::helpers::merge_class_name;
+use crate::renderer::merge_class_name;
 use orbital_core::client::recurse::child_patterns;
 use orbital_core::Value;
 

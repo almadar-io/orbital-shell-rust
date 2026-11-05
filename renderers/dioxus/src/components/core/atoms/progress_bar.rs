@@ -1,5 +1,6 @@
 //! Native Dioxus renderer for the shared pattern contract.
 
+use crate::renderer::merge_class_name;
 use crate::registry::DioxusPatternRegistry;
 use crate::renderer::{DioxusPatternRenderer, DioxusView};
 use dioxus::prelude::*;

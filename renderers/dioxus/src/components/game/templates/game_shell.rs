@@ -1,7 +1,8 @@
+use crate::renderer::merge_class_name;
 use crate::registry::{shared_root_attrs, DioxusPatternRegistry};
 use crate::renderer::{DioxusPatternRenderer, DioxusView};
 use dioxus::prelude::*;
-use orbital_core::client::helpers::{get_bool_or, get_string, merge_class_name};
+use orbital_core::client::helpers::{get_bool_or, get_string, };
 use orbital_core::Value;
 use serde::Deserialize;
 use std::collections::HashMap;
