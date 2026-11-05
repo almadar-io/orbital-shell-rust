@@ -200,6 +200,12 @@ version = "1.0"
 version = "0.30.11"
 features = ["rwh_06"]
 
+# ORBITAL PATCH: http(s) fetch for stylesheets/fonts without the `net` feature (assets.rs `http`).
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies.ureq]
+version = "2.9"
+features = ["tls"]
+default-features = false
+
 [target.'cfg(all(target_os = "ios", target_abi = "sim"))'.dependencies.anyrender_vello_cpu]
 version = "0.8"
 features = ["pixels_window_renderer"]

@@ -628,7 +628,10 @@ impl Node {
         let current_color = self
             .primary_styles()
             .map(|style| style.clone_color())
-            .map(|color| color.to_css_string());
+            // ORBITAL PATCH: color-mix()/oklch computed colours serialise as
+            // `color(srgb ...)`/`oklab(...)`, which usvg's svgtypes cannot parse, so the
+            // stroke/fill silently vanished. Hand usvg a legacy `rgba()` instead.
+            .map(|color| color.into_srgb_legacy().to_css_string());
         let stroke_width = self.primary_styles().and_then(|style| {
             let value = self.attr(local_name!("stroke-width"))?;
             computed_stroke_width(value, &style)

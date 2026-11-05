@@ -29,6 +29,22 @@ fn position_class(position: &str) -> &'static str {
     }
 }
 
+fn sr_only(text: &str) -> Value {
+    Value::Array(
+        vec![pattern_spec(
+            "typography",
+            [
+                ("as", Value::string("span")),
+                ("content", Value::string(text)),
+                ("className", Value::string("sr-only")),
+            ],
+        )]
+        .into(),
+    )
+}
+
+const BOX_BASE: &str = "bg-transparent rounded-none shadow-none";
+
 fn fab_button(
     variant: &str,
     icon: Value,
@@ -40,7 +56,6 @@ fn fab_button(
         ("variant", Value::string(variant)),
         ("size", Value::string("lg")),
         ("icon", icon),
-        ("label", Value::string("")),
         (
             "className",
             Value::String(format!("rounded-full shadow-elevation-popover{extra}").into()),
@@ -86,13 +101,15 @@ fn Fab(input: FabProps) -> Element {
             ),
             ("size", Value::string("lg")),
             ("icon", icon.clone()),
-            ("label", Value::string("")),
             (
                 "className",
                 Value::string("rounded-full shadow-elevation-popover"),
             ),
             ("aria-label", Value::String(aria.into())),
         ];
+        if let Some(label) = get_string(props, "label").filter(|label| !label.is_empty()) {
+            spec.push(("children", sr_only(&label)));
+        }
         if let Some(action) = get_string(props, "action") {
             spec.push(("action", Value::String(action.into())));
             if let Some(payload) = fields.and_then(|fields| fields.get("actionPayload")) {
@@ -100,14 +117,14 @@ fn Fab(input: FabProps) -> Element {
             }
         }
         let spec = pattern_spec("button", spec);
-        let class = merge_class_name(&format!("fixed z-50 {pos}"), props);
+        let class = merge_class_name(&format!("{BOX_BASE} fixed z-50 {pos}"), props);
         return rsx! { div { class: "{class}", {registry.render_spec(&spec, None, &view)} } };
     }
 
     let is_expanded = expanded();
     let class = merge_class_name(
         &format!(
-            "fixed z-50 flex flex-col items-end gap-3 {pos} {}",
+            "{BOX_BASE} fixed z-50 flex flex-col items-end gap-3 {pos} {}",
             if left { "items-start" } else { "" }
         ),
         props,
@@ -127,6 +144,10 @@ fn Fab(input: FabProps) -> Element {
         " transition-all duration-normal",
         vec![
             ("aria-expanded", Value::Bool(is_expanded)),
+            (
+                "children",
+                sr_only(if is_expanded { "Close" } else { "Open" }),
+            ),
             ("action", Value::string("__local_fab_main")),
         ],
     );
@@ -170,7 +191,10 @@ fn Fab(input: FabProps) -> Element {
                                 action.get("icon").cloned().unwrap_or(Value::Null),
                                 &label,
                                 "",
-                                vec![("action", Value::string("__local_fab_action"))],
+                                vec![
+                                    ("action", Value::string("__local_fab_action")),
+                                    ("children", sr_only(&label)),
+                                ],
                             );
                             let item_expanded = expanded;
                             let item_id = id.clone();

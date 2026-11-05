@@ -1,5 +1,5 @@
-use crate::renderer::merge_class_name;
 use crate::registry::{shared_root_attrs, DioxusPatternRegistry};
+use crate::renderer::merge_class_name;
 use crate::renderer::{
     array_value, cn, format_cell_text, format_display_value, logged_row_payload, logged_row_route,
     nested_value, object_value, pattern_spec as pattern, plain_text, relation_cell_display,
@@ -114,7 +114,7 @@ fn TableViewBody(p: TableViewBodyProps) -> Element {
     let columns = columns_of(props);
     let actions = get_array(props, "itemActions");
     let has_actions = !actions.is_empty();
-    let render_item = props.get("renderItem").and_then(render_item_param_body);
+    let render_item = props.get("renderItem").and_then(render_item_lambda);
     let has_render_prop = render_item.is_some();
     let look = get_string_or(props, "look", "dense");
     let (row_pad, head_pad, striped, divider) = match look.as_str() {
@@ -336,6 +336,7 @@ fn TableViewBody(p: TableViewBodyProps) -> Element {
     let show_header = !columns.is_empty() || has_render_prop;
     let header = show_header.then(|| {
         let header_class = cn(&[
+            "rounded-none shadow-none",
             "hidden @sm/table:grid items-center gap-3 sticky top-0 z-10",
             "bg-[var(--color-surface-subtle)] border-b border-[var(--color-border)]",
             "text-muted-foreground uppercase font-semibold tracking-wide",
@@ -357,7 +358,7 @@ fn TableViewBody(p: TableViewBodyProps) -> Element {
                 let active = sort_column.as_deref() == Some(col.field.as_str());
                 let sortable = col.sortable && sort_event.is_some();
                 let inner_class = cn(&[
-                    "flex items-center gap-1 min-w-0 text-xs",
+                    "bg-transparent rounded-none shadow-none flex items-center gap-1 min-w-0 text-xs",
                     if sortable {
                         "cursor-pointer select-none hover:text-foreground"
                     } else {
@@ -419,7 +420,7 @@ fn TableViewBody(p: TableViewBodyProps) -> Element {
                 });
                 rsx! {
                     div { key: "{col.key}", role: "columnheader", "aria-sort": aria_sort,
-                        class: cn(&["flex items-center min-w-0", align_class(&col.align)]),
+                        class: cn(&["bg-transparent rounded-none shadow-none flex items-center min-w-0", align_class(&col.align)]),
                         div { class: "{inner_class}",
                             role: sortable.then_some("button"), tabindex: sortable.then_some("0"),
                             onclick: move |_| {
@@ -438,11 +439,11 @@ fn TableViewBody(p: TableViewBodyProps) -> Element {
         rsx! {
             div { role: "row", class: "{header_class}", style: "{grid}",
                 if let Some(select_all) = select_all {
-                    div { role: "columnheader", class: "flex items-center", {select_all} }
+                    div { role: "columnheader", class: "bg-transparent rounded-none shadow-none flex items-center", {select_all} }
                 }
                 for cell in cells.iter() { {cell.clone()} }
                 if has_actions {
-                    div { "aria-hidden": "true", class: "sticky right-0 bg-[var(--color-surface-subtle)] border-l border-[var(--color-border)] h-full" }
+                    div { "aria-hidden": "true", class: "rounded-none shadow-none sticky right-0 bg-[var(--color-surface-subtle)] border-l border-[var(--color-border)] h-full" }
                 }
             }
         }
@@ -462,7 +463,7 @@ fn TableViewBody(p: TableViewBodyProps) -> Element {
                 let open: Option<(String, Value)> = item_click.clone().zip(open_payload);
                 let row_event = open.clone();
                 let row_class = cn(&[
-                    "group relative transition-colors duration-fast",
+                    "bg-transparent rounded-none shadow-none group relative transition-colors duration-fast",
                     if has_render_prop {
                         "flex items-center gap-3"
                     } else {
@@ -490,14 +491,14 @@ fn TableViewBody(p: TableViewBodyProps) -> Element {
                         ],
                     ))
                 });
-                let check_class = cn(&["flex items-center", STRETCHED_ABOVE]);
+                let check_class = cn(&["bg-transparent rounded-none shadow-none flex items-center", STRETCHED_ABOVE]);
                 let stop_check = open.is_some();
-                let cells: Vec<Element> = if let Some((param, template)) = &render_item {
-                    let custom = render(substitute_row_bindings(template, param, row));
+                let cells: Vec<Element> = if let Some(lambda) = &render_item {
+                    let custom = render(lambda.apply(row, index));
                     let overlay = open.clone();
                     let sink_open = open.clone();
                     vec![rsx! {
-                        div { role: "cell", class: "relative flex-1 min-w-0",
+                        div { role: "cell", class: "bg-transparent rounded-none shadow-none relative flex-1 min-w-0",
                             if overlay.is_some() {
                                 div { role: "button", tabindex: "0", "aria-label": format!("Open item {}", index + 1),
                                     class: "absolute inset-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-inset",
@@ -531,7 +532,7 @@ fn TableViewBody(p: TableViewBodyProps) -> Element {
                                 _ => "",
                             };
                             let cell_class = cn(&[
-                                "flex items-center min-w-0 gap-3",
+                                "bg-transparent rounded-none shadow-none flex items-center min-w-0 gap-3",
                                 if is_title {
                                     "font-medium @sm/table:font-[inherit]"
                                 } else {
@@ -580,7 +581,7 @@ fn TableViewBody(p: TableViewBodyProps) -> Element {
                                         span { class: "@sm/table:hidden shrink-0 text-xs text-muted-foreground", "data-stacked-label": "", "{col.label}" }
                                     }
                                     if opens {
-                                        div { role: "button", tabindex: "0", class: "min-w-0 {STRETCHED_CONTROL}",
+                                        div { role: "button", tabindex: "0", class: "bg-transparent rounded-none shadow-none min-w-0 {STRETCHED_CONTROL}",
                                             onclick: move |event| {
                                                 event.stop_propagation();
                                                 if let (Some(sink), Some((name, payload))) = (sink, &open_for_cell) {
@@ -648,7 +649,7 @@ fn TableViewBody(p: TableViewBodyProps) -> Element {
                     ))
                 });
                 let actions_class = cn(&[
-                    "flex flex-row gap-2 items-stretch justify-end flex-shrink-0 z-[1] transition-colors",
+                    "flex flex-row gap-1 items-stretch justify-end flex-shrink-0 z-[1] transition-colors",
                     "absolute top-1 right-1 @sm/table:sticky @sm/table:top-auto @sm/table:right-0",
                     "@sm/table:border-l @sm/table:border-[var(--color-border)]",
                     if striped && index % 2 == 1 {
@@ -684,7 +685,7 @@ fn TableViewBody(p: TableViewBodyProps) -> Element {
             })
             .collect();
         Some(rsx! {
-            div { role: "rowgroup",
+            div { role: "rowgroup", class: "bg-transparent rounded-none shadow-none",
                 for row in row_elements.iter() { {row.clone()} }
             }
         })
@@ -711,7 +712,10 @@ fn TableViewBody(p: TableViewBodyProps) -> Element {
         ""
     };
     let root_class = merge_class_name(
-        &cn(&["@container/table w-full text-sm", surface_class]),
+        &cn(&[
+            "bg-transparent rounded-none shadow-none @container/table w-full text-sm",
+            surface_class,
+        ]),
         props,
     );
 
@@ -719,7 +723,7 @@ fn TableViewBody(p: TableViewBodyProps) -> Element {
         div { role: "table", class: "{root_class}", ..shared_root_attrs(props),
             if let Some(header) = header { {header} }
             if let Some(status) = status {
-                div { role: "rowgroup", div { role: "row", div { role: "cell", class: "w-full", {status} } } }
+                div { role: "rowgroup", class: "bg-transparent rounded-none shadow-none", div { role: "row", class: "bg-transparent rounded-none shadow-none", div { role: "cell", class: "bg-transparent rounded-none shadow-none w-full", {status} } } }
             } else if let Some(body) = body { {body} }
             if let Some(more) = more { div { class: "flex justify-center py-3", {more} } }
         }

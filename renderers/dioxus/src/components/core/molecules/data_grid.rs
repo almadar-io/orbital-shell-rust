@@ -1,7 +1,7 @@
-use crate::renderer::merge_class_name;
-use crate::renderer::{pattern_spec as pattern, object_value as pattern_payload};
 use crate::components::core::atoms::checkbox::CheckboxRenderer;
 use crate::registry::{shared_root_attrs, DioxusPatternRegistry};
+use crate::renderer::merge_class_name;
+use crate::renderer::{object_value as pattern_payload, pattern_spec as pattern};
 use crate::renderer::{DioxusPatternRenderer, DioxusView, EventSink, OwnedDioxusView};
 use dioxus::prelude::*;
 use orbital_core::client::helpers::*;
@@ -16,7 +16,6 @@ struct GridProps {
     view: OwnedDioxusView,
     registry: DioxusPatternRegistry,
 }
-
 
 fn display(value: &Value) -> String {
     value
@@ -90,7 +89,6 @@ fn selection_payload(ids: &[String]) -> Value {
     )])
 }
 
-
 fn selected_next(current: &[String], id: &str) -> Vec<String> {
     let mut next = current.to_vec();
     if let Some(index) = next.iter().position(|selected| selected == id) {
@@ -117,9 +115,27 @@ fn action_button(action: &Value, row: &Value) -> Option<Value> {
     if route.is_none() && event.is_none() {
         return None;
     }
+    let label = get_string_or(action, "label", "");
+    let icon_only = action.get("icon").is_some();
     let mut fields = vec![
-        ("label", Value::string(get_string_or(action, "label", ""))),
-        ("actionPayload", crate::renderer::logged_row_payload(action, row)?),
+        (
+            "label",
+            Value::string(if icon_only {
+                String::new()
+            } else {
+                label.clone()
+            }),
+        ),
+        ("aria-label", Value::string(label.clone())),
+        ("title", Value::string(label)),
+        (
+            "className",
+            Value::string(if icon_only { "px-2" } else { "" }),
+        ),
+        (
+            "actionPayload",
+            crate::renderer::logged_row_payload(action, row)?,
+        ),
         (
             "variant",
             Value::string(get_string_or(action, "variant", "ghost")),
@@ -168,7 +184,7 @@ fn action_menu(actions: &[Value], row: &Value) -> Value {
     let trigger = pattern(
         "button",
         [
-            ("label", Value::string("⋯")),
+            ("icon", Value::string("more-horizontal")),
             ("variant", Value::string("ghost")),
             ("size", Value::string("sm")),
             ("aria-label", Value::string("Actions")),
@@ -236,7 +252,7 @@ fn Grid(input: GridProps) -> Element {
         .iter()
         .find(|field| matches!(get_string(field, "variant").as_deref(), Some("h3" | "h4")));
     let actions = get_array(props, "itemActions");
-    let lambda = props.get("renderItem").and_then(render_item_param_body);
+    let lambda = props.get("renderItem").and_then(render_item_lambda);
     let image_field = get_string(props, "imageField");
     let item_click = get_string(props, "itemClickEvent");
     let selectable = get_bool_or(props, "selectable", false);
@@ -286,20 +302,22 @@ fn Grid(input: GridProps) -> Element {
     } else {
         String::new()
     };
-    let layout = if as_rows {
-        "flex flex-col divide-y divide-border"
-    } else {
-        "grid"
-    };
-    let scroll_class = if scroll_x {
+    let scroll_or_cols = if scroll_x {
         "grid-flow-col overflow-x-auto snap-x snap-mandatory [&>*]:snap-start pb-2"
     } else {
-        ""
+        cols_class
     };
-    let grid_class = merge_class_name(
-        &format!("{layout} {gap} {look} {cols_class} {scroll_class}"),
-        props,
-    );
+    let grid_class = if as_rows {
+        merge_class_name(
+            "bg-transparent rounded-none shadow-none flex flex-col divide-y divide-border surface-content overflow-hidden",
+            props,
+        )
+    } else {
+        merge_class_name(
+            &format!("bg-transparent rounded-none shadow-none grid {gap} {scroll_or_cols} {look}"),
+            props,
+        )
+    };
     let item_enter = get_string(props, "itemEnter")
         .filter(|value| value != "none")
         .map(|value| format!("almadar-enter-{value}"))
@@ -335,7 +353,7 @@ fn Grid(input: GridProps) -> Element {
         emit_selection(sink, &toolbar_selection_event, &next);
     });
     rsx! {
-        div { class: "@container w-full min-w-0 flex flex-col gap-2", ..shared_root_attrs(props),
+        div { class: "flex flex-col gap-2 items-stretch justify-start @container w-full min-w-0", ..shared_root_attrs(props),
             if selectable && selected_count > 0 {
                 div { class: "flex items-center gap-2 px-2 py-2 bg-muted rounded-container",
                     {CheckboxRenderer.render_with_change(&toolbar_checkbox, &view, Some(toolbar_change))}
@@ -349,10 +367,17 @@ fn Grid(input: GridProps) -> Element {
                         let is_selected = selected().contains(&id);
                         let row_for_click = row.clone();
                         let click_event = item_click.clone();
-                        let custom = lambda.as_ref().map(|(param, body)| substitute_row_bindings(body, param, row));
+                        let custom = lambda.as_ref().map(|lambda| lambda.apply(row, index));
                         let title = title_field.and_then(|field| field_value(row, field)).map(display);
                         let title_variant = if title_field.and_then(|field| get_string(field, "variant")).as_deref() == Some("h3") && !as_rows { "h3" } else { "h4" };
-                        let title_spec = title.as_ref().map(|title| text(title.clone(), title_variant, "primary", "font-semibold min-w-0 line-clamp-2 break-words"));
+                        let title_spec = title.as_ref().map(|title| pattern("typography", [("content", Value::string(title.clone())), ("variant", Value::string(title_variant)), ("className", Value::string(if as_rows { "font-semibold min-w-0 truncate" } else { "font-semibold min-w-0 line-clamp-2 break-words" }))]));
+                        let title_clickable = click_event.is_some();
+                        let title_box_class = if title_clickable { format!("{TITLE_BOX} {STRETCHED_CONTROL}") } else { TITLE_BOX.to_string() };
+                        let title_icon = title_field.and_then(|field| icon_node(field, "sm", "text-primary flex-shrink-0", registry, &view));
+                        let badge_fields = fields.iter().filter(|field| get_string(field, "variant").as_deref() == Some("badge") && Some(*field) != title_field).collect::<Vec<_>>();
+                        let badge_nodes = badge_fields.iter().filter_map(|field| render_badge(field, row, registry, &view)).collect::<Vec<_>>();
+                        let body_node = render_body(&fields, title_field, row, registry, &view);
+                        let has_body = body_node.is_some();
                         let image_value = image_field.as_deref().and_then(|field| row.get_path(field));
                         let image_url = image_value.and_then(|value| value.as_str().or_else(|| value.get("url").and_then(Value::as_str)));
                         let image_spec = image_url.map(|url| pattern("image", [("src", Value::string(url)), ("alt", Value::string(title.clone().unwrap_or_default())), ("rounded", Value::string("none")), ("className", Value::string("w-full h-full object-cover"))]));
@@ -384,7 +409,7 @@ fn Grid(input: GridProps) -> Element {
                             selected.set(next.clone());
                             emit_selection(selection_sink, &selection_name, &next);
                         });
-                        let row_class = if as_rows { "flex flex-row items-center gap-3 px-card-md transition-colors duration-fast hover:bg-muted/50" } else { "rounded-container border border-border hover:shadow-elevation-dialog hover:border-primary transition-all flex flex-col" };
+                        let row_class = if as_rows { "bg-transparent rounded-none shadow-none flex flex-row items-center gap-3 px-card-md transition-colors duration-fast hover:bg-muted/50" } else { "rounded-container border border-border hover:shadow-elevation-dialog hover:border-primary transition-all flex flex-col" };
                         let selected_class = if is_selected { if as_rows { "bg-primary/5" } else { "ring-2 ring-primary border-primary" } } else { "" };
                         let clickable = if click_event.is_some() { "cursor-pointer" } else { "" };
                         rsx! { div { key: "{id}", class: "relative {row_class} {selected_class} {clickable} {item_enter}", "data-entity-row": "", "data-entity-id": "{id}", aria_current: if is_selected { Some("true") } else { None },
@@ -403,27 +428,45 @@ fn Grid(input: GridProps) -> Element {
                                         else { div { class: "flex items-center justify-center w-full h-full bg-muted text-muted-foreground", "data-media-placeholder": "", {registry.render_spec(&placeholder, None, &view)} } }
                                     }
                                 }
-                                div { class: if as_rows { "flex-1 min-w-0 py-card-sm" } else { "p-4" },
-                                    div { class: "flex items-start justify-between gap-2",
+                                div { class: if as_rows { "bg-transparent rounded-none shadow-none flex-1 min-w-0 py-card-sm" } else if has_body { "p-4 pb-0" } else { "p-4" },
+                                    div { class: if as_rows { "flex flex-row gap-2 justify-between items-center" } else { "flex flex-row gap-2 justify-between items-start" },
                                         if selectable {
-                                            div { onclick: move |event| event.stop_propagation(),
+                                            div { class: "mt-1 flex-shrink-0 relative z-[1]", onclick: move |event| event.stop_propagation(),
                                                 {CheckboxRenderer.render_with_change(&checkbox, &view, Some(change))}
                                             }
                                         }
-                                        div { class: "flex-1 min-w-0 flex flex-col gap-1",
-                                            if let Some(title) = title_spec { {registry.render_spec(&title, None, &view)} }
-                                            for field in fields.iter().filter(|field| get_string(field, "variant").as_deref() == Some("badge")) {
-                                                {render_badge(field, row, registry, &view)}
+                                        div { class: if as_rows { "flex gap-1 justify-start flex-1 min-w-0 flex-row flex-wrap items-center gap-x-2" } else { "flex flex-col gap-1 items-stretch justify-start flex-1 min-w-0" },
+                                            if let Some(title) = title_spec {
+                                                div { class: "flex flex-row gap-1 justify-start items-center min-w-0",
+                                                    if let Some(icon) = title_icon { {icon} }
+                                                    div { class: "{title_box_class}", role: if title_clickable { Some("button") } else { None }, tabindex: if title_clickable { Some("0") } else { None },
+                                                        {registry.render_spec(&title, None, &view)}
+                                                    }
+                                                }
+                                            }
+                                            if !badge_fields.is_empty() {
+                                                div { class: "flex flex-row gap-1 items-stretch justify-start flex-wrap",
+                                                    for node in badge_nodes { {node} }
+                                                }
+                                            }
+                                            if as_rows {
+                                                if let Some(body) = body_node.clone() {
+                                                    div { class: "bg-transparent rounded-none shadow-none basis-full min-w-0", {body} }
+                                                }
+                                            }
+                                        }
+                                        if inline_action.is_some() || menu.is_some() {
+                                            div { class: "flex flex-row gap-1 items-stretch justify-start flex-shrink-0 relative z-[1]", onclick: move |event| event.stop_propagation(),
+                                                if let Some(action) = inline_action { {registry.render_spec(&action, None, &view)} }
+                                                if let Some(menu) = menu { {registry.render_spec(&menu, None, menu_view.as_ref().unwrap_or(&view))} }
                                             }
                                         }
                                     }
                                 }
-                                {render_body(&fields, title_field, row, registry, &view, as_rows)}
-                            }
-                            if inline_action.is_some() || menu.is_some() {
-                                div { class: "flex flex-wrap gap-1 px-4 pb-3", onclick: move |event| event.stop_propagation(),
-                                    if let Some(action) = inline_action { {registry.render_spec(&action, None, &view)} }
-                                    if let Some(menu) = menu { {registry.render_spec(&menu, None, menu_view.as_ref().unwrap_or(&view))} }
+                                if !as_rows {
+                                    if let Some(body) = body_node {
+                                        div { class: "px-4 pt-2 pb-4 flex-1", {body} }
+                                    }
                                 }
                             }
                         } }
@@ -435,16 +478,40 @@ fn Grid(input: GridProps) -> Element {
     }
 }
 
+const TITLE_BOX: &str = "bg-transparent rounded-none shadow-none min-w-0";
+const STRETCHED_CONTROL: &str = "after:absolute after:inset-0 after:content-[''] after:rounded-[inherit] focus-visible:outline-none focus-visible:after:ring-2 focus-visible:after:ring-primary focus-visible:after:ring-inset";
+
+fn icon_node(
+    field: &Value,
+    size: &str,
+    class: &str,
+    registry: &DioxusPatternRegistry,
+    view: &DioxusView<'_>,
+) -> Option<Element> {
+    let icon = field.get("icon")?;
+    let mut props = vec![("name", icon.clone()), ("size", Value::string(size))];
+    if !class.is_empty() {
+        props.push(("className", Value::string(class)));
+    }
+    Some(registry.render_spec(&pattern("icon", props), None, view))
+}
+
+fn present<'a>(row: &'a Value, field: &Value) -> Option<&'a Value> {
+    let value = field_value(row, field)?;
+    if value == &Value::Null || value.as_str() == Some("") {
+        None
+    } else {
+        Some(value)
+    }
+}
+
 fn render_badge(
     field: &Value,
     row: &Value,
     registry: &DioxusPatternRegistry,
     view: &DioxusView<'_>,
-) -> Element {
-    let Some(value) = field_value(row, field) else {
-        return rsx! {};
-    };
-    let value = display(value);
+) -> Option<Element> {
+    let value = display(present(row, field)?);
     let label = field
         .get("labels")
         .and_then(|labels| labels.get(&value))
@@ -467,7 +534,14 @@ fn render_badge(
             ("variant", Value::string(variant)),
         ],
     );
-    registry.render_spec(&spec, None, view)
+    let icon = icon_node(field, "xs", "", registry, view);
+    let badge = registry.render_spec(&spec, None, view);
+    Some(
+        rsx! { div { class: "flex flex-row gap-1 justify-start items-center",
+            if let Some(icon) = icon { {icon} }
+            {badge}
+        } },
+    )
 }
 
 fn render_body(
@@ -476,62 +550,103 @@ fn render_body(
     row: &Value,
     registry: &DioxusPatternRegistry,
     view: &DioxusView<'_>,
-    as_rows: bool,
-) -> Element {
-    let content = fields
+) -> Option<Element> {
+    let body_fields = fields
         .iter()
         .filter(|field| {
             title_field != Some(*field) && get_string(field, "variant").as_deref() != Some("badge")
         })
+        .collect::<Vec<_>>();
+    if body_fields.is_empty() {
+        return None;
+    }
+    let is_boolean = |field: &Value| get_string(field, "format").as_deref() == Some("boolean");
+    let variant_of = |field: &Value| get_string_or(field, "variant", "body");
+    let captions = body_fields
+        .iter()
+        .filter(|field| variant_of(field) == "caption" && !is_boolean(field))
         .filter_map(|field| {
-            let value = field_value(row, field)?;
-            if value == &Value::Null || value.as_str() == Some("") {
-                return None;
-            }
-            let variant = get_string_or(field, "variant", "body");
-            let label = field_label(field);
-            if variant == "progress" {
-                let number = value.as_number()?;
-                let spec = pattern(
-                    "progress-bar",
-                    [
-                        ("value", Value::Number(number)),
-                        ("max", Value::Number(100.0)),
-                        ("label", Value::string(label)),
-                    ],
-                );
-                return Some(registry.render_spec(&spec, None, view));
-            }
-            if variant == "caption" && get_string(field, "format").as_deref() != Some("boolean") {
-                let spec = text(display(value), "small", "secondary", "line-clamp-2");
-                return Some(registry.render_spec(&spec, None, view));
-            }
-            let text_value = if get_string(field, "format").as_deref() == Some("boolean") {
-                if value.as_bool() == Some(true) {
-                    "Yes".to_string()
-                } else {
-                    "No".to_string()
-                }
-            } else {
-                display(value)
-            };
-            let label_spec = text(format!("{label}:"), "caption", "secondary", "");
-            let value_spec = text(text_value, "small", "secondary", "");
-            Some(rsx! { div { class: "flex items-center gap-2",
-                {registry.render_spec(&label_spec, None, view)}
-                {registry.render_spec(&value_spec, None, view)}
-            } })
+            let value = present(row, field)?;
+            let spec = text(display(value), "small", "secondary", "line-clamp-2");
+            Some(registry.render_spec(&spec, None, view))
         })
         .collect::<Vec<_>>();
-    if content.is_empty() {
-        return rsx! {};
-    }
-    let class = if as_rows {
-        "basis-full min-w-0"
-    } else {
-        "px-4 pt-2 pb-4 flex-1"
-    };
-    rsx! { div { class: "{class} flex flex-col gap-1", for item in content { {item} } } }
+    let inline = body_fields
+        .iter()
+        .filter(|field| {
+            (variant_of(field) != "caption" || is_boolean(field)) && variant_of(field) != "progress"
+        })
+        .filter_map(|field| {
+            let value = present(row, field)?;
+            let label = field_label(field);
+            let icon = icon_node(field, "xs", "text-muted-foreground", registry, view);
+            if is_boolean(field) {
+                let label_spec = text(label, "caption", "secondary", "");
+                let truthy = value.as_bool() == Some(true);
+                let badge = pattern(
+                    "badge",
+                    [
+                        ("label", Value::string(if truthy { "Yes" } else { "No" })),
+                        (
+                            "variant",
+                            Value::string(if truthy { "success" } else { "neutral" }),
+                        ),
+                    ],
+                );
+                return Some(
+                    rsx! { div { class: "flex flex-row gap-1 justify-start items-center",
+                        if let Some(icon) = icon { {icon} }
+                        {registry.render_spec(&label_spec, None, view)}
+                        {registry.render_spec(&badge, None, view)}
+                    } },
+                );
+            }
+            let label_class = if icon.is_some() { "sr-only" } else { "" };
+            let label_spec = text(format!("{label}:"), "caption", "secondary", label_class);
+            let value_spec = text(display(value), "small", "secondary", "");
+            Some(
+                rsx! { div { class: "flex flex-row gap-1 justify-start items-center",
+                    if let Some(icon) = icon { {icon} }
+                    {registry.render_spec(&label_spec, None, view)}
+                    {registry.render_spec(&value_spec, None, view)}
+                } },
+            )
+        })
+        .collect::<Vec<_>>();
+    let progress = body_fields
+        .iter()
+        .filter(|field| variant_of(field) == "progress")
+        .filter_map(|field| {
+            let number = field_value(row, field)?.as_number()?;
+            let icon = icon_node(field, "xs", "text-muted-foreground", registry, view);
+            let label_spec = text(field_label(field), "caption", "secondary", "");
+            let bar = pattern(
+                "progress-bar",
+                [
+                    ("value", Value::Number(number)),
+                    ("max", Value::Number(100.0)),
+                ],
+            );
+            Some(
+                rsx! { div { class: "flex flex-col gap-1 items-stretch justify-start",
+                    div { class: "flex flex-row gap-1 justify-start items-center",
+                        if let Some(icon) = icon { {icon} }
+                        {registry.render_spec(&label_spec, None, view)}
+                    }
+                    {registry.render_spec(&bar, None, view)}
+                } },
+            )
+        })
+        .collect::<Vec<_>>();
+    Some(
+        rsx! { div { class: "flex flex-col gap-1 items-stretch justify-start",
+            for item in captions { {item} }
+            div { class: "flex flex-row gap-4 items-stretch justify-start flex-wrap gap-y-1",
+                for item in inline { {item} }
+            }
+            for item in progress { {item} }
+        } },
+    )
 }
 
 impl DioxusPatternRenderer for DataGridRenderer {

@@ -1,9 +1,7 @@
 use crate::registry::{shared_root_attrs, DioxusPatternRegistry};
 use crate::renderer::{cn, pattern_spec, DioxusPatternRenderer, DioxusView};
 use dioxus::prelude::*;
-use orbital_core::client::helpers::{
-    get_string_or, render_item_param_body, substitute_row_bindings,
-};
+use orbital_core::client::helpers::{get_string_or, render_item_lambda};
 use orbital_core::Value;
 
 const BOX: &str = "bg-transparent rounded-none shadow-none";
@@ -51,7 +49,7 @@ impl DioxusPatternRenderer for SortableListRenderer {
         ]);
         let content_class = cn(&[BOX, "flex-1 min-w-0"]);
         let handle_left = get_string_or(props, "dragHandlePosition", "left") == "left";
-        let lambda = props.get("renderItem").and_then(render_item_param_body);
+        let lambda = props.get("renderItem").and_then(render_item_lambda);
         let grip = pattern_spec(
             "icon",
             [
@@ -71,8 +69,8 @@ impl DioxusPatternRenderer for SortableListRenderer {
                                 }
                             }
                             div { class: "{content_class}",
-                                if let Some((param, body)) = lambda.as_ref() {
-                                    {registry.render_spec(&substitute_row_bindings(body, param, item), None, view)}
+                                if let Some(lambda) = lambda.as_ref() {
+                                    {registry.render_spec(&lambda.apply(item, index), None, view)}
                                 } else {
                                     {item_json(item)}
                                 }

@@ -6,6 +6,7 @@ use parley::{
     FontContext, InlineBox, LayoutContext, StyleProperty, TreeBuilder, WhiteSpaceCollapse,
 };
 use slab::Slab;
+use style::values::specified::text::TextTransformCase;
 use style::{
     data::ElementData as StyloElementData,
     selector_parser::RestyleDamage,
@@ -963,12 +964,46 @@ pub(crate) fn build_inline_layout_into(
             NodeData::Text(data) => {
                 // node.remove_damage(CONSTRUCT_DESCENDENT | CONSTRUCT_FC | CONSTRUCT_BOX);
                 // dbg!(&data.content);
-                builder.push_text(&data.content);
+                // ORBITAL PATCH (blitz-dom 0.2.4, P-023): upstream never applies Stylo's
+                // computed text-transform to Parley text; apply the parent's case here.
+                let case = node
+                    .parent
+                    .and_then(|pid| nodes[pid].primary_styles())
+                    .map(|s| s.get_inherited_text().text_transform.case())
+                    .unwrap_or(TextTransformCase::None);
+                match apply_text_case(&data.content, case) {
+                    Some(text) => builder.push_text(&text),
+                    None => builder.push_text(&data.content),
+                }
             }
             NodeData::Comment => {
                 // node.remove_damage(CONSTRUCT_DESCENDENT | CONSTRUCT_FC | CONSTRUCT_BOX);
             }
             NodeData::Document => unreachable!(),
+        }
+    }
+}
+
+/// ORBITAL PATCH: text-transform case mapping (none returns `None`, the caller
+/// keeps the original text). Capitalize treats the start of the node and every
+/// char following a non-alphanumeric char as a word start.
+fn apply_text_case(text: &str, case: TextTransformCase) -> Option<String> {
+    match case {
+        TextTransformCase::None => None,
+        TextTransformCase::Uppercase => Some(text.to_uppercase()),
+        TextTransformCase::Lowercase => Some(text.to_lowercase()),
+        TextTransformCase::Capitalize => {
+            let mut out = String::with_capacity(text.len());
+            let mut word_start = true;
+            for c in text.chars() {
+                if word_start && c.is_alphanumeric() {
+                    out.extend(c.to_uppercase());
+                } else {
+                    out.push(c);
+                }
+                word_start = !c.is_alphanumeric() && c != '\'' && c != '\u{2019}';
+            }
+            Some(out)
         }
     }
 }

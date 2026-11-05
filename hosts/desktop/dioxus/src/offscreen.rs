@@ -110,6 +110,42 @@ impl OffscreenPaintRegistry for anyrender_vello_cpu::VelloCpuImageRenderer {
     }
 }
 
+/// Net provider for the offscreen document: http(s) stylesheets, `@import`s and fonts are
+/// fetched on worker threads and parked in `loaded` until the capture loop feeds them to the
+/// document; `pending` counts fetches whose handler has not finished.
+#[cfg(not(target_arch = "wasm32"))]
+struct CaptureNet {
+    loaded: std::sync::Arc<std::sync::Mutex<Vec<blitz_dom::net::Resource>>>,
+    pending: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl blitz_traits::net::NetProvider<blitz_dom::net::Resource> for CaptureNet {
+    fn fetch(
+        &self,
+        doc_id: usize,
+        request: blitz_traits::net::Request,
+        handler: blitz_traits::net::BoxedHandler<blitz_dom::net::Resource>,
+    ) {
+        use std::sync::atomic::Ordering;
+        if !matches!(request.url.scheme(), "http" | "https") {
+            return;
+        }
+        self.pending.fetch_add(1, Ordering::SeqCst);
+        let loaded = self.loaded.clone();
+        let pending = self.pending.clone();
+        let callback: blitz_traits::net::SharedCallback<blitz_dom::net::Resource> = std::sync::Arc::new(
+            move |_doc_id: usize, result: Result<blitz_dom::net::Resource, Option<String>>| match result {
+                Ok(resource) => loaded.lock().unwrap().push(resource),
+                Err(message) => tracing::warn!(target: crate::shell::NS, ?message, "offscreen fetch failed"),
+            },
+        );
+        dioxus_native::http::spawn_fetch(doc_id, request, handler, callback, move || {
+            pending.fetch_sub(1, Ordering::SeqCst);
+        });
+    }
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 fn capture_with<R: OffscreenPaintRegistry>(
     path: &std::path::Path,
@@ -131,24 +167,53 @@ fn capture_with<R: OffscreenPaintRegistry>(
         provide_context(Rc::new(sink) as Rc<dyn dioxus_document::Document>);
         provide_context(paint_sources);
     });
+    let net = CaptureNet {
+        loaded: Default::default(),
+        pending: Default::default(),
+    };
+    let loaded = net.loaded.clone();
+    let pending = net.pending.clone();
     let mut doc = DioxusDocument::new(
         vdom,
         DocumentConfig {
             viewport: Some(Viewport::new(width, height, 1.0, ColorScheme::Light)),
             font_ctx: Some(embedded_font_context()),
+            net_provider: Some(std::sync::Arc::new(net)),
             ..Default::default()
         },
     );
     doc.initial_build();
-    // Head elements land after a render; poll until the document is quiet.
-    for _ in 0..8 {
+    // Head elements land after a render; remote stylesheets, `@import`s and fonts land after
+    // their fetch. Poll until the document is quiet and no fetch is in flight, bounded.
+    const NET_DEADLINE: std::time::Duration = std::time::Duration::from_secs(15);
+    let started = std::time::Instant::now();
+    let mut quiet_rounds = 0;
+    loop {
+        // Read before draining: a fetch that finishes after this read is seen next round.
+        let in_flight = pending.load(std::sync::atomic::Ordering::SeqCst) > 0;
         let mut changed = false;
         while let Some(op) = ops.borrow_mut().pop_front() {
             doc.create_head_element(&op.name, &op.attributes, &op.contents);
             changed = true;
         }
+        let arrived: Vec<_> = loaded.lock().unwrap().drain(..).collect();
+        for resource in arrived {
+            doc.load_resource(resource);
+            changed = true;
+        }
         changed |= doc.poll(None);
-        if !changed {
+        if started.elapsed() >= NET_DEADLINE {
+            tracing::warn!(target: crate::shell::NS, in_flight, "offscreen resource wait hit its deadline");
+            break;
+        }
+        if in_flight {
+            if !changed {
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+            continue;
+        }
+        quiet_rounds += 1;
+        if !changed || quiet_rounds >= 8 {
             break;
         }
     }

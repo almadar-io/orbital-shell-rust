@@ -1,7 +1,7 @@
 //! Native Dioxus renderer for the shared pattern contract.
 
-use crate::renderer::merge_class_name;
 use crate::registry::{shared_root_attrs, DioxusPatternRegistry};
+use crate::renderer::merge_class_name;
 use crate::renderer::{DioxusPatternRenderer, DioxusView};
 use dioxus::prelude::*;
 use orbital_core::client::helpers::*;
@@ -30,10 +30,13 @@ impl DioxusPatternRenderer for CardRenderer {
         let variant = get_string_or(props, "variant", "bordered");
         let padding = get_string_or(props, "padding", "md");
         let variant_class = match variant.as_str() {
-            "elevated" | "interactive" => {
-                "bg-card surface-material border-[length:var(--border-width)] border-border shadow"
+            "elevated" => {
+                "bg-card surface-material border-[length:var(--border-width)] border-border shadow transition-all duration-normal hover:shadow-elevation-dialog hover:translate-y-[var(--hover-translate-y)]"
             }
-            _ => "surface-content",
+            "interactive" => {
+                "bg-card surface-material border-[length:var(--border-width)] border-border shadow cursor-pointer transition-all duration-normal hover:shadow-elevation-dialog"
+            }
+            _ => "surface-content transition-all duration-normal hover:shadow-elevation-dialog hover:translate-y-[var(--hover-translate-y)]",
         };
         let padding_class = match padding.as_str() {
             "none" => "",
@@ -67,10 +70,11 @@ impl DioxusPatternRenderer for CardRenderer {
         let subtitle = get_string_or(props, "subtitle", "");
         let loading = get_bool_or(props, "loading", false);
         let action = get_string(props, "action");
+        let pressable = action.is_some();
         let sink = view.sink;
         let children = child_patterns(props, view.trait_content);
         rsx! {
-            div { class: "{class}", style: "height:auto",
+            div { class: "{class}", role: pressable.then_some("button"), tabindex: pressable.then_some(0),
                 onclick: move |_| {
                     if let (Some(sink), Some(action)) = (sink, &action) {
                         sink.call((action.clone(), Value::Object(orbital_core::ValueMap::new().into())));

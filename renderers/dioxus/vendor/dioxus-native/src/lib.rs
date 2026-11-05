@@ -10,6 +10,8 @@
 //!  - `tracing`: Enables tracing support.
 
 mod assets;
+#[cfg(not(target_arch = "wasm32"))]
+pub use assets::http;
 mod config;
 mod contexts;
 mod dioxus_application;

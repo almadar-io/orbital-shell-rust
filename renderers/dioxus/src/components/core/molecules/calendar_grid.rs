@@ -501,7 +501,12 @@ fn CalendarGridView(input: GridProps) -> Element {
         }
     });
 
-    let root_class = merge_class_name("", props);
+    let surface_class = if get_string_or(props, "surface", "auto") == "auto" {
+        "surface-content p-card-sm"
+    } else {
+        ""
+    };
+    let root_class = merge_class_name(&format!("bg-transparent rounded-none shadow-none {surface_class}"), props);
     rsx! {
         div { class: "{root_class}",
             if let Some(pager) = pager { {pager} }

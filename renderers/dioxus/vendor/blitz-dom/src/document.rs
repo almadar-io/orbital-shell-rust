@@ -745,10 +745,23 @@ impl BaseDocument {
                 self.invalidate_inline_contexts();
             }
             Resource::None => {
-                // Do nothing
+                // ORBITAL PATCH: an `@import`ed sheet finished loading into its
+                // already-attached parent sheet, which Stylo does not track; restyle.
+                self.restyle_from_loaded_sheets();
             }
             _ => {}
         }
+    }
+
+    // ORBITAL PATCH: remote `@import` rules arrive after the first style pass, so the
+    // whole tree must be restyled once they are in place.
+    fn restyle_from_loaded_sheets(&mut self) {
+        self.stylist
+            .force_stylesheet_origins_dirty(style::stylesheets::OriginSet::all());
+        let root = self.root_element().id;
+        self.nodes[root].set_restyle_hint(
+            style::invalidation::element::restyle_hints::RestyleHint::restyle_subtree(),
+        );
     }
 
     pub fn snapshot_node(&mut self, node_id: usize) {

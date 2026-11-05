@@ -579,6 +579,9 @@ impl<'a> DioxusView<'a> {
         child: &Value,
         source: Option<&str>,
     ) -> Element {
+        if orbital_core::client::helpers::is_empty_layout_node(child) {
+            return rsx! {};
+        }
         match source {
             Some(source) => {
                 registry.render_spec(child, None, &self.for_trait_source(source.to_string()))
@@ -605,6 +608,7 @@ impl<'a> DioxusView<'a> {
                     rsx! { "{text}" }
                 }
             }
+            Value::Object(_) if orbital_core::client::helpers::is_empty_layout_node(node) => rsx! {},
             Value::Object(_) => registry.render_spec(node, None, self),
             _ => rsx! {},
         }

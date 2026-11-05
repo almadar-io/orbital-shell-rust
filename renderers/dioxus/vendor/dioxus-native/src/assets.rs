@@ -8,6 +8,47 @@ use blitz_traits::net::SharedCallback;
 use blitz_traits::net::{NetCallback, NetProvider};
 use winit::event_loop::EventLoopProxy;
 
+/// ORBITAL PATCH: blocking http(s) GET on a worker thread, shared by the window net
+/// provider and the offscreen capture's provider.
+#[cfg(not(target_arch = "wasm32"))]
+pub mod http {
+    use blitz_dom::net::Resource;
+    use blitz_traits::net::{BoxedHandler, Bytes, Request, SharedCallback};
+    use std::io::Read;
+
+    pub fn fetch_blocking(url: &str) -> Result<Bytes, String> {
+        let response = ureq::get(url).call().map_err(|e| e.to_string())?;
+        let mut body = Vec::new();
+        response
+            .into_reader()
+            .read_to_end(&mut body)
+            .map_err(|e| e.to_string())?;
+        Ok(Bytes::from(body))
+    }
+
+    /// Fetch `request` on a thread, hand the bytes to `handler`, then run `done`
+    /// (after the handler, whether or not it called back). A failed fetch reports the
+    /// handler's error resource, or an `Err`, through `callback`.
+    pub fn spawn_fetch(
+        doc_id: usize,
+        request: Request,
+        handler: BoxedHandler<Resource>,
+        callback: SharedCallback<Resource>,
+        done: impl FnOnce() + Send + 'static,
+    ) {
+        std::thread::spawn(move || {
+            match fetch_blocking(request.url.as_str()) {
+                Ok(bytes) => handler.bytes(doc_id, bytes, callback),
+                Err(message) => match handler.error_resource() {
+                    Some(resource) => callback.call(doc_id, Ok(resource)),
+                    None => callback.call(doc_id, Err(Some(message))),
+                },
+            }
+            done();
+        });
+    }
+}
+
 pub struct DioxusNativeNetProvider {
     callback: Arc<dyn NetCallback<Resource> + 'static>,
     #[cfg(feature = "net")]
@@ -80,13 +121,20 @@ impl NetProvider<Resource> for DioxusNativeNetProvider {
                 self.inner_net_provider.fetch(doc_id, request, handler);
             }
 
-            #[cfg(not(feature = "net"))]
-            if let Some(error) = error_resource {
+            // ORBITAL PATCH: `net` (blitz-net/reqwest/tokio) is off in this build, so
+            // http(s) stylesheets, `@import`s and fonts used to be dropped here. Fetch them
+            // with ureq instead.
+            #[cfg(all(not(feature = "net"), not(target_arch = "wasm32")))]
+            if matches!(request.url.scheme(), "http" | "https") {
+                http::spawn_fetch(doc_id, request, handler, self.callback.clone(), || {});
+            } else if let Some(error) = error_resource {
                 self.callback.call(doc_id, Ok(error));
             }
 
-            #[cfg(all(not(feature = "net"), feature = "tracing"))]
-            tracing::warn!("net feature not enabled, cannot fetch {request:#?}");
+            #[cfg(all(not(feature = "net"), target_arch = "wasm32"))]
+            if let Some(error) = error_resource {
+                self.callback.call(doc_id, Ok(error));
+            }
         }
     }
 }

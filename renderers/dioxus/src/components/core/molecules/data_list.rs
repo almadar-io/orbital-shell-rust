@@ -280,7 +280,7 @@ fn DataListBody(p: DataListBodyProps) -> Element {
         Some(kind @ ("fade" | "rise" | "scale" | "slide")) => format!("almadar-enter-{kind}"),
         _ => String::new(),
     };
-    let render_item = props.get("renderItem").and_then(render_item_param_body);
+    let render_item = props.get("renderItem").and_then(render_item_lambda);
 
     let row_actions: Vec<Vec<usize>> = rows
         .iter()
@@ -565,8 +565,8 @@ fn DataListBody(p: DataListBodyProps) -> Element {
             let divider_class = cn(&["border-b border-border/40", if is_compact { "mx-4" } else { "mx-6" }]);
             let outer_click = open.clone();
 
-            if let Some((param, template)) = &render_item {
-                let custom = render(substitute_row_bindings(template, param, row));
+            if let Some(lambda) = &render_item {
+                let custom = render(lambda.apply(row, ri));
                 let primary: Vec<usize> = row_actions[ri]
                     .iter()
                     .copied()

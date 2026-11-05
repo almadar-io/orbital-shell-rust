@@ -131,15 +131,12 @@ fn Carousel(input: CarouselProps) -> Element {
 
     let lambda = props
         .get("renderItem")
-        .and_then(render_item_param_body)
-        .or_else(|| props.get("children").and_then(render_item_param_body));
+        .and_then(render_item_lambda)
+        .or_else(|| props.get("children").and_then(render_item_lambda));
     let slide_nodes: Vec<Option<Value>> = items
         .iter()
-        .map(|item| {
-            lambda
-                .as_ref()
-                .map(|(param, body)| substitute_row_bindings(body, param, item))
-        })
+        .enumerate()
+        .map(|(index, item)| lambda.as_ref().map(|lambda| lambda.apply(item, index)))
         .collect();
 
     let relay: EventSink = Callback::new(move |(_, payload): (String, Value)| {

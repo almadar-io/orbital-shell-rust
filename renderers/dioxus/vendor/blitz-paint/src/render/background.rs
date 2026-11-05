@@ -1,4 +1,4 @@
-use super::{to_image_quality, to_peniko_image, ElementCx};
+use super::{ElementCx, to_image_quality, to_peniko_image};
 use crate::color::{Color, ToColorColor};
 use crate::gradient::to_peniko_gradient;
 use crate::layers::maybe_with_layer;
@@ -565,8 +565,32 @@ impl ElementCx<'_> {
             }
         };
 
+        // ORBITAL PATCH: only tiles that intersect the device surface count toward the
+        // near-zero-gradient guard. Counting every tile of a tall page container
+        // (e.g. a 64px grid over a scrolling dashboard) exceeded the cap and dropped the
+        // whole background. Axis-aligned transforms only; otherwise keep the full range.
+        let coeffs = transform.as_coeffs();
+        let axis_aligned =
+            coeffs[1] == 0.0 && coeffs[2] == 0.0 && coeffs[0] == 1.0 && coeffs[3] == 1.0;
+        let visible_range = |origin: f64, step: f64, count: u32, surface: f64| {
+            if !axis_aligned || step <= 0.0 {
+                return 0..count;
+            }
+            let first = ((-origin) / step - 1.0).floor().max(0.0) as u32;
+            let last = ((surface - origin) / step).ceil().max(0.0) as u32;
+            first.min(count)..last.saturating_add(1).min(count)
+        };
+        let width_range =
+            visible_range(coeffs[4], width_gap, width_count, self.context.width as f64);
+        let height_range = visible_range(
+            coeffs[5],
+            height_gap,
+            height_count,
+            self.context.height as f64,
+        );
+
         // FIXME: https://wpt.live/css/css-backgrounds/background-size/background-size-near-zero-gradient.html
-        if width_count * height_count > 500 {
+        if width_range.len() as u64 * height_range.len() as u64 > 500 {
             return;
         }
 
@@ -583,8 +607,8 @@ impl ElementCx<'_> {
         );
         let brush = anyrender::Paint::Gradient(&gradient);
 
-        for hc in 0..height_count {
-            for wc in 0..width_count {
+        for hc in height_range {
+            for wc in width_range.clone() {
                 let transform = transform.then_translate(Vec2 {
                     x: wc as f64 * width_gap,
                     y: hc as f64 * height_gap,

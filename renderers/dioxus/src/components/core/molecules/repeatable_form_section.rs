@@ -166,7 +166,7 @@ fn RepeatableBody(body: RepeatableBodyProps) -> Element {
         vec![],
     );
     let empty_add = button("primary", &add_label, "plus", ADD, add_payload, vec![]);
-    let lambda = props.get("renderItem").and_then(render_item_param_body);
+    let lambda = props.get("renderItem").and_then(render_item_lambda);
     let outer_class = merge_class_name(&format!("{STACK_MD} w-full"), props);
 
     rsx! {
@@ -195,7 +195,7 @@ fn RepeatableBody(body: RepeatableBodyProps) -> Element {
                             let remove_payload = object_value([("sectionType", text(&section_type)), ("index", Value::Int(index as i64)), ("itemId", text(&id))]);
                             let up = object_value([("fromIndex", Value::Int(index as i64)), ("toIndex", Value::Int(index as i64 - 1))]);
                             let down = object_value([("fromIndex", Value::Int(index as i64)), ("toIndex", Value::Int(index as i64 + 1))]);
-                            let rendered = lambda.as_ref().map(|(param, body)| substitute_row_bindings(body, param, item));
+                            let rendered = lambda.as_ref().map(|lambda| lambda.apply(item, index));
                             rsx! {
                                 div { key: "{id}", class: "{CARD} p-4", style: "height:auto",
                                     div { class: "{STACK_SM}", style: "height:auto",
