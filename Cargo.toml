@@ -25,9 +25,10 @@ tokio = { version = "1.0", default-features = false, features = ["sync", "rt", "
 # The desktop program (`orb-desktop`): this shell's renderers as a GUI host.
 orbital-client-dioxus = { path = "renderers/dioxus", features = ["native"], optional = true }
 orbital-client-tui = { path = "renderers/tui", optional = true }
+tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "env-filter"], optional = true }
 
 [features]
-desktop = ["dep:orbital-client-dioxus", "dep:orbital-client-tui", "orbital-core/client-http"]
+desktop = ["dep:orbital-client-dioxus", "dep:orbital-client-tui", "dep:tracing-subscriber", "orbital-core/client-http"]
 
 [[bin]]
 name = "orb-desktop"

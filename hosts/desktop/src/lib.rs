@@ -21,6 +21,9 @@ const WIDTH: u32 = 1280;
 const HEIGHT: u32 = 900;
 const TEXT_COLUMNS: u16 = 160;
 const TEXT_ROWS: u16 = 50;
+/// A route capture runs at most this many host frames, `FRAME_MS` apart, before painting.
+const FRAME_LIMIT: usize = 40;
+const FRAME_MS: u64 = 50;
 
 fn failed(message: impl Into<String>) -> ShellFailure {
     ShellFailure::new(CODE_GENERATE_FAILED, message)
@@ -40,6 +43,13 @@ impl Renderer {
             other => Err(ShellFailure::new(CODE_BAD_REQUEST, format!("unknown renderer {other:?} (expected one of {})", RENDERERS.join(", ")))),
         }
     }
+}
+
+/// The program a client-role kernel runs against a server: the same projection the browser receives (EXEC-ENDPOINT-5),
+/// so the server's boot and protocol orbitals stay on the server.
+fn client_schema(schema: &OrbitalSchema) -> Result<OrbitalSchema, String> {
+    let program = serde_json::to_value(schema).map_err(|e| format!("client program: {e}"))?;
+    serde_json::from_value(orbital_core::effects::runs_on::client_program(&program)).map_err(|e| format!("client program: {e}"))
 }
 
 /// An in-process kernel over the app's own rows.
@@ -117,17 +127,60 @@ fn screenshot_route(
     server: Option<&str>,
 ) -> Result<PathBuf, String> {
     std::fs::create_dir_all(out_dir).map_err(|e| format!("{}: {e}", out_dir.display()))?;
-    let bridge: Arc<dyn ServerBridge> = match server {
-        Some(url) => Arc::new(SyncServerBridge::new(url)),
-        None => kernel(schema)?,
+    let (schema, bridge): (OrbitalSchema, Arc<dyn ServerBridge>) = match server {
+        Some(url) => (client_schema(schema)?, Arc::new(SyncServerBridge::new(url))),
+        None => (schema.clone(), kernel(schema)?),
     };
-    let mut surface = Surface::mount(renderer, schema, bridge)?;
-    surface.drive(|core| {
-        core.navigate_to(route, None);
-        core.mount_page_blocking();
+    let mut surface = Surface::mount(renderer, &schema, bridge)?;
+    let painted = surface.drive(|core| {
+        // The window's first mount already opened the program's first page; another route is opened as navigation.
+        if core.page_mount_route().as_deref() != Some(route) {
+            core.navigate_to(route, None);
+            core.mount_page_blocking();
+        }
         core.settle(8);
+        // The window's frame loop: run frames until nothing ran and nothing awaits (bounded), as the app would paint.
+        for _ in 0..FRAME_LIMIT {
+            let ran = core.drive_ticks_blocking();
+            core.settle(8);
+            if !ran && !core.has_awaiting() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(FRAME_MS));
+        }
+        painted_tree(core)
     })?;
+    let tree = out_dir.join(format!("{item}.tree.json"));
+    let text = serde_json::to_string_pretty(&painted).map_err(|e| e.to_string())?;
+    std::fs::write(&tree, text).map_err(|e| format!("{}: {e}", tree.display()))?;
     surface.capture(&out_dir.join(item))
+}
+
+/// What the capture painted, beside the image: each slot's render tree (as the kernel handed it), the active trait's
+/// state and any status message, so a parity review reads the desktop's input instead of guessing from pixels.
+fn painted_tree(core: &ClientCore) -> serde_json::Value {
+    let mut slots = serde_json::Map::new();
+    let mut names: Vec<&String> = core.ui_slots.keys().collect();
+    names.sort();
+    for name in names {
+        let items: Vec<serde_json::Value> = core.ui_slots[name]
+            .iter()
+            .map(|content| {
+                serde_json::json!({
+                    "pattern": content.pattern,
+                    "sourceTrait": content.source_trait,
+                    "props": orbital_core::client::helpers::to_json(&content.props),
+                })
+            })
+            .collect();
+        slots.insert(name.clone(), serde_json::Value::Array(items));
+    }
+    serde_json::json!({
+        "trait": core.current_trait_name,
+        "state": core.current_state,
+        "status": core.status_message.as_ref().map(|(text, error)| serde_json::json!({ "text": text, "error": error })),
+        "slots": slots,
+    })
 }
 
 fn coverage(renderer: Renderer) -> DesktopReply {
@@ -172,7 +225,7 @@ impl DesktopProgram for Desktop {
                 let title = schema.name.clone();
                 let css = orbital_client_dioxus::styles::program_stylesheets(&schema);
                 match server {
-                    Some(url) => dioxus::mount(schema, Arc::new(SyncServerBridge::new(url)))?,
+                    Some(url) => dioxus::mount(client_schema(&schema)?, Arc::new(SyncServerBridge::new(url)))?,
                     None => dioxus::mount_core(&json)?,
                 };
                 orbital_client_dioxus::native::open_window(css, &title);
