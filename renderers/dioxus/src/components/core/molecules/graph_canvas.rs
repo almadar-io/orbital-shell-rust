@@ -142,25 +142,21 @@ impl DioxusPatternRenderer for GraphCanvasRenderer {
         let zoom_out = registry.render_spec(&icon_button("zoom-out", "Zoom out"), None, view);
         let zoom_in = registry.render_spec(&icon_button("zoom-in", "Zoom in"), None, view);
         let reset = registry.render_spec(&icon_button("rotate-ccw", "Reset"), None, view);
-        let sink = view.sink;
-        let action_nodes: Vec<(Element, Option<String>)> = actions
+        let action_nodes: Vec<Element> = actions
             .iter()
             .map(|action| {
-                let spec = pattern_spec(
-                    "badge",
-                    [
-                        ("variant", Value::string("default")),
-                        (
-                            "className",
-                            Value::string("cursor-pointer hover:opacity-80 transition-opacity"),
-                        ),
-                        ("label", Value::string(get_string_or(action, "label", ""))),
-                    ],
-                );
-                (
-                    registry.render_spec(&spec, None, view),
-                    get_string(action, "event"),
-                )
+                let mut fields = vec![
+                    ("variant", Value::string("default")),
+                    (
+                        "className",
+                        Value::string("cursor-pointer hover:opacity-80 transition-opacity"),
+                    ),
+                    ("label", Value::string(get_string_or(action, "label", ""))),
+                ];
+                if let Some(event) = get_string(action, "event") {
+                    fields.push(("onClick", Value::string(event)));
+                }
+                registry.render_spec(&pattern_spec("badge", fields), None, view)
             })
             .collect();
         let legend: Vec<(String, Element)> = groups
@@ -193,17 +189,8 @@ impl DioxusPatternRenderer for GraphCanvasRenderer {
                                     {zoom_in}
                                     {reset}
                                 }
-                                for (index, (badge, event)) in action_nodes.into_iter().enumerate() {
-                                    span {
-                                        key: "{index}",
-                                        class: "contents",
-                                        onclick: move |_| {
-                                            if let (Some(sink), Some(event)) = (sink, &event) {
-                                                sink.call((event.clone(), Value::Object(orbital_core::ValueMap::new().into())));
-                                            }
-                                        },
-                                        {badge}
-                                    }
+                                for (index, badge) in action_nodes.into_iter().enumerate() {
+                                    span { key: "{index}", {badge} }
                                 }
                             }
                         }

@@ -2,7 +2,7 @@
 
 use crate::registry::DioxusPatternRegistry;
 use crate::renderer::{
-    pattern_spec, DioxusPatternRenderer, DioxusView, NavigationSink, OwnedDioxusView,
+    array_value, pattern_spec, DioxusPatternRenderer, DioxusView, NavigationSink, OwnedDioxusView,
 };
 use dioxus::prelude::*;
 use orbital_core::client::helpers::*;
@@ -29,15 +29,19 @@ pub(crate) fn stack_class(
     crate::renderer::cn(&[direction, gap, align, justify, extra])
 }
 
-const BUTTON_BASE: &str = "relative inline-flex items-center justify-center gap-2 font-medium rounded-interactive interactive-border cursor-pointer chrome-button transition-all duration-normal focus:outline-none focus-visible:ring-[length:var(--focus-ring-width)] focus-visible:ring-ring focus-visible:ring-offset-[length:var(--focus-ring-offset)] disabled:opacity-50 disabled:cursor-not-allowed";
-const BUTTON_GHOST: &str = "bg-transparent text-muted-foreground border border-transparent hover:text-primary-foreground hover:bg-primary hover:border-primary active:scale-[var(--active-scale)]";
-const BUTTON_MD: &str = "h-button-md px-4 text-sm";
-pub(crate) const BUTTON_CONTENT: &str =
-    "inline-flex flex-1 min-w-0 items-center [justify-content:inherit] gap-2";
-
-/// The ghost `Button` classes for a `className`, for a button that carries children (the `button` body takes none).
-pub(crate) fn ghost_button_class(extra: &str) -> String {
-    crate::renderer::cn(&[BUTTON_BASE, BUTTON_GHOST, BUTTON_MD, extra])
+/// A ghost `button` spec carrying `class`, its child specs and any extra props (the web `<Button variant="ghost">`).
+pub(crate) fn ghost_button_spec(
+    class: &str,
+    children: Vec<Value>,
+    extra: Vec<(&str, Value)>,
+) -> Value {
+    let mut fields = vec![
+        ("variant", Value::string("ghost")),
+        ("className", Value::string(class)),
+        ("children", crate::renderer::array_value(children)),
+    ];
+    fields.extend(extra);
+    pattern_spec("button", fields)
 }
 
 pub(crate) fn truthy(value: &Value) -> bool {
@@ -226,35 +230,30 @@ fn NavLink(props: NavLinkProps) -> Element {
 
     if props.compact {
         let glyph = match &icon_name {
-            Some(name) => registry.render_spec(&icon_spec(name, icon_class), None, &view),
-            None => registry.render_spec(
-                &text_spec(&initial, "small", "font-semibold", &[]),
-                None,
-                &view,
-            ),
+            Some(name) => icon_spec(name, icon_class),
+            None => text_spec(&initial, "small", "font-semibold", &[]),
         };
-        let corner = badge.as_ref().map(|text| {
-            registry.render_spec(
-                &badge_spec(
-                    text,
-                    is_active,
-                    "absolute -top-2 -right-2 px-1 py-0 text-[10px] leading-4",
-                ),
-                None,
-                &view,
-            )
-        });
-        let mark = rsx! {
-            span { class: box_class("relative inline-flex"),
-                {glyph}
-                if let Some(corner) = corner { {corner} }
-            }
-        };
+        let mut mark_children = vec![glyph];
+        if let Some(text) = badge.as_ref() {
+            mark_children.push(badge_spec(
+                text,
+                is_active,
+                "absolute -top-2 -right-2 px-1 py-0 text-[10px] leading-4",
+            ));
+        }
+        let mark_spec = pattern_spec(
+            "box",
+            [
+                ("className", Value::string("relative inline-flex")),
+                ("children", crate::renderer::array_value(mark_children)),
+            ],
+        );
         if !has_children {
             let class = crate::renderer::cn(&[
                 "flex items-center justify-center px-2 py-2 rounded-interactive transition-colors",
                 state_class,
             ]);
+            let mark = registry.render_spec(&mark_spec, None, &view);
             return nav_anchor(
                 class,
                 &href,
@@ -266,9 +265,9 @@ fn NavLink(props: NavLinkProps) -> Element {
                 mark,
             );
         }
-        let button_class = ghost_button_class(&format!(
+        let button_class = format!(
             "flex items-center justify-center w-full px-2 py-2 rounded-interactive transition-colors {state_class}"
-        ));
+        );
         let flyout_items = children.iter().map(|child| {
             let child_href = get_string_or(child, "href", "");
             let child_label = get_string_or(child, "label", "");
@@ -308,13 +307,33 @@ fn NavLink(props: NavLinkProps) -> Element {
             )
         });
         let flyout: Vec<Element> = flyout_items.collect();
+        let toggle_spec = ghost_button_spec(
+            &button_class,
+            vec![mark_spec],
+            vec![
+                ("title", Value::string(label.as_str())),
+                ("aria-label", Value::string(label.as_str())),
+                ("aria-expanded", Value::Bool(open())),
+                ("action", Value::string("__local_toggle")),
+            ],
+        );
+        let toggle = crate::renderer::render_with_local_sink(
+            &view,
+            registry,
+            &toggle_spec,
+            move |event, _| {
+                if event != "__local_toggle" {
+                    return false;
+                }
+                let mut flag = open;
+                let next = !flag();
+                flag.set(next);
+                true
+            },
+        );
         return rsx! {
             div { class: box_class("relative"),
-                button { class: "{button_class}", r#type: "button", title: "{label}", "aria-label": "{label}",
-                    "aria-expanded": if open() { "true" } else { "false" },
-                    onclick: move |_| { let next = !open(); open.set(next); },
-                    span { class: "{BUTTON_CONTENT}", {mark} }
-                }
+                {toggle}
                 if open() {
                     div { class: box_class("fixed inset-0 z-20"), onclick: move |_| open.set(false) }
                     div { class: box_class("absolute left-full top-0 ml-2 w-48 bg-card surface-material rounded-container shadow-elevation-popover border border-border py-1 z-30"),
@@ -360,21 +379,9 @@ fn NavLink(props: NavLinkProps) -> Element {
         );
     }
 
-    let chevron = registry.render_spec(
-        &icon_spec(
-            "chevron-down",
-            if open() {
-                "h-4 w-4 shrink-0 transition-transform rotate-180"
-            } else {
-                "h-4 w-4 shrink-0 transition-transform"
-            },
-        ),
-        None,
-        &view,
-    );
-    let button_class = ghost_button_class(&format!(
+    let button_class = format!(
         "flex items-center gap-3 w-full px-3 py-2 rounded-interactive text-sm font-medium transition-colors {state_class}"
-    ));
+    );
     let sub_items: Vec<Element> = children
         .iter()
         .map(|child| {
@@ -428,6 +435,45 @@ fn NavLink(props: NavLinkProps) -> Element {
             )
         })
         .collect();
+    let mut toggle_children: Vec<Value> = Vec::new();
+    if let Some(name) = &icon_name {
+        toggle_children.push(icon_spec(name, icon_class));
+    }
+    toggle_children.push(text_spec(
+        &label,
+        "small",
+        "flex-1",
+        &[("color", text_color)],
+    ));
+    if let Some(text) = badge.as_ref() {
+        toggle_children.push(badge_spec(text, is_active, ""));
+    }
+    toggle_children.push(icon_spec(
+        "chevron-down",
+        if open() {
+            "h-4 w-4 shrink-0 transition-transform rotate-180"
+        } else {
+            "h-4 w-4 shrink-0 transition-transform"
+        },
+    ));
+    let toggle_spec = ghost_button_spec(
+        &button_class,
+        toggle_children,
+        vec![
+            ("aria-expanded", Value::Bool(open())),
+            ("action", Value::string("__local_toggle")),
+        ],
+    );
+    let toggle =
+        crate::renderer::render_with_local_sink(&view, registry, &toggle_spec, move |event, _| {
+            if event != "__local_toggle" {
+                return false;
+            }
+            let mut flag = open;
+            let next = !flag();
+            flag.set(next);
+            true
+        });
     let group_class = stack_class(
         false,
         "gap-0",
@@ -437,16 +483,7 @@ fn NavLink(props: NavLinkProps) -> Element {
     );
     rsx! {
         div { class: box_class(""),
-            button { class: "{button_class}", r#type: "button",
-                "aria-expanded": if open() { "true" } else { "false" },
-                onclick: move |_| { let next = !open(); open.set(next); },
-                span { class: "{BUTTON_CONTENT}",
-                    if let Some(icon) = icon { span { class: "flex-shrink-0", {icon} } }
-                    {text}
-                    if let Some(badge_el) = badge_el { {badge_el} }
-                    span { class: "flex-shrink-0", {chevron} }
-                }
-            }
+            {toggle}
             if open() {
                 div { class: "{group_class}",
                     for entry in sub_items { {entry} }
@@ -679,8 +716,27 @@ fn DashboardLayout(props: LayoutProps) -> Element {
             None,
             rsx! { {mark} if let Some(brand_name) = brand_name { {brand_name} } },
         );
-        let close_icon = registry.render_spec(&icon_spec("x", "h-5 w-5"), None, &view);
-        let close_class = ghost_button_class("p-2");
+        let close_spec = ghost_button_spec(
+            "p-2",
+            vec![icon_spec("x", "h-5 w-5")],
+            vec![
+                ("aria-label", Value::string("Close panel")),
+                ("action", Value::string("__local_close_sidebar")),
+            ],
+        );
+        let close_button = crate::renderer::render_with_local_sink(
+            &view,
+            registry,
+            &close_spec,
+            move |event, _| {
+                if event != "__local_close_sidebar" {
+                    return false;
+                }
+                let mut flag = sidebar_open;
+                flag.set(false);
+                true
+            },
+        );
         let nav_class = stack_class(
             false,
             "gap-0",
@@ -722,10 +778,7 @@ fn DashboardLayout(props: LayoutProps) -> Element {
                 div { class: "{head_class}",
                     {brand}
                     if off_canvas {
-                        button { class: "{close_class}", r#type: "button", "aria-label": "Close panel",
-                            onclick: move |_| sidebar_open.set(false),
-                            span { class: "{BUTTON_CONTENT}", {close_icon} }
-                        }
+                        {close_button}
                     }
                 }
                 nav { class: "{nav_class}", "aria-label": "Main navigation",
@@ -754,10 +807,27 @@ fn DashboardLayout(props: LayoutProps) -> Element {
             "justify-between",
             "h-16 px-3 @sm/dashboard:px-4 gap-2 @sm/dashboard:gap-4",
         );
-        let menu_class = ghost_button_class(
+        let menu_spec = ghost_button_spec(
             "p-2 rounded-interactive hover:bg-muted text-muted-foreground touch-manipulation min-h-[44px] min-w-[44px] flex items-center justify-center",
+            vec![icon_spec("menu", "h-5 w-5")],
+            vec![
+                ("aria-label", Value::string("Open sidebar")),
+                ("action", Value::string("__local_open_sidebar")),
+            ],
         );
-        let menu_icon = registry.render_spec(&icon_spec("menu", "h-5 w-5"), None, &view);
+        let menu_button = crate::renderer::render_with_local_sink(
+            &view,
+            registry,
+            &menu_spec,
+            move |event, _| {
+                if event != "__local_open_sidebar" {
+                    return false;
+                }
+                let mut flag = sidebar_open;
+                flag.set(true);
+                true
+            },
+        );
         let phone_title = (is_mobile && !search_open()).then(|| {
             let spec = pattern_spec(
                 "typography",
@@ -864,22 +934,28 @@ fn DashboardLayout(props: LayoutProps) -> Element {
             rsx! { div { class: "{class}", "data-dashboard-search": "", {input} } }
         });
         let search_toggle = (search_enabled && is_mobile).then(|| {
-            let icon = registry.render_spec(
-                &icon_spec(
-                    if search_open() { "x" } else { "search" },
-                    "h-icon-default w-icon-default",
-                ),
-                None,
-                &view,
+            let spec = ghost_button_spec(
+                "shrink-0 min-h-[44px] min-w-[44px]",
+                Vec::new(),
+                vec![
+                    (
+                        "icon",
+                        Value::string(if search_open() { "x" } else { "search" }),
+                    ),
+                    ("aria-label", Value::string("Search")),
+                    ("aria-expanded", Value::Bool(search_open())),
+                    ("action", Value::string("__local_toggle_search")),
+                ],
             );
-            let class = ghost_button_class("shrink-0 min-h-[44px] min-w-[44px]");
-            rsx! {
-                button { class: "{class}", r#type: "button", "aria-label": "Search",
-                    "aria-expanded": if search_open() { "true" } else { "false" },
-                    onclick: move |_| { let next = !search_open(); search_open.set(next); },
-                    span { class: "{BUTTON_CONTENT}", span { class: "flex-shrink-0", {icon} } }
+            crate::renderer::render_with_local_sink(&view, registry, &spec, move |event, _| {
+                if event != "__local_toggle_search" {
+                    return false;
                 }
-            }
+                let mut flag = search_open;
+                let next = !flag();
+                flag.set(next);
+                true
+            })
         });
         let spacer = (!search_enabled).then(|| rsx! { div { class: box_class("flex-1") } });
         let right_class = stack_class(true, "gap-1", "items-center", "justify-start", "");
@@ -897,64 +973,83 @@ fn DashboardLayout(props: LayoutProps) -> Element {
                 let label = get_string(action, "label");
                 let icon_name = get_string(action, "icon");
                 let aria = label.clone().or_else(|| icon_name.clone());
-                let icon = icon_name.as_ref().map(|name| {
-                    registry.render_spec(&icon_spec(name, "h-5 w-5 text-muted-foreground"), None, &view)
-                });
-                let badge = badge_text(action).map(|text| {
+                let mut button_children: Vec<Value> = Vec::new();
+                if let Some(name) = icon_name.as_ref() {
+                    button_children.push(icon_spec(name, "h-5 w-5 text-muted-foreground"));
+                }
+                if let Some(text) = badge_text(action) {
                     let tone = match get_string(action, "variant").as_deref() {
                         Some("danger") => "bg-error text-error-foreground",
                         Some("primary") => "bg-primary text-primary-foreground",
                         _ => "bg-foreground text-background",
                     };
-                    (
-                        box_class(&format!(
-                            "absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full text-xs font-semibold flex items-center justify-center {tone}"
-                        )),
-                        text,
-                    )
-                });
+                    button_children.push(pattern_spec(
+                        "box",
+                        [
+                            (
+                                "className",
+                                Value::string(format!(
+                                    "absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full text-xs font-semibold flex items-center justify-center {tone}"
+                                )),
+                            ),
+                            ("children", array_value(vec![text_spec(&text, "small", "text-xs font-semibold", &[("color", "inherit"), ("as", "span")])])),
+                        ],
+                    ));
+                }
                 let event = get_string(action, "event");
                 let route = get_string(action, "navigatesTo");
-                let class = ghost_button_class("relative p-2");
-                rsx! {
-                    button { class: "{class}", r#type: "button", "aria-label": aria.as_deref(),
-                        onclick: move |_| {
-                            if let (Some(sink), Some(event)) = (sink, &event) {
-                                sink.call((event.clone(), empty_payload()));
-                            }
-                            if let (Some(navigate), Some(route)) = (navigate, &route) {
-                                navigate.call(route.clone());
-                            }
-                        },
-                        span { class: "{BUTTON_CONTENT}",
-                            if let Some(icon) = icon { {icon} }
-                            if let Some((badge_class, text)) = badge { span { class: "{badge_class}", "{text}" } }
-                        }
-                    }
+                let mut extra = vec![("action", Value::string("__local_bar_action"))];
+                if let Some(aria) = aria {
+                    extra.push(("aria-label", Value::string(aria)));
                 }
+                let spec = ghost_button_spec("relative p-2", button_children, extra);
+                crate::renderer::render_with_local_sink(&view, registry, &spec, move |name, _| {
+                    if name != "__local_bar_action" {
+                        return false;
+                    }
+                    if let (Some(sink), Some(event)) = (sink, &event) {
+                        sink.call((event.clone(), empty_payload()));
+                    }
+                    if let (Some(navigate), Some(route)) = (navigate, &route) {
+                        navigate.call(route.clone());
+                    }
+                    true
+                })
             })
             .collect();
         let bell = unread.map(|count| {
-            let icon = registry.render_spec(&icon_spec("bell", "h-5 w-5 text-muted-foreground"), None, &view);
-            let class = ghost_button_class("relative p-2");
             let event = get_string(p, "notificationClickEvent").filter(|event| !event.is_empty());
-            let badge_class = box_class(
-                "absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 bg-error rounded-full text-xs font-semibold text-error-foreground flex items-center justify-center",
-            );
-            let shown = if count > 99 { "99+".to_string() } else { count.to_string() };
-            rsx! {
-                button { class: "{class}", r#type: "button", "aria-label": "Notifications",
-                    onclick: move |_| {
-                        if let (Some(sink), Some(event)) = (sink, &event) {
-                            sink.call((event.clone(), empty_payload()));
-                        }
-                    },
-                    span { class: "{BUTTON_CONTENT}",
-                        {icon}
-                        if count > 0 { span { class: "{badge_class}", "{shown}" } }
-                    }
-                }
+            let mut bell_children = vec![icon_spec("bell", "h-5 w-5 text-muted-foreground")];
+            if count > 0 {
+                let shown = if count > 99 { "99+".to_string() } else { count.to_string() };
+                bell_children.push(pattern_spec(
+                    "box",
+                    [
+                        (
+                            "className",
+                            Value::string("absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 bg-error rounded-full text-xs font-semibold text-error-foreground flex items-center justify-center"),
+                        ),
+                        ("children", array_value(vec![text_spec(&shown, "small", "text-xs font-semibold", &[("color", "inherit"), ("as", "span")])])),
+                    ],
+                ));
             }
+            let spec = ghost_button_spec(
+                "relative p-2",
+                bell_children,
+                vec![
+                    ("aria-label", Value::string("Notifications")),
+                    ("action", Value::string("__local_notifications")),
+                ],
+            );
+            crate::renderer::render_with_local_sink(&view, registry, &spec, move |name, _| {
+                if name != "__local_notifications" {
+                    return false;
+                }
+                if let (Some(sink), Some(event)) = (sink, &event) {
+                    sink.call((event.clone(), empty_payload()));
+                }
+                true
+            })
         });
         let user_menu = p
             .get("user")
@@ -982,30 +1077,22 @@ fn DashboardLayout(props: LayoutProps) -> Element {
                 if let Some(src) = get_string(user, "avatar") {
                     avatar_fields.push(("src", Value::string(src)));
                 }
-                let trigger = pattern_spec(
-                    "flex",
-                    [
-                        (
-                            "className",
-                            Value::string(ghost_button_class("flex items-center gap-2 p-2")),
+                let trigger = ghost_button_spec(
+                    "flex items-center gap-2 p-2",
+                    vec![
+                        pattern_spec("avatar", avatar_fields),
+                        text_spec(
+                            &name,
+                            "small",
+                            "hidden @sm/dashboard:block text-foreground",
+                            &[("weight", "medium")],
                         ),
-                        (
-                            "children",
-                            Value::array(vec![
-                                pattern_spec("avatar", avatar_fields),
-                                text_spec(
-                                    &name,
-                                    "small",
-                                    "hidden @sm/dashboard:block text-foreground",
-                                    &[("weight", "medium")],
-                                ),
-                                icon_spec(
-                                    "chevron-down",
-                                    "hidden @sm/dashboard:block h-4 w-4 text-muted-foreground",
-                                ),
-                            ]),
+                        icon_spec(
+                            "chevron-down",
+                            "hidden @sm/dashboard:block h-4 w-4 text-muted-foreground",
                         ),
                     ],
+                    Vec::new(),
                 );
                 let mut items: Vec<Value> = user_menu_items
                     .iter()
@@ -1041,10 +1128,7 @@ fn DashboardLayout(props: LayoutProps) -> Element {
             header { class: "{header_class}",
                 div { class: "{row_class}",
                     if show_sidebar && off_canvas {
-                        button { class: "{menu_class}", r#type: "button", "aria-label": "Open sidebar",
-                            onclick: move |_| sidebar_open.set(true),
-                            span { class: "{BUTTON_CONTENT}", {menu_icon} }
-                        }
+                        {menu_button}
                     }
                     if let Some(title) = phone_title { {title} }
                     if let Some(brand) = drawer_brand { {brand} }

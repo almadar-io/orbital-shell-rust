@@ -1,11 +1,11 @@
 //! Native Dioxus renderer for the `reply-tree` pattern (web: ReplyTree.tsx).
-//! Text is the web's default-locale (en) catalog. Votes are drawn inline because the `vote-stack` body
-//! cannot carry the per-node `{ nodeId, vote }` payload.
+//! Text is the web's default-locale (en) catalog.
 
 use super::agent_activity_row::{field, plain_text_of, render_pattern, typography};
 use crate::registry::DioxusPatternRegistry;
 use crate::renderer::{
-    object_value, plain_text, DioxusPatternRenderer, DioxusView, OwnedDioxusView,
+    object_value, pattern_spec, render_with_local_sink, DioxusPatternRenderer, DioxusView,
+    OwnedDioxusView,
 };
 use dioxus::prelude::*;
 use orbital_core::client::helpers::*;
@@ -70,15 +70,14 @@ fn ReplyNode(input: NodeProps) -> Element {
     let registry = &input.registry;
     let node = &input.node;
     let config = &input.config;
-    let mut collapsed = input.collapsed;
-    let mut reply_open = use_signal(|| false);
+    let collapsed = input.collapsed;
+    let reply_open = use_signal(|| false);
     let mut draft = use_signal(String::new);
     let node_id = plain_text_of(field(node, "id"));
     let author = get_string_or(node, "authorName", "");
     let avatar = get_string(node, "authorAvatarUrl");
     let content = get_string_or(node, "content", "");
     let posted_at = get_string_or(node, "postedAt", "");
-    let vote_text = plain_text(&Value::Number(get_number_or(node, "voteCount", 0.0)));
     let user_vote = get_string(node, "userVote");
     let replies = get_array(node, "replies");
     let has_replies = !replies.is_empty();
@@ -90,9 +89,7 @@ fn ReplyNode(input: NodeProps) -> Element {
     let is_open = reply_open();
 
     let toggle_id = node_id.clone();
-    let toggle_button = render_pattern(
-        registry,
-        &view,
+    let toggle_spec = pattern_spec(
         "button",
         vec![
             ("variant", Value::string("ghost")),
@@ -102,8 +99,22 @@ fn ReplyNode(input: NodeProps) -> Element {
             ("aria-label", Value::string(if is_collapsed { "Expand replies" } else { "Collapse replies" })),
             ("aria-expanded", Value::Bool(!is_collapsed)),
             ("className", Value::string("w-6 h-6 p-0 min-w-0 rounded-interactive text-muted-foreground hover:bg-muted hover:text-foreground")),
+            ("action", Value::string("__local_collapse")),
         ],
     );
+    let toggle_button = render_with_local_sink(&view, registry, &toggle_spec, move |name, _| {
+        if name != "__local_collapse" {
+            return false;
+        }
+        let mut list = collapsed;
+        let mut current = list.write();
+        if let Some(position) = current.iter().position(|entry| *entry == toggle_id) {
+            current.remove(position);
+        } else {
+            current.push(toggle_id.clone());
+        }
+        true
+    });
     let avatar_el = {
         let mut fields = vec![
             ("name", Value::string(author.as_str())),
@@ -115,43 +126,42 @@ fn ReplyNode(input: NodeProps) -> Element {
         render_pattern(registry, &view, "avatar", fields)
     };
 
-    let vote_button = |direction: &'static str, icon: &'static str| {
-        let selected = user_vote.as_deref() == Some(direction);
-        let next = if selected {
-            Value::Null
-        } else {
-            Value::string(direction)
-        };
+    let vote_node = {
+        let mut fields = vec![
+            (
+                "count",
+                Value::Number(get_number_or(node, "voteCount", 0.0)),
+            ),
+            (
+                "userVote",
+                user_vote
+                    .as_deref()
+                    .map(Value::string)
+                    .unwrap_or(Value::Null),
+            ),
+            ("size", Value::string("sm")),
+            ("variant", Value::string("horizontal")),
+            ("label", Value::string(format!("Vote on reply by {author}"))),
+        ];
+        if config.vote_event.is_some() {
+            fields.push(("voteEvent", Value::string("__local_vote")));
+        }
+        let spec = pattern_spec("vote-stack", fields);
         let event = config.vote_event.clone();
         let id = node_id.clone();
-        let rounded = if direction == "up" {
-            "rounded-l-interactive"
-        } else {
-            "rounded-r-interactive"
-        };
-        let class = format!(
-            "inline-flex items-center justify-center {rounded} {} hover:bg-muted active:bg-muted transition-colors duration-instant disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent focus:outline-none focus-visible:ring-[length:var(--focus-ring-width)] focus-visible:ring-ring focus-visible:ring-inset w-7 h-7",
-            if selected { "text-primary" } else { "text-muted-foreground" }
-        );
-        let label = if direction == "up" {
-            "Upvote"
-        } else {
-            "Downvote"
-        };
-        rsx! {
-            button {
-                r#type: "button",
-                class: "{class}",
-                "aria-label": "{label}",
-                "aria-pressed": "{selected}",
-                onclick: move |_| {
-                    if let (Some(sink), Some(event)) = (sink, &event) {
-                        sink.call((event.clone(), object_value([("nodeId", Value::string(id.as_str())), ("vote", next.clone())])));
-                    }
-                },
-                {render_pattern(registry, &view, "icon", vec![("name", Value::string(icon)), ("className", Value::string("w-3 h-3"))])}
+        render_with_local_sink(&view, registry, &spec, move |name, payload| {
+            if name != "__local_vote" {
+                return false;
             }
-        }
+            if let (Some(sink), Some(event)) = (sink, &event) {
+                let vote = payload.get("next").cloned().unwrap_or(Value::Null);
+                sink.call((
+                    event.clone(),
+                    object_value([("nodeId", Value::string(id.as_str())), ("vote", vote)]),
+                ));
+            }
+            true
+        })
     };
 
     let flag_button = {
@@ -174,9 +184,7 @@ fn ReplyNode(input: NodeProps) -> Element {
         }
         render_pattern(registry, &view, "button", fields)
     };
-    let reply_button = render_pattern(
-        registry,
-        &view,
+    let reply_spec = pattern_spec(
         "button",
         vec![
             ("variant", Value::string("ghost")),
@@ -184,38 +192,70 @@ fn ReplyNode(input: NodeProps) -> Element {
             ("leftIcon", Value::string("message-square")),
             ("label", Value::string("Reply")),
             ("aria-label", Value::string(format!("Reply to {author}"))),
+            ("action", Value::string("__local_reply_toggle")),
         ],
     );
+    let reply_button = render_with_local_sink(&view, registry, &reply_spec, move |name, _| {
+        if name != "__local_reply_toggle" {
+            return false;
+        }
+        let mut open = reply_open;
+        let next = !open();
+        open.set(next);
+        true
+    });
     let send_button = {
-        let mut fields = vec![
+        let send_action = config
+            .reply_event
+            .clone()
+            .unwrap_or_else(|| "__local_send".to_string());
+        let fields = vec![
             ("variant", Value::string("primary")),
             ("size", Value::string("sm")),
             ("leftIcon", Value::string("send")),
             ("label", Value::string("Send")),
             ("disabled", Value::Bool(trimmed.is_empty())),
-        ];
-        if let Some(event) = &config.reply_event {
-            fields.push(("action", Value::string(event.as_str())));
-            fields.push((
+            ("action", Value::string(send_action.as_str())),
+            (
                 "actionPayload",
                 object_value([
                     ("parentNodeId", Value::string(node_id.as_str())),
                     ("content", Value::string(trimmed.as_str())),
                 ]),
-            ));
-        }
-        render_pattern(registry, &view, "button", fields)
+            ),
+        ];
+        let spec = pattern_spec("button", fields);
+        let local_only = config.reply_event.is_none();
+        render_with_local_sink(&view, registry, &spec, move |name, _| {
+            if name != send_action {
+                return false;
+            }
+            let mut text = draft;
+            let mut open = reply_open;
+            text.set(String::new());
+            open.set(false);
+            local_only
+        })
     };
-    let cancel_button = render_pattern(
-        registry,
-        &view,
+    let cancel_spec = pattern_spec(
         "button",
         vec![
             ("variant", Value::string("ghost")),
             ("size", Value::string("sm")),
             ("label", Value::string("Cancel")),
+            ("action", Value::string("__local_cancel")),
         ],
     );
+    let cancel_button = render_with_local_sink(&view, registry, &cancel_spec, move |name, _| {
+        if name != "__local_cancel" {
+            return false;
+        }
+        let mut text = draft;
+        let mut open = reply_open;
+        text.set(String::new());
+        open.set(false);
+        true
+    });
     let continue_button = {
         let mut fields = vec![
             ("variant", Value::string("ghost")),
@@ -235,9 +275,6 @@ fn ReplyNode(input: NodeProps) -> Element {
     };
     let placeholder = format!("Reply to {author}…");
     let aria_reply = format!("Reply to {author}");
-    let group_label = format!("Vote on reply by {author}");
-    let up = vote_button("up", "chevron-up");
-    let down = vote_button("down", "chevron-down");
     let children: Vec<(String, Value)> = replies
         .iter()
         .map(|child| (plain_text_of(field(child, "id")), child.clone()))
@@ -247,18 +284,7 @@ fn ReplyNode(input: NodeProps) -> Element {
         div { class: "flex flex-row gap-2 items-stretch min-w-0",
             div { class: "flex flex-col items-center flex-shrink-0 w-6",
                 if has_replies {
-                    div {
-                        class: "contents",
-                        onclick: move |_| {
-                            let mut current = collapsed.write();
-                            if let Some(position) = current.iter().position(|entry| *entry == toggle_id) {
-                                current.remove(position);
-                            } else {
-                                current.push(toggle_id.clone());
-                            }
-                        },
-                        {toggle_button}
-                    }
+                    {toggle_button}
                 } else {
                     div { class: "w-6 h-6", "aria-hidden": "true" }
                 }
@@ -275,20 +301,8 @@ fn ReplyNode(input: NodeProps) -> Element {
                 {typography(registry, &view, "body", &content, None, None, Some("whitespace-pre-wrap break-words"))}
                 if config.show_actions {
                     div { class: "flex flex-row gap-2 items-center",
-                        div {
-                            class: "inline-flex items-center justify-center w-fit flex-row rounded-interactive border-[length:var(--border-width)] border-border bg-surface",
-                            role: "group",
-                            "aria-label": "{group_label}",
-                            {up}
-                            span {
-                                class: "text-center font-bold tabular-nums select-none text-foreground border-x-[length:var(--border-width)] border-border h-full px-1 py-0.5 text-sm min-w-[2rem]",
-                                "aria-live": "polite",
-                                "aria-atomic": "true",
-                                "{vote_text}"
-                            }
-                            {down}
-                        }
-                        div { class: "contents", onclick: move |_| reply_open.set(!reply_open()), {reply_button} }
+                        {vote_node}
+                        {reply_button}
                         {flag_button}
                     }
                 }
@@ -303,8 +317,8 @@ fn ReplyNode(input: NodeProps) -> Element {
                             oninput: move |event| draft.set(event.value()),
                         }
                         div { class: "flex flex-row gap-2 items-center",
-                            div { class: "contents", onclick: move |_| { draft.set(String::new()); reply_open.set(false); }, {send_button} }
-                            div { class: "contents", onclick: move |_| { draft.set(String::new()); reply_open.set(false); }, {cancel_button} }
+                            {send_button}
+                            {cancel_button}
                         }
                     }
                 }

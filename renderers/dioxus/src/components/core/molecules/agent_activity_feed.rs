@@ -3,10 +3,10 @@
 
 use super::agent_activity_row::{
     accordion, activity_row, activity_row_facts, field, is_user_message, plain_text_of,
-    render_pattern, thinking_row, typography, AccordionEntry,
+    render_pattern, row_spec, thinking_row, typography, typography_spec, AccordionEntry,
 };
 use crate::registry::DioxusPatternRegistry;
-use crate::renderer::{DioxusPatternRenderer, DioxusView};
+use crate::renderer::{pattern_spec, DioxusPatternRenderer, DioxusView};
 use dioxus::prelude::*;
 use orbital_core::client::helpers::*;
 use orbital_core::Value;
@@ -109,25 +109,63 @@ impl DioxusPatternRenderer for AgentActivityFeedRenderer {
                         .prompt
                         .clone()
                         .unwrap_or_else(|| "Earlier activity".to_string());
-                    let header = rsx! {
-                        div { class: "flex items-center gap-2 min-w-0", "data-testid": "agent-earlier-conversation",
-                            {render_pattern(registry, view, "icon", vec![
-                                ("name", Value::string("message-square")),
-                                ("size", Value::string("sm")),
-                                ("color", Value::string("muted")),
-                                ("className", Value::string("shrink-0")),
-                            ])}
-                            {typography(registry, view, "body2", &label, None, None, Some("truncate"))}
-                        }
-                    };
+                    let header = pattern_spec(
+                        "box",
+                        [
+                            (
+                                "className",
+                                Value::string("flex items-center gap-2 min-w-0"),
+                            ),
+                            ("data-testid", Value::string("agent-earlier-conversation")),
+                            (
+                                "children",
+                                Value::Array(
+                                    vec![
+                                        pattern_spec(
+                                            "icon",
+                                            [
+                                                ("name", Value::string("message-square")),
+                                                ("size", Value::string("sm")),
+                                                ("color", Value::string("muted")),
+                                                ("className", Value::string("shrink-0")),
+                                            ],
+                                        ),
+                                        typography_spec(
+                                            "body2",
+                                            &label,
+                                            None,
+                                            None,
+                                            Some("truncate"),
+                                        ),
+                                    ]
+                                    .into(),
+                                ),
+                            ),
+                        ],
+                    );
                     let rows = if conversation.prompt.is_none() {
                         &conversation.activities[..]
                     } else {
                         &conversation.activities[1..]
                     };
-                    let content = rsx! {
-                        div { class: "flex flex-col gap-2 w-full", {conversation_rows(rows, registry, view)} }
-                    };
+                    let facts = activity_row_facts(rows);
+                    let content = pattern_spec(
+                        "vstack",
+                        [
+                            ("gap", Value::string("sm")),
+                            ("className", Value::string("w-full")),
+                            (
+                                "children",
+                                Value::Array(
+                                    rows.iter()
+                                        .zip(facts.iter())
+                                        .map(|(activity, fact)| row_spec(activity, *fact))
+                                        .collect::<Vec<Value>>()
+                                        .into(),
+                                ),
+                            ),
+                        ],
+                    );
                     AccordionEntry {
                         id: format!("conversation-{}-{index}", conversation.started_at),
                         header,

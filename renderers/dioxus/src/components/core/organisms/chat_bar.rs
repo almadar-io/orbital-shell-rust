@@ -3,7 +3,10 @@
 
 use crate::components::core::molecules::agent_activity_row::{field, render_pattern, typography};
 use crate::registry::{shared_root_attrs, DioxusPatternRegistry};
-use crate::renderer::{object_value, DioxusPatternRenderer, DioxusView, OwnedDioxusView};
+use crate::renderer::{
+    object_value, pattern_spec, render_with_local_sink, DioxusPatternRenderer, DioxusView,
+    OwnedDioxusView,
+};
 use dioxus::prelude::*;
 use orbital_core::client::helpers::*;
 use orbital_core::Value;
@@ -117,9 +120,7 @@ fn Bar(input: BarProps) -> Element {
             "rounded-none flex-shrink-0 h-auto",
         ),
         _ => {
-            let button = render_pattern(
-                registry,
-                &view,
+            let spec = pattern_spec(
                 "button",
                 vec![
                     ("variant", Value::string("primary")),
@@ -139,7 +140,16 @@ fn Bar(input: BarProps) -> Element {
                     ),
                 ],
             );
-            rsx! { div { class: "contents", onclick: move |_| { value.set(String::new()); requested_placeholder.set(None); }, {button} } }
+            let sent_event = send_event.clone();
+            render_with_local_sink(&view, registry, &spec, move |name, _| {
+                if name == sent_event {
+                    let mut text = value;
+                    let mut placeholder = requested_placeholder;
+                    text.set(String::new());
+                    placeholder.set(None);
+                }
+                false
+            })
         }
     };
 

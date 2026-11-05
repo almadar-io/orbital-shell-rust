@@ -1,9 +1,11 @@
 //! Native Dioxus body for the `sidebar` pattern, ported from `Sidebar.tsx`.
 
-use crate::components::core::templates::dashboard_layout::{box_class, ghost_button_class, icon_spec, slot, BUTTON_CONTENT};
+use crate::components::core::templates::dashboard_layout::{
+    box_class, ghost_button_spec, icon_spec, slot,
+};
 use crate::registry::{shared_root_attrs, DioxusPatternRegistry};
 use crate::renderer::{
-    emit_empty_event, object_value, pattern_spec, DioxusPatternRenderer, DioxusView,
+    array_value, emit_empty_event, object_value, pattern_spec, DioxusPatternRenderer, DioxusView,
     OwnedDioxusView,
 };
 use dioxus::prelude::*;
@@ -39,7 +41,7 @@ fn Sidebar(props: SidebarProps) -> Element {
     let registry = &props.registry;
     let p = &props.props;
     let controlled = p.get("collapsed").and_then(Value::as_bool);
-    let mut internal = use_signal(|| get_bool_or(p, "defaultCollapsed", false));
+    let internal = use_signal(|| get_bool_or(p, "defaultCollapsed", false));
     let collapsed = controlled.unwrap_or_else(|| internal());
     let brand_name = get_string_or(p, "brandName", "KFlow");
     let hide_collapse = get_bool_or(p, "hideCollapseButton", false);
@@ -48,7 +50,6 @@ fn Sidebar(props: SidebarProps) -> Element {
     let close_event = get_string(p, "closeEvent");
     let logo_event = get_string(p, "logoClickEvent").filter(|event| !event.is_empty());
     let sink = view.sink;
-    let navigate = view.navigate;
     let is_controlled = controlled.is_some();
 
     let class = box_class(&crate::renderer::cn(&[
@@ -116,33 +117,61 @@ fn Sidebar(props: SidebarProps) -> Element {
     let logo_label = pressable.then(|| brand_name.clone());
     let logo_click = logo_event.clone();
 
-    let chevron = registry.render_spec(
-        &icon_spec(
+    let collapse_class = format!(
+        "p-1.5 hover:bg-muted text-foreground hidden lg:block rounded-interactive{}",
+        if collapsed { " mx-auto" } else { "" }
+    );
+    let collapse_title = if collapsed {
+        "Expand sidebar"
+    } else {
+        "Collapse sidebar"
+    };
+    let toggle_button = |class: &str, children: Vec<Value>, mut extra: Vec<(&str, Value)>| {
+        extra.push(("action", Value::string("__local_toggle_collapse")));
+        let spec = ghost_button_spec(class, children, extra);
+        let event = collapse_event.clone();
+        crate::renderer::render_with_local_sink(&view, registry, &spec, move |name, _| {
+            if name != "__local_toggle_collapse" {
+                return false;
+            }
+            let next = !collapsed;
+            if !is_controlled {
+                let mut state = internal;
+                state.set(next);
+            }
+            if let (Some(sink), Some(event)) = (sink, &event) {
+                sink.call((
+                    event.clone(),
+                    object_value([("collapsed", Value::Bool(next))]),
+                ));
+            }
+            true
+        })
+    };
+    let collapse_button = toggle_button(
+        &collapse_class,
+        vec![icon_spec(
             if collapsed {
                 "chevron-right"
             } else {
                 "chevron-left"
             },
             "h-[18px] w-[18px]",
-        ),
-        None,
-        &view,
+        )],
+        vec![("title", Value::string(collapse_title))],
     );
-    let collapse_class = ghost_button_class(&format!(
-        "p-1.5 hover:bg-muted text-foreground hidden lg:block rounded-interactive{}",
-        if collapsed { " mx-auto" } else { "" }
-    ));
-    let collapse_title = if collapsed {
-        "Expand sidebar"
-    } else {
-        "Collapse sidebar"
+    let close_button = {
+        let mut extra = vec![("aria-label", Value::string("Close sidebar"))];
+        if let Some(event) = close_event.as_ref() {
+            extra.push(("action", Value::string(event.as_str())));
+        }
+        let spec = ghost_button_spec(
+            "p-1.5 hover:bg-muted text-foreground lg:hidden rounded-interactive",
+            vec![icon_spec("x", "h-[18px] w-[18px]")],
+            extra,
+        );
+        registry.render_spec(&spec, None, &view)
     };
-    let toggle_event = collapse_event.clone();
-    let toggle_event_footer = collapse_event.clone();
-    let close_icon = registry.render_spec(&icon_spec("x", "h-[18px] w-[18px]"), None, &view);
-    let close_class =
-        ghost_button_class("p-1.5 hover:bg-muted text-foreground lg:hidden rounded-interactive");
-    let close_click = close_event.clone();
 
     let items = get_array(p, "items");
     let entries: Vec<Element> = items
@@ -155,104 +184,91 @@ fn Sidebar(props: SidebarProps) -> Element {
                 .and_then(Value::as_bool)
                 .or_else(|| item.get("isActive").and_then(Value::as_bool))
                 .unwrap_or(false);
-            let item_class = ghost_button_class(&format!(
+            let item_class = format!(
                 "w-full flex items-center gap-3 px-3 py-2.5 transition-all duration-fast group relative rounded-interactive border-[length:var(--border-width-thin)] border-transparent {}",
                 if active {
                     "bg-primary text-primary-foreground font-medium shadow-elevation-interactive border-primary translate-x-1 rtl:-translate-x-1 -translate-y-0.5"
                 } else {
                     "text-foreground hover:bg-muted hover:border-border active:bg-primary active:text-primary-foreground"
                 }
-            ));
-            let icon = get_string(item, "icon").map(|name| {
-                registry.render_spec(
-                    &pattern_spec(
-                        "icon",
-                        [
-                            ("name", Value::string(name)),
-                            ("size", Value::string("sm")),
-                            (
-                                "className",
-                                Value::string(if active {
-                                    "min-w-[20px] flex-shrink-0 text-primary-foreground"
-                                } else {
-                                    "min-w-[20px] flex-shrink-0"
-                                }),
-                            ),
-                        ],
-                    ),
-                    None,
-                    &view,
-                )
-            });
-            let text = (!collapsed).then(|| {
-                registry.render_spec(
-                    &pattern_spec(
-                        "typography",
-                        [
-                            ("content", Value::string(label.as_str())),
-                            ("variant", Value::string("body")),
-                            ("color", Value::string(if active { "inherit" } else { "primary" })),
-                            ("className", Value::string("font-medium truncate flex-1 text-start")),
-                        ],
-                    ),
-                    None,
-                    &view,
-                )
-            });
-            let badge = (!collapsed).then(|| badge_text(item)).flatten().map(|text| {
-                registry.render_spec(
-                    &pattern_spec(
+            );
+            let mut children: Vec<Value> = Vec::new();
+            if let Some(name) = get_string(item, "icon") {
+                children.push(pattern_spec(
+                    "icon",
+                    [
+                        ("name", Value::string(name)),
+                        ("size", Value::string("sm")),
+                        (
+                            "className",
+                            Value::string(if active {
+                                "min-w-[20px] flex-shrink-0 text-primary-foreground"
+                            } else {
+                                "min-w-[20px] flex-shrink-0"
+                            }),
+                        ),
+                    ],
+                ));
+            }
+            if !collapsed {
+                children.push(pattern_spec(
+                    "typography",
+                    [
+                        ("content", Value::string(label.as_str())),
+                        ("variant", Value::string("body")),
+                        ("color", Value::string(if active { "inherit" } else { "primary" })),
+                        ("className", Value::string("font-medium truncate flex-1 text-start")),
+                    ],
+                ));
+                if let Some(text) = badge_text(item) {
+                    children.push(pattern_spec(
                         "badge",
                         [
                             ("label", Value::string(text)),
                             ("variant", Value::string("danger")),
                             ("size", Value::string("sm")),
                         ],
-                    ),
-                    None,
-                    &view,
-                )
-            });
-            let tooltip = collapsed.then(|| {
-                box_class("absolute start-full ms-2 px-2 py-1 text-xs opacity-0 group-hover:opacity-100 pointer-events-none whitespace-nowrap z-50 transition-opacity bg-primary text-primary-foreground border-[length:var(--border-width-thin)] border-border rounded-interactive")
-            });
-            let title = collapsed.then(|| label.clone());
-            let on_click = get_string(item, "onClick");
-            let body = rsx! {
-                span { class: "{BUTTON_CONTENT}",
-                    if let Some(icon) = icon { span { class: "flex-shrink-0", {icon} } }
-                    if let Some(text) = text { {text} }
-                    if let Some(badge) = badge { {badge} }
-                    if let Some(tooltip) = tooltip { div { class: "{tooltip}", "{label}" } }
+                    ));
                 }
-            };
-            match href {
-                Some(href) => {
-                    let target = href.clone();
-                    rsx! {
-                        a { class: "{item_class}", href: "{href}", title: title.as_deref(),
-                            "aria-current": active.then_some("page"),
-                            onclick: move |event| {
-                                emit_empty_event(sink, on_click.as_deref());
-                                if let Some(navigate) = navigate {
-                                    if target.starts_with('/') || target.starts_with('#') {
-                                        event.prevent_default();
-                                        navigate.call(target.clone());
-                                    }
-                                }
-                            },
-                            {body}
-                        }
-                    }
-                }
-                None => rsx! {
-                    button { class: "{item_class}", r#type: "button", title: title.as_deref(),
-                        "aria-current": active.then_some("page"),
-                        onclick: move |_| emit_empty_event(sink, on_click.as_deref()),
-                        {body}
-                    }
-                },
+            } else {
+                children.push(pattern_spec(
+                    "box",
+                    [
+                        (
+                            "className",
+                            Value::string("absolute start-full ms-2 px-2 py-1 text-xs opacity-0 group-hover:opacity-100 pointer-events-none whitespace-nowrap z-50 transition-opacity bg-primary text-primary-foreground border-[length:var(--border-width-thin)] border-border rounded-interactive"),
+                        ),
+                        (
+                            "children",
+                            array_value(vec![pattern_spec(
+                                "typography",
+                                [
+                                    ("content", Value::string(label.as_str())),
+                                    ("variant", Value::string("body")),
+                                    ("color", Value::string("inherit")),
+                                    ("as", Value::string("span")),
+                                    ("className", Value::string("text-xs")),
+                                ],
+                            )]),
+                        ),
+                    ],
+                ));
             }
+            let mut extra: Vec<(&str, Value)> = Vec::new();
+            if collapsed {
+                extra.push(("title", Value::string(label.as_str())));
+            }
+            if active {
+                extra.push(("aria-current", Value::string("page")));
+            }
+            if let Some(href) = href {
+                extra.push(("href", Value::string(href.as_str())));
+            }
+            if let Some(event) = get_string(item, "onClick") {
+                extra.push(("action", Value::string(event.as_str())));
+            }
+            let spec = ghost_button_spec(&item_class, children, extra);
+            registry.render_spec(&spec, None, &view)
         })
         .collect();
 
@@ -267,11 +283,13 @@ fn Sidebar(props: SidebarProps) -> Element {
             "justify-between px-2"
         },
     ]));
-    let footer_chevron = (collapsed && !hide_collapse)
-        .then(|| registry.render_spec(&icon_spec("chevron-right", "h-5 w-5"), None, &view));
-    let footer_toggle_class = ghost_button_class(
-        "w-full flex justify-center p-2 mt-2 text-muted-foreground hover:text-foreground lg:hidden",
-    );
+    let footer_toggle = (collapsed && !hide_collapse).then(|| {
+        toggle_button(
+            "w-full flex justify-center p-2 mt-2 text-muted-foreground hover:text-foreground lg:hidden",
+            vec![icon_spec("chevron-right", "h-5 w-5")],
+            Vec::new(),
+        )
+    });
 
     rsx! {
         aside { class: "{class}", ..shared_root_attrs(p),
@@ -284,26 +302,8 @@ fn Sidebar(props: SidebarProps) -> Element {
                     {logo_el}
                     if let Some(name_el) = name_el { {name_el} }
                 }
-                if !hide_collapse {
-                    button { class: "{collapse_class}", r#type: "button", title: "{collapse_title}",
-                        onclick: move |_| {
-                            let next = !collapsed;
-                            if !is_controlled {
-                                internal.set(next);
-                            }
-                            if let (Some(sink), Some(event)) = (sink, &toggle_event) {
-                                sink.call((event.clone(), object_value([("collapsed", Value::Bool(next))])));
-                            }
-                        },
-                        span { class: "{BUTTON_CONTENT}", {chevron} }
-                    }
-                }
-                if show_close {
-                    button { class: "{close_class}", r#type: "button", "aria-label": "Close sidebar",
-                        onclick: move |_| emit_empty_event(sink, close_click.as_deref()),
-                        span { class: "{BUTTON_CONTENT}", {close_icon} }
-                    }
-                }
+                if !hide_collapse { {collapse_button} }
+                if show_close { {close_button} }
             }
             nav { class: box_class("flex-1 py-6 px-3 space-y-1 overflow-y-auto"),
                 for entry in entries { {entry} }
@@ -314,20 +314,7 @@ fn Sidebar(props: SidebarProps) -> Element {
                         if let Some(content) = footer_content { div { class: box_class("flex items-center"), {content} } }
                         if let Some(section) = user_section { div { class: box_class("flex items-center"), {section} } }
                     }
-                    if let Some(chevron) = footer_chevron {
-                        button { class: "{footer_toggle_class}", r#type: "button",
-                            onclick: move |_| {
-                                let next = !collapsed;
-                                if !is_controlled {
-                                    internal.set(next);
-                                }
-                                if let (Some(sink), Some(event)) = (sink, &toggle_event_footer) {
-                                    sink.call((event.clone(), object_value([("collapsed", Value::Bool(next))])));
-                                }
-                            },
-                            span { class: "{BUTTON_CONTENT}", {chevron} }
-                        }
-                    }
+                    if let Some(footer_toggle) = footer_toggle { {footer_toggle} }
                 }
             }
         }

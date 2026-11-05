@@ -6,7 +6,9 @@ use super::agent_activity_row::{
     typography, RowFacts,
 };
 use crate::registry::DioxusPatternRegistry;
-use crate::renderer::{DioxusPatternRenderer, DioxusView, OwnedDioxusView};
+use crate::renderer::{
+    pattern_spec, render_with_local_sink, DioxusPatternRenderer, DioxusView, OwnedDioxusView,
+};
 use dioxus::prelude::*;
 use orbital_core::client::helpers::*;
 use orbital_core::Value;
@@ -151,27 +153,52 @@ struct TurnStepsProps {
     tool_steps: usize,
     has_raw: bool,
     switch_id: String,
-    toggle_closed: Element,
-    toggle_open: Element,
+    label: String,
+    view: OwnedDioxusView,
+    registry: DioxusPatternRegistry,
     switch_label: Element,
     body: Element,
 }
 
 #[allow(non_snake_case)]
 fn TurnSteps(input: TurnStepsProps) -> Element {
-    let mut open = use_signal(|| false);
+    let open = use_signal(|| false);
     let mut show_raw = input.show_raw;
     let is_open = open();
     let checked = show_raw();
+    let view = input.view.as_view();
+    let toggle_spec = pattern_spec(
+        "button",
+        [
+            ("variant", Value::string("ghost")),
+            ("size", Value::string("sm")),
+            (
+                "leftIcon",
+                Value::string(if is_open {
+                    "chevron-down"
+                } else {
+                    "chevron-right"
+                }),
+            ),
+            ("label", Value::string(input.label.as_str())),
+            ("className", Value::string("self-start")),
+            ("data-testid", Value::string("agent-chat-steps-toggle")),
+            ("aria-expanded", Value::Bool(is_open)),
+            ("action", Value::string("__local_toggle_steps")),
+        ],
+    );
+    let toggle = render_with_local_sink(&view, &input.registry, &toggle_spec, move |event, _| {
+        if event != "__local_toggle_steps" {
+            return false;
+        }
+        let mut state = open;
+        let next = !state();
+        state.set(next);
+        true
+    });
     rsx! {
         div { class: "flex flex-col gap-1 items-stretch justify-start self-start w-full max-w-[90%]", "data-testid": "agent-chat-steps",
-            div {
-                class: "contents",
-                "data-testid": "agent-chat-steps-toggle",
-                "aria-expanded": "{is_open}",
-                onclick: move |_| open.set(!open()),
-                if is_open { {input.toggle_open.clone()} } else { {input.toggle_closed.clone()} }
-            }
+            {toggle}
             if is_open {
                 div { class: "flex flex-col gap-1 items-stretch justify-start w-full border-s-[length:var(--border-width)] border-[var(--color-border)] ps-3",
                     if input.has_raw {
@@ -250,21 +277,15 @@ fn ChatFeed(input: ChatFeedProps) -> Element {
                                 rsx! {}
                             } else {
                                 let label = format!("Worked through {tool_steps} steps");
-                                let toggle = |icon: &str| render_pattern(registry, &view, "button", vec![
-                                    ("variant", Value::string("ghost")),
-                                    ("size", Value::string("sm")),
-                                    ("leftIcon", Value::string(icon)),
-                                    ("label", Value::string(label.as_str())),
-                                    ("className", Value::string("self-start")),
-                                ]);
                                 rsx! {
                                     TurnSteps {
                                         show_raw: show_raw,
                                         tool_steps: tool_steps,
                                         has_raw: has_raw,
                                         switch_id: format!("{id_prefix}-show-raw-llm-{index}"),
-                                        toggle_closed: toggle("chevron-right"),
-                                        toggle_open: toggle("chevron-down"),
+                                        label: label.clone(),
+                                        view: input.view.clone(),
+                                        registry: input.registry.clone(),
                                         switch_label: rsx! { "Raw LLM" },
                                         body: step_rows(&visible, registry, &view),
                                     }

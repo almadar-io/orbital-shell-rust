@@ -1,7 +1,7 @@
 //! Native Dioxus renderer for the shared pattern contract.
 
+use crate::registry::DioxusPatternRegistry;
 use crate::renderer::merge_class_name;
-use crate::registry::{shared_root_attrs, DioxusPatternRegistry};
 use crate::renderer::{DioxusPatternRenderer, DioxusView};
 use crate::styles::style_with_props;
 use dioxus::prelude::*;
@@ -224,7 +224,7 @@ impl DioxusPatternRenderer for BoxRenderer {
             onclick: move |_| { if let (Some(action), Some(sink)) = (&action, sink) { sink.call((action.clone(), action_payload.clone())); } },
             onmouseenter: move |_| { if let (Some(event), Some(sink)) = (&hover_event, sink) { let mut payload = orbital_core::ValueMap::new(); payload.insert("hovered".into(), Value::Bool(true)); sink.call((event.clone(), Value::Object(payload.into()))); } },
             onmouseleave: move |_| { if let (Some(event), Some(sink)) = (&hover_out, sink) { let mut payload = orbital_core::ValueMap::new(); payload.insert("hovered".into(), Value::Bool(false)); sink.call((event.clone(), Value::Object(payload.into()))); } },
-            ..shared_root_attrs(props),
+            ..crate::renderer::passthrough_attrs(props, &[]),
             if texture { span { class: "band-texture", "data-band-layer": "", aria_hidden: "true" } }
             if let Some(edge_class) = top_edge_class { span { class: "{edge_class}", "data-band-layer": "", aria_hidden: "true" } }
             if let Some(edge_class) = bottom_edge_class { span { class: "{edge_class}", "data-band-layer": "", aria_hidden: "true" } }

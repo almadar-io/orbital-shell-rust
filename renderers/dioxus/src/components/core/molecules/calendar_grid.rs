@@ -1,7 +1,7 @@
 //! Native Dioxus body for the `calendar-grid` pattern, ported from web `CalendarGrid.tsx`.
 
-use crate::renderer::merge_class_name;
 use crate::registry::DioxusPatternRegistry;
+use crate::renderer::merge_class_name;
 use crate::renderer::{
     object_value, pattern_spec, DioxusPatternRenderer, DioxusView, OwnedDioxusView,
 };
@@ -201,7 +201,7 @@ fn CalendarGridView(input: GridProps) -> Element {
     let view = input.view.as_view();
     let props = &input.props;
     let registry = &input.registry;
-    let mut offset = use_signal(|| 0usize);
+    let offset = use_signal(|| 0usize);
 
     let events = get_array(props, "events");
     let title_field = get_string_or(props, "titleField", "title");
@@ -438,6 +438,7 @@ fn CalendarGridView(input: GridProps) -> Element {
                 ("icon", Value::string("chevron-left")),
                 ("aria-label", Value::string("Previous days")),
                 ("label", Value::string("Previous")),
+                ("action", Value::string("__local_prev")),
             ],
             vec![],
         );
@@ -449,6 +450,7 @@ fn CalendarGridView(input: GridProps) -> Element {
                 ("iconRight", Value::string("chevron-right")),
                 ("aria-label", Value::string("Next days")),
                 ("label", Value::string("Next")),
+                ("action", Value::string("__local_next")),
             ],
             vec![],
         );
@@ -467,30 +469,34 @@ fn CalendarGridView(input: GridProps) -> Element {
             ],
             vec![],
         );
-        let prev_el = registry.render_spec(&prev, None, &view);
+        let prev_el =
+            crate::renderer::render_with_local_sink(&view, registry, &prev, move |name, _| {
+                if name != "__local_prev" {
+                    return false;
+                }
+                if can_prev {
+                    let mut state = offset;
+                    state.set(clamped.saturating_sub(visible_count));
+                }
+                true
+            });
         let range_el = registry.render_spec(&range, None, &view);
-        let next_el = registry.render_spec(&next, None, &view);
+        let next_el =
+            crate::renderer::render_with_local_sink(&view, registry, &next, move |name, _| {
+                if name != "__local_next" {
+                    return false;
+                }
+                if can_next {
+                    let mut state = offset;
+                    state.set((clamped + visible_count).min(7 - visible_count));
+                }
+                true
+            });
         rsx! {
             div { class: "flex flex-row gap-4 items-center justify-between mb-2 px-2",
-                div {
-                    class: "contents",
-                    onclick: move |_| {
-                        if can_prev {
-                            offset.set(clamped.saturating_sub(visible_count));
-                        }
-                    },
-                    {prev_el}
-                }
+                {prev_el}
                 {range_el}
-                div {
-                    class: "contents",
-                    onclick: move |_| {
-                        if can_next {
-                            offset.set((clamped + visible_count).min(7 - visible_count));
-                        }
-                    },
-                    {next_el}
-                }
+                {next_el}
             }
         }
     });

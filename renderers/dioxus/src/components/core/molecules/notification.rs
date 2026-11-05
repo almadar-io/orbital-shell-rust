@@ -1,10 +1,10 @@
-use crate::renderer::merge_class_name;
 use crate::registry::{shared_root_attrs, DioxusPatternRegistry};
+use crate::renderer::merge_class_name;
 use crate::renderer::{
     object_value, pattern_spec, DioxusPatternRenderer, DioxusView, OwnedDioxusView,
 };
 use dioxus::prelude::*;
-use orbital_core::client::helpers::{get_bool_or, get_string, get_string_or, };
+use orbital_core::client::helpers::{get_bool_or, get_string, get_string_or};
 use orbital_core::Value;
 
 /// Dioxus renderer for the `notification` pattern (web `Toast`).
@@ -33,7 +33,7 @@ fn Toast(input: ToastProps) -> Element {
         .as_object()
         .and_then(|fields| fields.get("badge"))
         .cloned();
-    let mut leaving = use_signal(|| false);
+    let leaving = use_signal(|| false);
 
     let (variant_class, icon_name, icon_color) = match variant.as_str() {
         "success" => (
@@ -102,14 +102,15 @@ fn Toast(input: ToastProps) -> Element {
     );
     let action_spec = action_label
         .as_ref()
-        .filter(|_| action_event.is_some())
-        .map(|label| {
+        .zip(action_event.as_ref())
+        .map(|(label, event)| {
             pattern_spec(
                 "button",
                 [
                     ("variant", Value::string("ghost")),
                     ("size", Value::string("sm")),
                     ("label", Value::String(label.clone().into())),
+                    ("action", Value::String(event.clone().into())),
                 ],
             )
         });
@@ -132,11 +133,26 @@ fn Toast(input: ToastProps) -> Element {
             ("label", Value::string("")),
             ("aria-label", Value::string("Dismiss toast")),
             ("className", Value::string("flex-shrink-0")),
+            ("action", Value::string("__local_dismiss")),
         ],
     );
     let sink = view.sink;
-    let action_sink = sink;
-    let action_event_name = action_event.clone();
+    let dismiss_node = dismissible.then(|| {
+        crate::renderer::render_with_local_sink(&view, registry, &dismiss_spec, move |name, _| {
+            if name != "__local_dismiss" {
+                return false;
+            }
+            let mut state = leaving;
+            if state() {
+                return true;
+            }
+            state.set(true);
+            if let (Some(sink), Some(event)) = (sink, &dismiss_event) {
+                sink.call((event.clone(), object_value::<&str>([])));
+            }
+            true
+        })
+    });
 
     rsx! {
         div { class: "{class}", role: "{role}", ..attrs,
@@ -147,31 +163,13 @@ fn Toast(input: ToastProps) -> Element {
                     {registry.render_spec(&message_spec, None, &view)}
                     if let Some(spec) = action_spec.as_ref() {
                         div { class: "mt-3",
-                            div { style: "display:contents",
-                                onclick: move |_| {
-                                    if let (Some(sink), Some(event)) = (action_sink, &action_event_name) {
-                                        sink.call((event.clone(), object_value::<&str>([])));
-                                    }
-                                },
-                                {registry.render_spec(spec, None, &view)}
-                            }
+                            {registry.render_spec(spec, None, &view)}
                         }
                     }
                 }
                 div { class: "flex items-start gap-2 flex-shrink-0",
                     if let Some(spec) = badge_spec.as_ref() { {registry.render_spec(spec, None, &view)} }
-                    if dismissible {
-                        div { style: "display:contents",
-                            onclick: move |_| {
-                                if leaving() { return; }
-                                leaving.set(true);
-                                if let (Some(sink), Some(event)) = (sink, &dismiss_event) {
-                                    sink.call((event.clone(), object_value::<&str>([])));
-                                }
-                            },
-                            {registry.render_spec(&dismiss_spec, None, &view)}
-                        }
-                    }
+                    if let Some(node) = dismiss_node { {node} }
                 }
             }
         }

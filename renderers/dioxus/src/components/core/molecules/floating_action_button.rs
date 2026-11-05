@@ -1,10 +1,10 @@
-use crate::renderer::merge_class_name;
 use crate::registry::DioxusPatternRegistry;
+use crate::renderer::merge_class_name;
 use crate::renderer::{
     object_value, pattern_spec, DioxusPatternRenderer, DioxusView, OwnedDioxusView,
 };
 use dioxus::prelude::*;
-use orbital_core::client::helpers::{get_string, get_string_or, };
+use orbital_core::client::helpers::{get_string, get_string_or};
 use orbital_core::Value;
 
 /// Dioxus renderer for the `floating-action-button` pattern.
@@ -29,21 +29,26 @@ fn position_class(position: &str) -> &'static str {
     }
 }
 
-fn fab_button(variant: &str, icon: Value, aria_label: &str, extra: &str) -> Value {
-    pattern_spec(
-        "button",
-        [
-            ("variant", Value::string(variant)),
-            ("size", Value::string("lg")),
-            ("icon", icon),
-            ("label", Value::string("")),
-            (
-                "className",
-                Value::String(format!("rounded-full shadow-elevation-popover{extra}").into()),
-            ),
-            ("aria-label", Value::string(aria_label)),
-        ],
-    )
+fn fab_button(
+    variant: &str,
+    icon: Value,
+    aria_label: &str,
+    extra: &str,
+    more: Vec<(&str, Value)>,
+) -> Value {
+    let mut fields = vec![
+        ("variant", Value::string(variant)),
+        ("size", Value::string("lg")),
+        ("icon", icon),
+        ("label", Value::string("")),
+        (
+            "className",
+            Value::String(format!("rounded-full shadow-elevation-popover{extra}").into()),
+        ),
+        ("aria-label", Value::string(aria_label)),
+    ];
+    fields.extend(more);
+    pattern_spec("button", fields)
 }
 
 #[allow(non_snake_case)]
@@ -59,7 +64,7 @@ fn Fab(input: FabProps) -> Element {
         .and_then(Value::as_array)
         .map(|items| items.iter().cloned().collect())
         .unwrap_or_default();
-    let mut expanded = use_signal(|| false);
+    let expanded = use_signal(|| false);
     let left = position.contains("left");
     let pos = position_class(&position);
 
@@ -120,12 +125,34 @@ fn Fab(input: FabProps) -> Element {
         Value::string(if is_expanded { "x" } else { "plus" }),
         &main_aria,
         " transition-all duration-normal",
+        vec![
+            ("aria-expanded", Value::Bool(is_expanded)),
+            ("action", Value::string("__local_fab_main")),
+        ],
     );
     let single_event = (actions.len() == 1)
         .then(|| get_string(&actions[0], "event"))
         .flatten();
     let single_id = get_string_or(&actions[0], "id", "");
     let multiple = actions.len() > 1;
+    let main_expanded = expanded;
+    let main_node =
+        crate::renderer::render_with_local_sink(&view, registry, &main, move |name, _| {
+            if name != "__local_fab_main" {
+                return false;
+            }
+            if multiple {
+                let mut state = main_expanded;
+                let next = !state();
+                state.set(next);
+            } else if let (Some(sink), Some(event)) = (sink, &single_event) {
+                sink.call((
+                    event.clone(),
+                    object_value([("actionId", Value::String(single_id.clone().into()))]),
+                ));
+            }
+            true
+        });
     let label_class = "text-foreground bg-card px-2 py-1 rounded-interactive shadow-elevation-card whitespace-nowrap";
     let list_align = if left { "items-start" } else { "items-end" };
 
@@ -143,7 +170,21 @@ fn Fab(input: FabProps) -> Element {
                                 action.get("icon").cloned().unwrap_or(Value::Null),
                                 &label,
                                 "",
+                                vec![("action", Value::string("__local_fab_action"))],
                             );
+                            let item_expanded = expanded;
+                            let item_id = id.clone();
+                            let button_node = crate::renderer::render_with_local_sink(&view, registry, &button, move |name, _| {
+                                if name != "__local_fab_action" {
+                                    return false;
+                                }
+                                let mut state = item_expanded;
+                                state.set(false);
+                                if let (Some(sink), Some(event)) = (sink, &event) {
+                                    sink.call((event.clone(), object_value([("actionId", Value::String(item_id.clone().into()))])));
+                                }
+                                true
+                            });
                             let label_spec = pattern_spec("typography", [
                                 ("variant", Value::string("small")),
                                 ("className", Value::string(label_class)),
@@ -155,15 +196,7 @@ fn Fab(input: FabProps) -> Element {
                                     class: "flex flex-row gap-2 items-center transition-all duration-fast",
                                     style: "opacity:1;transform:translateY(0);transition-delay:{index * 50}ms",
                                     if !left { {registry.render_spec(&label_spec, None, &view)} }
-                                    div { style: "display:contents",
-                                        onclick: move |_| {
-                                            expanded.set(false);
-                                            if let (Some(sink), Some(event)) = (sink, &event) {
-                                                sink.call((event.clone(), object_value([("actionId", Value::String(id.clone().into()))])));
-                                            }
-                                        },
-                                        {registry.render_spec(&button, None, &view)}
-                                    }
+                                    {button_node}
                                     if left { {registry.render_spec(&label_spec, None, &view)} }
                                 }
                             }
@@ -171,17 +204,7 @@ fn Fab(input: FabProps) -> Element {
                     }
                 }
             }
-            div { style: "display:contents",
-                "aria-expanded": "{is_expanded}",
-                onclick: move |_| {
-                    if multiple {
-                        expanded.set(!expanded());
-                    } else if let (Some(sink), Some(event)) = (sink, &single_event) {
-                        sink.call((event.clone(), object_value([("actionId", Value::String(single_id.clone().into()))])));
-                    }
-                },
-                {registry.render_spec(&main, None, &view)}
-            }
+            {main_node}
         }
     }
 }

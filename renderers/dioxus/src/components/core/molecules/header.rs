@@ -1,6 +1,8 @@
 //! Native Dioxus body for the `header` pattern, ported from `Header.tsx`.
 
-use crate::components::core::templates::dashboard_layout::{box_class, ghost_button_class, slot, stack_class, truthy, BUTTON_CONTENT};
+use crate::components::core::templates::dashboard_layout::{
+    box_class, ghost_button_spec, slot, stack_class, truthy,
+};
 use crate::registry::{shared_root_attrs, DioxusPatternRegistry};
 use crate::renderer::{emit_empty_event, pattern_spec, DioxusPatternRenderer, DioxusView};
 use dioxus::prelude::*;
@@ -64,7 +66,6 @@ impl DioxusPatternRenderer for HeaderRenderer {
         let on_logo_click = get_string(props, "onLogoClick").filter(|event| !event.is_empty());
         let brand_href = get_string(props, "brandHref").filter(|href| !href.is_empty());
         let sink = view.sink;
-        let navigate = view.navigate;
 
         let class = box_class(&crate::renderer::cn(&[
             "h-16 border-b border-border flex items-center px-4 justify-between bg-card",
@@ -74,82 +75,64 @@ impl DioxusPatternRenderer for HeaderRenderer {
             &get_string_or(props, "className", ""),
         ]));
 
-        let logo_el = match slot(props, "logo") {
-            Some(Value::String(src)) => {
-                Some(registry.render_spec(&logo_image(src, &brand_name), None, view))
-            }
-            Some(node) => Some(view.render_node(registry, node)),
+        let logo_node: Option<Value> = match slot(props, "logo") {
+            Some(Value::String(src)) => Some(logo_image(src, &brand_name)),
+            Some(node) => Some(node.clone()),
             None => get_string(props, "logoSrc")
                 .filter(|src| !src.is_empty())
-                .map(|src| registry.render_spec(&logo_image(&src, &brand_name), None, view)),
+                .map(|src| logo_image(&src, &brand_name)),
         };
-        let name_el = (!brand_name.is_empty()).then(|| {
-            registry.render_spec(
-                &pattern_spec(
-                    "typography",
-                    [
-                        ("content", Value::string(brand_name.as_str())),
-                        ("variant", Value::string("h5")),
-                        ("className", Value::string("text-lg text-foreground")),
-                    ],
-                ),
-                None,
-                view,
+        let name_node: Option<Value> = (!brand_name.is_empty()).then(|| {
+            pattern_spec(
+                "typography",
+                [
+                    ("content", Value::string(brand_name.as_str())),
+                    ("variant", Value::string("h5")),
+                    ("className", Value::string("text-lg text-foreground")),
+                ],
             )
         });
-        let brand_content = rsx! {
-            if let Some(logo_el) = logo_el { {logo_el} }
-            if let Some(name_el) = name_el { {name_el} }
-        };
+        let brand_nodes: Vec<Value> = logo_node.into_iter().chain(name_node).collect();
 
         let left_class = stack_class(true, "gap-0", "items-center", "justify-start", "gap-3");
         let toggle = show_menu_toggle.then(|| {
-            let icon = registry.render_spec(
-                &pattern_spec(
-                    "icon",
-                    [
-                        (
-                            "name",
-                            Value::string(if is_menu_open { "x" } else { "menu" }),
-                        ),
-                        ("size", Value::string("lg")),
-                    ],
-                ),
-                None,
-                view,
+            let icon_spec = pattern_spec(
+                "icon",
+                [
+                    (
+                        "name",
+                        Value::string(if is_menu_open { "x" } else { "menu" }),
+                    ),
+                    ("size", Value::string("lg")),
+                ],
             );
-            let toggle_class =
-                ghost_button_class("p-2 -ml-2 text-foreground hover:bg-muted transition-colors");
             let label = if is_menu_open {
                 "Close menu"
             } else {
                 "Open menu"
             };
-            let event = on_menu_toggle.clone();
-            rsx! {
-                button { class: "{toggle_class}", r#type: "button", "aria-label": "{label}",
-                    onclick: move |_| emit_empty_event(sink, event.as_deref()),
-                    span { class: "{BUTTON_CONTENT}", {icon} }
-                }
+            let mut extra = vec![("aria-label", Value::string(label))];
+            if let Some(event) = on_menu_toggle.as_ref() {
+                extra.push(("action", Value::string(event.as_str())));
             }
+            let spec = ghost_button_spec(
+                "p-2 -ml-2 text-foreground hover:bg-muted transition-colors",
+                vec![icon_spec],
+                extra,
+            );
+            registry.render_spec(&spec, None, view)
         });
 
         let brand = if let Some(href) = brand_href {
-            let brand_class = ghost_button_class("gap-2 px-0 hover:bg-transparent");
-            let target = href.clone();
-            rsx! {
-                a { class: "{brand_class}", href: "{href}", "aria-label": "{brand_name}",
-                    onclick: move |event| {
-                        if let Some(navigate) = navigate {
-                            if target.starts_with('/') || target.starts_with('#') {
-                                event.prevent_default();
-                                navigate.call(target.clone());
-                            }
-                        }
-                    },
-                    span { class: "{BUTTON_CONTENT}", {brand_content} }
-                }
-            }
+            let spec = ghost_button_spec(
+                "gap-2 px-0 hover:bg-transparent",
+                brand_nodes.clone(),
+                vec![
+                    ("href", Value::string(href.as_str())),
+                    ("aria-label", Value::string(brand_name.as_str())),
+                ],
+            );
+            registry.render_spec(&spec, None, view)
         } else {
             let brand_class = stack_class(
                 true,
@@ -165,6 +148,9 @@ impl DioxusPatternRenderer for HeaderRenderer {
             let pressable = on_logo_click.is_some();
             let label = on_logo_click.is_some().then(|| brand_name.clone());
             let event = on_logo_click.clone();
+            let brand_content = rsx! {
+                for node in brand_nodes.iter() { {view.render_node(registry, node)} }
+            };
             rsx! {
                 div { class: "{brand_class}",
                     role: pressable.then_some("button"),
@@ -215,10 +201,10 @@ impl DioxusPatternRenderer for HeaderRenderer {
         let user_name = get_string(props, "userName").filter(|name| !name.is_empty());
         let user_button = (avatar.is_some() || user_name.is_some()).then(|| {
             let clickable = on_user_click.is_some();
-            let button_class = ghost_button_class(&format!(
+            let button_class = format!(
                 "w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold text-xs hover:ring-2 hover:ring-ring transition-all{}",
                 if clickable { " cursor-pointer" } else { "" }
-            ));
+            );
             let src = avatar
                 .and_then(|a| get_string(a, "src"))
                 .filter(|src| !src.is_empty());
@@ -232,34 +218,33 @@ impl DioxusPatternRenderer for HeaderRenderer {
                         .map(|c| c.to_uppercase().to_string())
                 })
                 .unwrap_or_else(|| "U".to_string());
-            let visual = src.map(|src| {
-                let alt = avatar
-                    .and_then(|a| get_string(a, "alt"))
-                    .filter(|alt| !alt.is_empty())
-                    .or_else(|| user_name.clone())
-                    .unwrap_or_default();
-                registry.render_spec(
-                    &pattern_spec(
+            let mut extra: Vec<(&str, Value)> = Vec::new();
+            if let Some(event) = on_user_click.as_ref() {
+                extra.push(("action", Value::string(event.as_str())));
+            }
+            let children = match src {
+                Some(src) => {
+                    let alt = avatar
+                        .and_then(|a| get_string(a, "alt"))
+                        .filter(|alt| !alt.is_empty())
+                        .or_else(|| user_name.clone())
+                        .unwrap_or_default();
+                    vec![pattern_spec(
                         "avatar",
                         [
                             ("src", Value::string(src)),
                             ("alt", Value::string(alt)),
                             ("size", Value::string("sm")),
                         ],
-                    ),
-                    None,
-                    view,
-                )
-            });
-            let event = on_user_click.clone();
-            rsx! {
-                button { class: "{button_class}", r#type: "button",
-                    onclick: move |_| emit_empty_event(sink, event.as_deref()),
-                    span { class: "{BUTTON_CONTENT}",
-                        if let Some(visual) = visual { {visual} } else { "{initials}" }
-                    }
+                    )]
                 }
-            }
+                None => {
+                    extra.push(("label", Value::string(initials.as_str())));
+                    Vec::new()
+                }
+            };
+            let spec = ghost_button_spec(&button_class, children, extra);
+            registry.render_spec(&spec, None, view)
         });
 
         rsx! {

@@ -2,7 +2,7 @@
 //! Text is the web's default-locale (en) catalog; the host has no translation catalog.
 
 use crate::registry::DioxusPatternRegistry;
-use crate::renderer::{pattern_spec, plain_text, DioxusPatternRenderer, DioxusView};
+use crate::renderer::{object_value, pattern_spec, plain_text, DioxusPatternRenderer, DioxusView};
 use dioxus::prelude::*;
 use orbital_core::client::helpers::*;
 use orbital_core::Value;
@@ -41,15 +41,13 @@ pub(crate) fn render_pattern(
     registry.render_spec(&pattern_spec(name, fields), None, view)
 }
 
-pub(crate) fn typography(
-    registry: &DioxusPatternRegistry,
-    view: &DioxusView<'_>,
+pub(crate) fn typography_spec(
     variant: &str,
     text: &str,
     color: Option<&str>,
     weight: Option<&str>,
     class: Option<&str>,
-) -> Element {
+) -> Value {
     let mut fields = vec![
         ("variant", Value::string(variant)),
         ("content", Value::string(text)),
@@ -63,7 +61,40 @@ pub(crate) fn typography(
     if let Some(class) = class {
         fields.push(("className", Value::string(class)));
     }
-    render_pattern(registry, view, "typography", fields)
+    pattern_spec("typography", fields)
+}
+
+pub(crate) fn typography(
+    registry: &DioxusPatternRegistry,
+    view: &DioxusView<'_>,
+    variant: &str,
+    text: &str,
+    color: Option<&str>,
+    weight: Option<&str>,
+    class: Option<&str>,
+) -> Element {
+    registry.render_spec(
+        &typography_spec(variant, text, color, weight, class),
+        None,
+        view,
+    )
+}
+
+/// An `agent-activity-row` spec for `activity` with the list facts it was derived with.
+pub(crate) fn row_spec(activity: &Value, facts: RowFacts) -> Value {
+    pattern_spec(
+        "agent-activity-row",
+        [
+            ("activity", activity.clone()),
+            (
+                "facts",
+                object_value([
+                    ("settled", Value::Bool(facts.settled)),
+                    ("readyCount", Value::Number(facts.ready_count as f64)),
+                ]),
+            ),
+        ],
+    )
 }
 
 pub(crate) fn activity_row_facts(items: &[Value]) -> Vec<RowFacts> {
@@ -327,70 +358,10 @@ fn describe(activity: &Value, facts: RowFacts) -> Option<RowSpec> {
     })
 }
 
-#[derive(Clone, PartialEq)]
 pub(crate) struct AccordionEntry {
     pub id: String,
-    pub header: Element,
-    pub content: Element,
-}
-
-#[derive(Props, Clone, PartialEq)]
-pub(crate) struct AccordionBoxProps {
-    items: Vec<AccordionEntry>,
-    multiple: bool,
-    chevron: Element,
-    chevron_open: Element,
-}
-
-#[allow(non_snake_case)]
-pub(crate) fn AccordionBox(input: AccordionBoxProps) -> Element {
-    let mut open = use_signal(Vec::<String>::new);
-    let multiple = input.multiple;
-    rsx! {
-        div { class: "w-full divide-y divide-border",
-            for item in input.items.iter() {
-                {
-                    let id = item.id.clone();
-                    let is_open = open.read().contains(&id);
-                    let button_class = if is_open {
-                        "w-full flex items-center justify-between px-4 py-3 hover:bg-muted transition-colors duration-fast focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset disabled:opacity-50 disabled:cursor-not-allowed bg-muted font-bold"
-                    } else {
-                        "w-full flex items-center justify-between px-4 py-3 hover:bg-muted transition-colors duration-fast focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset disabled:opacity-50 disabled:cursor-not-allowed"
-                    };
-                    let content_id = format!("accordion-content-{id}");
-                    let toggle_id = id.clone();
-                    rsx! {
-                        div { key: "{id}",
-                            div { class: "overflow-hidden",
-                                button {
-                                    r#type: "button",
-                                    class: "{button_class}",
-                                    "aria-expanded": "{is_open}",
-                                    "aria-controls": "{content_id}",
-                                    onclick: move |_| {
-                                        let mut current = open.write();
-                                        if let Some(position) = current.iter().position(|entry| *entry == toggle_id) {
-                                            current.remove(position);
-                                        } else {
-                                            if !multiple {
-                                                current.clear();
-                                            }
-                                            current.push(toggle_id.clone());
-                                        }
-                                    },
-                                    div { class: "flex-1 text-left", {item.header.clone()} }
-                                    if is_open { {input.chevron_open.clone()} } else { {input.chevron.clone()} }
-                                }
-                                if is_open {
-                                    div { id: "{content_id}", class: "px-4 py-3 border-t-heavy border-border", {item.content.clone()} }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
+    pub header: Value,
+    pub content: Value,
 }
 
 pub(crate) fn accordion(
@@ -399,33 +370,26 @@ pub(crate) fn accordion(
     registry: &DioxusPatternRegistry,
     view: &DioxusView<'_>,
 ) -> Element {
-    let chevron = render_pattern(
+    let items: Vec<Value> = items
+        .into_iter()
+        .map(|entry| {
+            object_value([
+                ("id", Value::string(entry.id.as_str())),
+                ("header", entry.header),
+                ("content", entry.content),
+            ])
+        })
+        .collect();
+    render_pattern(
         registry,
         view,
-        "icon",
+        "accordion",
         vec![
-            ("name", Value::string("chevron-down")),
-            ("size", Value::string("sm")),
-            (
-                "className",
-                Value::string("transition-transform duration-fast"),
-            ),
+            ("items", Value::Array(items.into())),
+            ("multiple", Value::Bool(multiple)),
+            ("surface", Value::string("none")),
         ],
-    );
-    let chevron_open = render_pattern(
-        registry,
-        view,
-        "icon",
-        vec![
-            ("name", Value::string("chevron-down")),
-            ("size", Value::string("sm")),
-            (
-                "className",
-                Value::string("transition-transform duration-fast transform rotate-180"),
-            ),
-        ],
-    );
-    rsx! { AccordionBox { items: items, multiple: multiple, chevron: chevron, chevron_open: chevron_open } }
+    )
 }
 
 fn llm_summary(activity: &Value) -> String {
@@ -455,45 +419,92 @@ fn llm_summary(activity: &Value) -> String {
     parts.join(" · ")
 }
 
-fn llm_section(
-    registry: &DioxusPatternRegistry,
-    view: &DioxusView<'_>,
-    label: &str,
-    text: &str,
-) -> Element {
-    rsx! {
-        div { class: "flex flex-col gap-0 items-stretch justify-start w-full",
-            {typography(registry, view, "caption", label, Some("muted"), Some("semibold"), None)}
-            {typography(registry, view, "caption", text, None, None, Some("whitespace-pre-wrap break-all font-mono"))}
-        }
-    }
+fn llm_section(label: &str, text: &str) -> Value {
+    pattern_spec(
+        "vstack",
+        [
+            ("gap", Value::string("none")),
+            ("className", Value::string("w-full")),
+            (
+                "children",
+                Value::Array(
+                    vec![
+                        typography_spec("caption", label, Some("muted"), Some("semibold"), None),
+                        typography_spec(
+                            "caption",
+                            text,
+                            None,
+                            None,
+                            Some("whitespace-pre-wrap break-all font-mono"),
+                        ),
+                    ]
+                    .into(),
+                ),
+            ),
+        ],
+    )
 }
 
 fn llm_row(activity: &Value, registry: &DioxusPatternRegistry, view: &DioxusView<'_>) -> Element {
-    let header = rsx! {
-        div { class: "flex items-center gap-2 min-w-0",
-            {render_pattern(registry, view, "icon", vec![
-                ("name", Value::string("cpu")),
-                ("size", Value::string("sm")),
-                ("color", Value::string("muted")),
-                ("className", Value::string("shrink-0")),
-            ])}
-            {typography(registry, view, "caption", &llm_summary(activity), Some("muted"), None, Some("truncate"))}
-        }
-    };
+    let header = pattern_spec(
+        "box",
+        [
+            (
+                "className",
+                Value::string("flex items-center gap-2 min-w-0"),
+            ),
+            (
+                "children",
+                Value::Array(
+                    vec![
+                        pattern_spec(
+                            "icon",
+                            [
+                                ("name", Value::string("cpu")),
+                                ("size", Value::string("sm")),
+                                ("color", Value::string("muted")),
+                                ("className", Value::string("shrink-0")),
+                            ],
+                        ),
+                        typography_spec(
+                            "caption",
+                            &llm_summary(activity),
+                            Some("muted"),
+                            None,
+                            Some("truncate"),
+                        ),
+                    ]
+                    .into(),
+                ),
+            ),
+        ],
+    );
     let llm = field(activity, "llm").filter(|llm| llm.as_object().is_some());
-    let content = rsx! {
-        div { class: "flex flex-col gap-2 items-stretch justify-start w-full",
-            {llm_section(registry, view, "Response", &get_string_or(activity, "content", ""))}
-            if let Some(llm) = llm {
-                {llm_section(registry, view, "System prompt", &get_string_or(llm, "systemPrompt", ""))}
-                {llm_section(registry, view, "User prompt", &get_string_or(llm, "userPrompt", ""))}
-                if let Some(calls) = get_string(llm, "toolCallsJson").filter(|calls| !calls.is_empty()) {
-                    {llm_section(registry, view, "Tool calls", &calls)}
-                }
-            }
+    let mut sections = vec![llm_section(
+        "Response",
+        &get_string_or(activity, "content", ""),
+    )];
+    if let Some(llm) = llm {
+        sections.push(llm_section(
+            "System prompt",
+            &get_string_or(llm, "systemPrompt", ""),
+        ));
+        sections.push(llm_section(
+            "User prompt",
+            &get_string_or(llm, "userPrompt", ""),
+        ));
+        if let Some(calls) = get_string(llm, "toolCallsJson").filter(|calls| !calls.is_empty()) {
+            sections.push(llm_section("Tool calls", &calls));
         }
-    };
+    }
+    let content = pattern_spec(
+        "vstack",
+        [
+            ("gap", Value::string("sm")),
+            ("className", Value::string("w-full")),
+            ("children", Value::Array(sections.into())),
+        ],
+    );
     let id = format!(
         "llm-{}",
         plain_text(field(activity, "timestamp").unwrap_or(&Value::Null))
@@ -582,18 +593,8 @@ pub(crate) fn activity_row(
             accordion(
                 vec![AccordionEntry {
                     id,
-                    header: typography(
-                        registry,
-                        view,
-                        "body2",
-                        &row.text,
-                        None,
-                        None,
-                        Some("break-words"),
-                    ),
-                    content: typography(
-                        registry,
-                        view,
+                    header: typography_spec("body2", &row.text, None, None, Some("break-words")),
+                    content: typography_spec(
                         "caption",
                         raw,
                         None,
