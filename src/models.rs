@@ -527,6 +527,19 @@ mod tests {
     }
 
     #[test]
+    fn a_nullable_number_field_renders_one_option() {
+        let mut m = OirModule::new("app", "1.0.0");
+        let mut rec = OirEntity::new("Rec");
+        rec.fields.push(OirField::optional("v", OirType::optional(OirType::Number)));
+        rec.fields.push(OirField::new("n", OirType::Number));
+        m.entities.push(rec);
+        let content = entities_file(&m).content;
+        assert!(content.contains("pub v: Option<f64>,"), "{content}");
+        assert!(!content.contains("Option<Option<"), "{content}");
+        assert!(content.contains("pub n: f64,"), "{content}");
+    }
+
+    #[test]
     fn control_a_required_field_has_no_option_and_no_default() {
         let content = entities_file(&module(false)).content;
         assert!(!content.contains("Option<DocStatus>"));
