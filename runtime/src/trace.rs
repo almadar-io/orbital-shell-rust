@@ -175,22 +175,7 @@ impl TraceJournal {
         if !self.on.load(Ordering::SeqCst) && subscribers.is_empty() {
             return;
         }
-        let seed = observed
-            .seeds
-            .iter()
-            .map(|s| format!("{}.{}", s.trait_name, s.event))
-            .collect::<Vec<_>>()
-            .join("+");
-        let seed_entity_id = observed
-            .seeds
-            .first()
-            .and_then(|s| s.entity_id.clone())
-            .unwrap_or_else(|| "singleton".into());
-        let seed_traits = observed
-            .seeds
-            .iter()
-            .map(|s| s.trait_name.clone())
-            .collect();
+        let (seed, seed_entity_id, seed_traits) = observed.seed_summary();
         let entry = TraceEntry {
             seq: self.seq.fetch_add(1, Ordering::SeqCst),
             dispatch_id: observed.dispatch_id,
