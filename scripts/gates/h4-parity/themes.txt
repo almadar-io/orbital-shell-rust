@@ -1,0 +1,11 @@
+linear-clean-light
+linear-clean-dark
+almadar-light
+almadar-dark
+minimalist-light
+minimalist-dark
+notion-editorial-light
+swiss-light
+bloomberg-dense-dark
+terminal-dark
+game-sci-fi-dark
