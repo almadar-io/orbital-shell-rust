@@ -105,6 +105,11 @@ impl TargetTypeRenderer for RsTypes<'_> {
         let Some(values) = enum_values.filter(|v| !v.is_empty()) else {
             return "String".to_string();
         };
+        let name = if orbital_core::type_compat::literal_union_members(name).is_some() {
+            self.context.as_str()
+        } else {
+            name
+        };
         let variants: Vec<String> = values
             .iter()
             .map(|v| {
@@ -115,10 +120,14 @@ impl TargetTypeRenderer for RsTypes<'_> {
                 )
             })
             .collect();
-        self.hoisted.borrow_mut().push(format!(
+        let decl = format!(
             "#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]\npub enum {name} {{\n{}\n}}",
             variants.join("\n")
-        ));
+        );
+        let mut hoisted = self.hoisted.borrow_mut();
+        if !hoisted.contains(&decl) {
+            hoisted.push(decl);
+        }
         name.to_string()
     }
     fn trait_ref(&self) -> String {
@@ -589,5 +598,50 @@ mod tests {
         assert!(!events_file(&module(false)).content.contains("pub struct"));
         let listing = mod_file().content;
         assert!(listing.contains("pub mod entities;") && listing.contains("pub mod events;"));
+    }
+
+    fn payload_module(ty: OirType) -> OirModule {
+        let mut m = module(true);
+        let mut schema = OirTypeMap::new();
+        schema.insert("reason".into(), ty);
+        schema.insert("plain".into(), OirType::String);
+        m.traits[0].events[1].payload_schema = Some(schema);
+        m
+    }
+
+    #[test]
+    fn a_literal_union_payload_field_renders_a_hoisted_serde_enum() {
+        let union = OirType::Enum { name: "\"not-a-key\" | \"salt\"".into() };
+        let content = events_file(&payload_module(union)).content;
+        assert!(content.contains("pub enum ChunkCHUNKEDPayloadReason {\n    #[serde(rename = \"not-a-key\")]\n    NotAKey,\n    #[serde(rename = \"salt\")]\n    Salt,\n}"), "{content}");
+        assert!(content.contains("pub reason: ChunkCHUNKEDPayloadReason,"), "{content}");
+        assert!(!content.contains("pub enum \""), "{content}");
+        assert!(content.contains("pub plain: String,"), "{content}");
+    }
+
+    #[test]
+    fn control_an_array_of_one_literal_union_declares_the_enum_once() {
+        let union = OirType::Array { inner: Box::new(OirType::Enum { name: "\"a\" | \"b\"".into() }) };
+        let content = events_file(&payload_module(union)).content;
+        assert!(content.contains("pub reason: Vec<ChunkCHUNKEDPayloadReason>,"), "{content}");
+        assert_eq!(content.matches("pub enum ChunkCHUNKEDPayloadReason").count(), 1, "{content}");
+    }
+
+    #[test]
+    fn control_a_plain_string_payload_field_stays_string() {
+        let content = events_file(&payload_module(OirType::String)).content;
+        assert!(content.contains("pub reason: String,"), "{content}");
+        assert!(!content.contains("pub enum"), "{content}");
+    }
+
+    #[test]
+    fn a_literal_union_entity_field_without_enum_values_renders_a_hoisted_enum() {
+        let mut m = OirModule::new("app", "1.0.0");
+        let mut e = OirEntity::new("Doc");
+        e.fields.push(OirField::new("kind", OirType::Enum { name: "\"x\" | \"y\"".into() }));
+        m.entities.push(e);
+        let content = entities_file(&m).content;
+        assert!(content.contains("pub enum DocKind {"), "{content}");
+        assert!(content.contains("pub kind: DocKind,"), "{content}");
     }
 }
