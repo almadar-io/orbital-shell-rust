@@ -55,11 +55,6 @@ impl ShellProgram for RustProgram {
                 ShellFailure::new(CODE_GENERATE_FAILED, format!("write {PROGRAM_FILE}: {e}"))
             })?;
             files.push(PROGRAM_FILE.to_string());
-            if let Some(source) = &request.source_path {
-                orbital_core::project::copy_locales(source, output).map_err(|e| {
-                    ShellFailure::new(CODE_GENERATE_FAILED, format!("copy locales: {e}"))
-                })?;
-            }
         }
         Ok(GenerateResponse {
             files,

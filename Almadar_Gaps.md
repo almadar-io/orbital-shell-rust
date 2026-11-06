@@ -7,7 +7,9 @@ Every open gap this repo owns lives here. This file is the source of truth; the 
 - **Codes:** new gaps use this repo's prefix `G-ORBITAL-SHELL-RUST-`. Take the "Next code" below, then bump it in the same edit. Codes are never reused or renamed.
 - **Close by deleting.** Remove the entry in the same commit as the fix.
 
-Next code: `G-ORBITAL-SHELL-RUST-006`
+Next code: `G-ORBITAL-SHELL-RUST-007`
+
+- **G-ORBITAL-SHELL-RUST-006** `[mechanical]` — The dioxus `guest-view` renderer does not scope guest paints to their painters, so a click on a guest control reaches no guest: since 2026-11-06 the kernel delivers a guest click only as `<Painter>.<EVENT>` (`orbital-core` `kernel/guest_controls.rs`), and the web GuestView names the painter through its trait scopes. Reproduce: paint a `guest-view` in a dioxus host and click a guest button; the opener's `deliver` event never fires. Fix: render each guest paint (`paints[].orbital`) under its painter's scope and dispatch `<Painter>.<EVENT>` to the opener, as the web renderer does. Prevention rung: (3) the guest parity twin test run on the native host. `renderers/dioxus/src/components/core/molecules/guest_view.rs` · Root cause: one-off.
 
 - **G-ORBITAL-SHELL-RUST-005** — The dioxus and TUI dock-layout renderers still read `secondarySidebarWidth` as pixels (default 280) while the contract is now a 0-100 SplitPane ratio (default 25) beside `secondarySidebarMinSize` and `onSecondarySidebarWidthChange` (web, SwiftUI and Compose carry it since 2026-11-04), so a native-GPU or terminal host draws std-workspace-layout's right dock at 25-55 px. renderers/dioxus + renderers/tui `dock_layout.rs` [mechanical] — deferred by the owner 2026-11-04; rung: (3) the verifiers (no cross-host dock-layout fixture compares widths). Root cause: one-off.
 
