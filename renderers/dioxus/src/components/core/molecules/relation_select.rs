@@ -364,7 +364,7 @@ fn RelationSelect(input: RelationSelectProps) -> Element {
         (
             "className".to_string(),
             Value::string(cn(&[
-                "relative",
+                "relative flex flex-col",
                 get_string(props, "className").as_deref().unwrap_or(""),
             ])),
         ),

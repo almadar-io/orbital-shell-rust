@@ -2,7 +2,7 @@
 
 use crate::registry::{shared_root_attrs, DioxusPatternRegistry};
 use crate::renderer::merge_class_name;
-use crate::renderer::{DioxusPatternRenderer, DioxusView};
+use crate::renderer::{DioxusPatternRenderer, DioxusView, OwnedDioxusView};
 use dioxus::prelude::*;
 use orbital_core::client::helpers::*;
 use orbital_core::client::recurse::*;
@@ -68,31 +68,51 @@ impl DioxusPatternRenderer for CardRenderer {
         view: &DioxusView<'_>,
         registry: &DioxusPatternRegistry,
     ) -> Element {
-        let class = card_class(props);
-        let title = get_string_or(props, "title", "");
-        let subtitle = get_string_or(props, "subtitle", "");
-        let loading = get_bool_or(props, "loading", false);
-        let action = get_string(props, "action");
-        let pressable = action.is_some();
-        let sink = view.sink;
-        let children = child_patterns(props, view.trait_content);
-        rsx! {
-            div { class: "{class}", role: pressable.then_some("button"), tabindex: pressable.then_some(0),
-                onclick: move |_| {
-                    if let (Some(sink), Some(action)) = (sink, &action) {
-                        sink.call((action.clone(), Value::Object(orbital_core::ValueMap::new().into())));
-                    }
-                },
-                ..shared_root_attrs(props),
-                if loading { span { class: "almadar-spinner absolute inset-0" } }
-                if !title.is_empty() || !subtitle.is_empty() {
-                    div { class: "mb-4",
-                        if !title.is_empty() { h3 { class: "text-lg text-card-foreground heading-voice", "{title}" } }
-                        if !subtitle.is_empty() { p { class: "text-sm text-muted-foreground mt-1", "{subtitle}" } }
-                    }
+        rsx! { CardBody { props: props.clone(), view: view.to_owned(), registry: registry.clone() } }
+    }
+}
+
+/// Context marker: a card already paints a surface, so content blocks inside stay flat (web `SurfaceBoundary`).
+#[derive(Clone, Copy)]
+pub(crate) struct OnSurface;
+
+#[derive(Props, Clone, PartialEq)]
+struct CardBodyProps {
+    props: Value,
+    view: OwnedDioxusView,
+    registry: DioxusPatternRegistry,
+}
+
+#[allow(non_snake_case)]
+fn CardBody(input: CardBodyProps) -> Element {
+    use_context_provider(|| OnSurface);
+    let view = input.view.as_view();
+    let props = &input.props;
+    let registry = &input.registry;
+    let class = card_class(props);
+    let title = get_string_or(props, "title", "");
+    let subtitle = get_string_or(props, "subtitle", "");
+    let loading = get_bool_or(props, "loading", false);
+    let action = get_string(props, "action");
+    let pressable = action.is_some();
+    let sink = view.sink;
+    let children = child_patterns(props, view.trait_content);
+    rsx! {
+        div { class: "{class}", role: pressable.then_some("button"), tabindex: pressable.then_some(0),
+            onclick: move |_| {
+                if let (Some(sink), Some(action)) = (sink, &action) {
+                    sink.call((action.clone(), Value::Object(orbital_core::ValueMap::new().into())));
                 }
-                for (child, src) in children.iter() { {view.render_child(registry, child, src.as_deref())} }
+            },
+            ..shared_root_attrs(props),
+            if loading { span { class: "almadar-spinner absolute inset-0" } }
+            if !title.is_empty() || !subtitle.is_empty() {
+                div { class: "mb-4",
+                    if !title.is_empty() { h3 { class: "text-lg text-card-foreground heading-voice", "{title}" } }
+                    if !subtitle.is_empty() { p { class: "text-sm text-muted-foreground mt-1", "{subtitle}" } }
+                }
             }
+            for (child, src) in children.iter() { {view.render_child(registry, child, src.as_deref())} }
         }
     }
 }

@@ -380,12 +380,13 @@ fn DataListBody(p: DataListBodyProps) -> Element {
             .unwrap_or_else(|| ri.to_string())
     };
 
-    let surface_class = if look == "card-rows" || get_string_or(props, "surface", "auto") != "auto"
-    {
-        ""
-    } else {
-        "surface-content overflow-hidden"
-    };
+    let on_surface = try_use_context::<crate::components::core::atoms::card::OnSurface>().is_some();
+    let surface_class =
+        if look == "card-rows" || on_surface || get_string_or(props, "surface", "auto") != "auto" {
+            ""
+        } else {
+            "surface-content overflow-hidden"
+        };
     let gap_class = match get_string_or(props, "gap", "none").as_str() {
         "sm" => "gap-1",
         "md" => "gap-2",

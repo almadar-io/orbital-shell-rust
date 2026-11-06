@@ -37,7 +37,7 @@
   --almadar-radius: var(--radius-md);
   font-family: var(--almadar-font);
   color: var(--almadar-fg);
-  background: var(--almadar-bg);
+  background-color: var(--almadar-bg);
   min-height: 100vh;
   font-size: 14px;
   line-height: 1.5;
@@ -53,6 +53,14 @@
 .almadar-drawer-overlay-contained.almadar-drawer-overlay-contained { position: absolute; z-index: 50; }
 .almadar-drawer-overlay-viewport.almadar-drawer-overlay-viewport { position: fixed; z-index: 60; }
 .almadar-orbital-dioxus .line-clamp-2 { overflow: hidden; max-height: calc(1lh * 2); }
+.almadar-orbital-dioxus .line-clamp-2.text-xs { max-height: calc(var(--leading-xs, 16px) * 2); }
+.almadar-orbital-dioxus .line-clamp-2.text-sm { max-height: calc(var(--leading-sm, 20px) * 2); }
+.almadar-orbital-dioxus .line-clamp-2.text-base { max-height: calc(var(--leading-base, 24px) * 2); }
+.almadar-orbital-dioxus .line-clamp-2.text-lg { max-height: calc(var(--leading-lg, 28px) * 2); }
+.almadar-orbital-dioxus .line-clamp-2.text-xl { max-height: calc(var(--leading-xl, 28px) * 2); }
+.almadar-orbital-dioxus .line-clamp-2.text-2xl { max-height: calc(var(--leading-2xl, 32px) * 2); }
+.almadar-orbital-dioxus .line-clamp-2.text-3xl { max-height: calc(var(--leading-3xl, 36px) * 2); }
+.almadar-orbital-dioxus .line-clamp-2.text-4xl { max-height: calc(var(--leading-4xl, 40px) * 2); }
 .almadar-fallback {
   font-family: var(--almadar-mono);
   font-size: 12px;
@@ -69,7 +77,7 @@
   padding: 6px 12px;
   border-radius: var(--almadar-radius);
   border: 1px solid var(--almadar-line);
-  background: var(--almadar-bg);
+  background-color: var(--almadar-bg);
   color: var(--almadar-fg);
   cursor: pointer;
 }
@@ -79,7 +87,7 @@
   padding: 6px 10px;
   border-radius: var(--almadar-radius);
   border: 1px solid var(--almadar-line);
-  background: var(--almadar-bg);
+  background-color: var(--almadar-bg);
   color: var(--almadar-fg);
   min-width: 180px;
 }

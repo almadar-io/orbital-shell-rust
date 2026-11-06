@@ -117,7 +117,7 @@ fn Fab(input: FabProps) -> Element {
             }
         }
         let spec = pattern_spec("button", spec);
-        let class = merge_class_name(&format!("{BOX_BASE} fixed z-50 {pos}"), props);
+        let class = merge_class_name(&format!("{BOX_BASE} fixed z-50 flex {pos}"), props);
         return rsx! { div { class: "{class}", {registry.render_spec(&spec, None, &view)} } };
     }
 

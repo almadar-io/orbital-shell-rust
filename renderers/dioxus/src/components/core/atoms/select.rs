@@ -1,7 +1,7 @@
-use crate::renderer::merge_class_name;
 use super::field_draft::use_field_draft;
 use crate::registry::{shared_root_attrs, DioxusPatternRegistry};
-use crate::renderer::{DioxusPatternRenderer, DioxusView, OwnedDioxusView};
+use crate::renderer::merge_class_name;
+use crate::renderer::{pattern_spec, DioxusPatternRenderer, DioxusView, OwnedDioxusView};
 use dioxus::prelude::*;
 use orbital_core::client::helpers::*;
 use orbital_core::Value;
@@ -185,9 +185,9 @@ impl DioxusPatternRenderer for SelectRenderer {
         props: &Value,
         _entity: Option<&Value>,
         view: &DioxusView<'_>,
-        _registry: &DioxusPatternRegistry,
+        registry: &DioxusPatternRegistry,
     ) -> Element {
-        rsx! { SelectField { props: props.clone(), view: view.to_owned() } }
+        rsx! { SelectField { props: props.clone(), view: view.to_owned(), registry: registry.clone() } }
     }
 }
 
@@ -195,12 +195,25 @@ impl DioxusPatternRenderer for SelectRenderer {
 struct SelectFieldProps {
     props: Value,
     view: OwnedDioxusView,
+    registry: DioxusPatternRegistry,
 }
 
 #[allow(non_snake_case)]
 fn SelectField(field: SelectFieldProps) -> Element {
     let props = &field.props;
     let view = field.view.as_view();
+    let registry = &field.registry;
+    let chevron_spec = pattern_spec(
+        "icon",
+        [
+            ("name", Value::string("chevron-down")),
+            (
+                "className",
+                Value::string("h-icon-default w-icon-default text-foreground"),
+            ),
+        ],
+    );
+    let chevron = rsx! { div { class: "absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none", {registry.render_spec(&chevron_spec, None, &view)} } };
     let options = rows(props);
     let selected = get_string_or(props, "value", "");
     let mut single_draft = use_field_draft(if selected.is_empty() {
@@ -286,6 +299,7 @@ fn SelectField(field: SelectFieldProps) -> Element {
                     class: "block w-full rounded-interactive border-[length:var(--border-width)] shadow-elevation-interactive interactive-border px-3 py-2 pr-10 text-sm bg-card border-border",
                     dioxus_primitives::select::SelectValue { placeholder: placeholder }
                 }
+                {chevron.clone()}
                 dioxus_primitives::select::SelectList { class: "absolute z-50 mt-1 w-full bg-card border-[length:var(--border-width)] border-border rounded-interactive shadow-elevation-popover py-1 max-h-60 overflow-y-auto",
                     for (index, option) in options.iter().enumerate() {
                         div { key: "{option.value}",
@@ -327,6 +341,7 @@ fn SelectField(field: SelectFieldProps) -> Element {
                 class: "block w-full rounded-interactive border-[length:var(--border-width)] shadow-elevation-interactive interactive-border appearance-none px-3 py-2 pr-10 text-sm text-foreground font-medium bg-card focus:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:bg-muted disabled:text-muted-foreground disabled:cursor-not-allowed border-border focus:border-primary",
                 dioxus_primitives::select::SelectValue { placeholder: placeholder }
             }
+            {chevron.clone()}
             dioxus_primitives::select::SelectList { class: "absolute z-50 mt-1 w-full bg-card border-[length:var(--border-width)] border-border rounded-interactive shadow-elevation-popover py-1 max-h-60 overflow-y-auto",
                 for (index, option) in options.iter().enumerate() {
                     div { key: "{option.value}",

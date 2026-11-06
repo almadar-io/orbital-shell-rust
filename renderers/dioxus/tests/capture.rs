@@ -1364,3 +1364,58 @@ fn look() {
         .with(|c| *c.borrow_mut() = orbital_client_dioxus::styles::stylesheets());
     capture_png(std::path::Path::new(&out), 600, 300).unwrap();
 }
+
+#[test]
+fn aspect_square_overflow_hidden_grid_items_give_their_rows_height_in_a_flex_column() {
+    use blitz_dom::DocumentConfig;
+    use blitz_traits::shell::{ColorScheme, Viewport};
+    use dioxus::prelude::*;
+    use dioxus_native::DioxusDocument;
+
+    fn app() -> Element {
+        rsx! {
+            div { class: "flex min-h-full flex-col",
+                div { id: "clipped", class: "grid gap-3 grid-cols-3",
+                    for i in 0..6 {
+                        div { key: "{i}", class: "relative overflow-hidden aspect-square", div { class: "w-full h-full" } }
+                    }
+                }
+                div { id: "visible", class: "grid gap-3 grid-cols-3",
+                    for i in 0..6 {
+                        div { key: "{i}", class: "relative aspect-square", div { class: "w-full h-full" } }
+                    }
+                }
+            }
+        }
+    }
+
+    let mut doc = DioxusDocument::new(
+        dioxus_core::VirtualDom::new(app),
+        DocumentConfig {
+            viewport: Some(Viewport::new(312, 900, 1.0, ColorScheme::Light)),
+            font_ctx: Some(orbital_client_dioxus::offscreen::embedded_font_context()),
+            ..Default::default()
+        },
+    );
+    doc.initial_build();
+    doc.create_head_element(
+        "style",
+        &[],
+        &Some(include_str!("../assets/css/web-client.css").into()),
+    );
+    doc.resolve(0.0);
+    let height = |selector| {
+        let id = doc.query_selector(selector).unwrap().unwrap();
+        doc.get_node(id).unwrap().final_layout.size.height
+    };
+    let visible = height("#visible");
+    let clipped = height("#clipped");
+    assert!(
+        visible > 190.0,
+        "control: two rows of 96px squares plus a gap, got {visible}"
+    );
+    assert!(
+        (clipped - visible).abs() <= 1.5,
+        "overflow-hidden rows collapsed: clipped={clipped} visible={visible}"
+    );
+}

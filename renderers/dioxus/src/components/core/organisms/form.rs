@@ -933,7 +933,22 @@ fn FormBody(body: FormBodyProps) -> Element {
     } else {
         "w-full max-w-xl"
     };
-    let class = merge_class_name(&format!("{layout_class} {gap_class} {vertical}"), props);
+    let paints_surface = get_string_or(props, "surface", "auto") == "auto"
+        && try_use_context::<crate::components::core::atoms::card::OnSurface>().is_none();
+    use_hook(|| {
+        if paints_surface {
+            provide_context(crate::components::core::atoms::card::OnSurface);
+        }
+    });
+    let surface = if paints_surface {
+        "surface-content p-card-md"
+    } else {
+        ""
+    };
+    let class = merge_class_name(
+        &format!("{layout_class} {gap_class} {vertical} {surface}"),
+        props,
+    );
 
     let is_loading = get_bool_or(props, "isLoading", false);
     let relations = props.get("relationsData");

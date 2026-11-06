@@ -664,7 +664,7 @@ pub fn App() -> Element {
             for (i, css) in css_texts.iter().enumerate() {
                 document::Style { key: "almadar-css-{i}", href: "almadar-css-{i}", "{css}" }
             }
-            div { class: "almadar-orbital-dioxus p-4", "data-state": "{core.current_state}", "data-theme": "{theme}", "data-reduced-motion": "{reduced_motion}",
+            div { class: "almadar-orbital-dioxus p-4 h-full min-h-full bg-background surface-page text-foreground", "data-state": "{core.current_state}", "data-theme": "{theme}", "data-reduced-motion": "{reduced_motion}",
                 onmousedown: move |_| {
                     #[cfg(all(feature = "native-audio", not(target_arch = "wasm32")))]
                     crate::audio::user_gesture();
