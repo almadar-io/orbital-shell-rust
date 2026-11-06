@@ -125,7 +125,7 @@ impl Surface {
         match self {
             Surface::Dioxus => {
                 let path = PathBuf::from(format!("{}.png", stem.display()));
-                offscreen::capture_png(&path, WIDTH, HEIGHT)?;
+                offscreen::capture_gpu_png(&path, WIDTH, HEIGHT)?;
                 Ok(path)
             }
             Surface::Tui(app) => {

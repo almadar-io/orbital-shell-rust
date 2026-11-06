@@ -249,7 +249,13 @@ impl LayoutPartialTree for BaseDocument {
                                 }
                                 ImageData::None => taffy::Size::ZERO,
                             },
-                            SpecialElementData::Canvas(_) => taffy::Size::ZERO,
+                            // ORBITAL PATCH (blitz-dom 0.2.4, parity): a canvas's natural size is its
+                            // width/height attributes (HTML default 300x150), so `height:auto` keeps
+                            // its aspect ratio instead of collapsing to 0.
+                            SpecialElementData::Canvas(_) => taffy::Size {
+                                width: attr_size.width.unwrap_or(300.0),
+                                height: attr_size.height.unwrap_or(150.0),
+                            },
                             SpecialElementData::None => taffy::Size::ZERO,
                             _ => unreachable!(),
                         };

@@ -125,7 +125,6 @@ use crate::components::core::molecules::gantt::GanttRenderer;
 use crate::components::core::molecules::geometric_pattern::GeometricPatternRenderer;
 use crate::components::core::molecules::gradient_divider::GradientDividerRenderer;
 use crate::components::core::molecules::graph_canvas::GraphCanvasRenderer;
-use crate::components::core::molecules::graph_view::GraphViewRenderer;
 use crate::components::core::molecules::grid::GridRenderer;
 use crate::components::core::molecules::guest_view::GuestViewRenderer;
 use crate::components::core::molecules::header::HeaderRenderer;
@@ -344,7 +343,6 @@ pub fn register_dioxus(registry: &mut crate::registry::DioxusPatternRegistry) {
     registry.register(Box::new(GeometricPatternRenderer));
     registry.register(Box::new(GradientDividerRenderer));
     registry.register(Box::new(GraphCanvasRenderer));
-    registry.register(Box::new(GraphViewRenderer));
     registry.register(Box::new(GridRenderer));
     registry.register(Box::new(GuestViewRenderer));
     registry.register(Box::new(HeaderRenderer));

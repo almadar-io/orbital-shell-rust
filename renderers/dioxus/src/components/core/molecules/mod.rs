@@ -62,7 +62,6 @@ pub mod gantt;
 pub mod geometric_pattern;
 pub mod gradient_divider;
 pub mod graph_canvas;
-pub mod graph_view;
 pub mod grid;
 pub mod guest_view;
 pub mod header;

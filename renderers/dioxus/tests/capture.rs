@@ -840,6 +840,42 @@ fn gpu_paints_svg_ring_stroke_pixels() {
 }
 
 #[test]
+fn physics_canvas_paints_its_bodies_inside_the_card_on_gpu() {
+    let dir = std::env::temp_dir().join(format!("dioxus-physics-gpu-{}", std::process::id()));
+    orbital_client_dioxus::app::CSS_TEXT
+        .with(|css| *css.borrow_mut() = orbital_client_dioxus::styles::stylesheets());
+    let body = |id: &str, x: f64, y: f64| {
+        serde_json::json!({
+            "id": id, "x": x, "y": y, "radius": 30, "color": "#ff0000",
+            "label": "", "vx": 0, "vy": 0, "fx": 0, "fy": 0
+        })
+    };
+    let physics = |bodies: serde_json::Value| {
+        serde_json::json!({
+            "type": "physics-canvas", "title": "Physics", "width": 600, "height": 400,
+            "bodies": bodies
+        })
+    };
+    mount_core(&program(physics(serde_json::json!([
+        body("a", 200.0, 200.0),
+        body("b", 400.0, 200.0)
+    ]))))
+    .unwrap();
+    let two = dir.join("two-bodies.png");
+    capture_gpu_png(&two, 700, 500).unwrap();
+    mount_core(&program(physics(serde_json::json!([])))).unwrap();
+    let empty = dir.join("empty.png");
+    capture_gpu_png(&empty, 700, 500).unwrap();
+    let (painted, control) = (red_pixels(&two), red_pixels(&empty));
+    std::fs::remove_dir_all(&dir).ok();
+    assert!(
+        painted > 500,
+        "physics-canvas painted {painted} red body pixels on the GPU frame"
+    );
+    assert_eq!(control, 0, "an empty scene painted red pixels");
+}
+
+#[test]
 fn pattern_tile_canvas_mapper_paints_headless_gpu_pixels() {
     use orbital_canvas::mappers::scene;
     use orbital_canvas::Canvas;
@@ -1366,6 +1402,47 @@ fn look() {
 }
 
 #[test]
+fn graph_view_paints_its_surface_and_nodes_on_gpu() {
+    let dir = std::env::temp_dir().join(format!("dioxus-graph-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let ink = |path: &std::path::Path| {
+        let px = capture_rgba(path);
+        let bg = [px[0], px[1], px[2]];
+        px.chunks_exact(4)
+            .filter(|p| {
+                (p[0] as i32 - bg[0] as i32).abs()
+                    + (p[1] as i32 - bg[1] as i32).abs()
+                    + (p[2] as i32 - bg[2] as i32).abs()
+                    > 30
+            })
+            .count()
+    };
+    orbital_client_dioxus::app::CSS_TEXT
+        .with(|css| *css.borrow_mut() = orbital_client_dioxus::styles::stylesheets());
+    let graph = dir.join("graph.png");
+    mount_core(&program(serde_json::json!({
+        "type": "graph-view",
+        "layout": "force",
+        "showLabels": true,
+        "zoomToFit": true,
+        "nodes": [
+            { "id": "a", "label": "Label", "color": "#000000", "group": "g" },
+            { "id": "b", "label": "Label 2", "color": "#000000", "group": "g" }
+        ],
+        "edges": [{ "source": "a", "target": "b", "label": "Label", "color": "#000000" }]
+    })))
+    .unwrap();
+    capture_gpu_png(&graph, 600, 500).unwrap();
+    let empty = dir.join("empty.png");
+    mount_core(&program(serde_json::json!({ "type": "box", "children": [] }))).unwrap();
+    capture_gpu_png(&empty, 600, 500).unwrap();
+    let (painted, control) = (ink(&graph), ink(&empty));
+    assert!(control == 0, "control: an empty box paints nothing, got {control}");
+    assert!(painted > 200, "graph-view painted no nodes or labels: {painted} ink pixels");
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
 fn items_center_flex_column_behind_a_contents_wrapper_centres_its_children() {
     use blitz_dom::DocumentConfig;
     use blitz_traits::shell::{ColorScheme, Viewport};
@@ -1408,7 +1485,10 @@ fn items_center_flex_column_behind_a_contents_wrapper_centres_its_children() {
     };
     let direct = width("#direct");
     let wrapped = width("#wrapped");
-    assert!(direct < 100.0, "control: centred pill shrinks to its content, got {direct}");
+    assert!(
+        direct < 100.0,
+        "control: centred pill shrinks to its content, got {direct}"
+    );
     assert!(
         (wrapped - direct).abs() < 1.0,
         "display:contents wrapper stretched the centred pill: wrapped={wrapped} direct={direct}"
@@ -1704,7 +1784,10 @@ fn grid_item_percent_height_resolves_against_the_sized_row_not_the_grid() {
     };
     for id in ["#auto-a", "#auto-b"] {
         let h = height(id);
-        assert!((h - 80.0).abs() < 0.5, "{id} in an auto-height grid must be the 80px row, got {h}");
+        assert!(
+            (h - 80.0).abs() < 0.5,
+            "{id} in an auto-height grid must be the 80px row, got {h}"
+        );
     }
     for id in ["#tall-a", "#tall-b"] {
         let h = height(id);
@@ -1752,7 +1835,12 @@ fn line_clamp_limits_a_long_text_to_its_lines_and_records_the_ellipsis() {
     let measure = |selector: &str| {
         let id = doc.query_selector(selector).unwrap().unwrap();
         let node = doc.get_node(id).unwrap();
-        let text = node.element_data().unwrap().inline_layout_data.as_ref().unwrap();
+        let text = node
+            .element_data()
+            .unwrap()
+            .inline_layout_data
+            .as_ref()
+            .unwrap();
         (node.final_layout.size.height, text.layout.len(), text.clamp)
     };
     let (clamped_height, clamped_lines, clamped) = measure("#clamped");
@@ -1801,8 +1889,18 @@ fn text_overflow_ellipsis_with_nowrap_keeps_one_line_and_marks_the_ellipsis() {
     let measure = |selector: &str| {
         let id = doc.query_selector(selector).unwrap().unwrap();
         let node = doc.get_node(id).unwrap();
-        let text = node.element_data().unwrap().inline_layout_data.as_ref().unwrap();
-        (node.final_layout.size, text.layout.len(), text.layout.width(), text.clamp)
+        let text = node
+            .element_data()
+            .unwrap()
+            .inline_layout_data
+            .as_ref()
+            .unwrap();
+        (
+            node.final_layout.size,
+            text.layout.len(),
+            text.layout.width(),
+            text.clamp,
+        )
     };
     let (size, lines, text_width, clamp) = measure("#truncated");
     assert!(

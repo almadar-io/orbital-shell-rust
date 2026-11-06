@@ -16,15 +16,15 @@
 
 use crate::helpers::{format_value, get_entity_field, get_hud_stats, humanize_field_name};
 use crate::registry::DioxusPatternRegistry;
+use crate::renderer::merge_class_name;
 use crate::renderer::{DioxusPatternRenderer, DioxusView};
 use crate::styles::style_with_props;
 use anyrender_vello::wgpu;
 use anyrender_vello::{CustomPaintCtx, CustomPaintSource, DeviceHandle, TextureHandle};
 use dioxus::prelude::*;
 use dioxus_native::use_wgpu;
-use orbital_canvas::mappers::scene;
+use orbital_canvas::mappers::{learning, scene};
 use orbital_canvas::{SceneHost, SharedDeviceRenderer};
-use crate::renderer::merge_class_name;
 use orbital_core::Value;
 use std::sync::{Arc, Mutex};
 use web_time::Instant;
@@ -399,12 +399,68 @@ impl DioxusPatternRenderer for SceneCanvasRenderer {
         props: &Value,
         _entity: Option<&Value>,
         view: &DioxusView<'_>,
-        _registry: &DioxusPatternRegistry,
+        registry: &DioxusPatternRegistry,
     ) -> Element {
         let node = scene_node(self.name, props, view.canvas_theme.as_ref());
+        if learning::CARD_PATTERNS.contains(&self.name) {
+            return learning_card(self.name, props, node, view, registry);
+        }
         let (class_name, a11y) = scene_presentation(props);
         let inline_style = style_with_props("", props);
         rsx! { SceneCanvas { node, sink: view.sink, fill_parent: false, a11y, class_name, inline_style } }
+    }
+}
+
+/// The card the web wraps around a learning molecule's canvas: the optional `h4` title over the
+/// canvas, which scales to the card width at the scene's aspect ratio.
+fn learning_card(
+    pattern: &str,
+    props: &Value,
+    node: serde_json::Value,
+    view: &DioxusView<'_>,
+    registry: &DioxusPatternRegistry,
+) -> Element {
+    let (w, h) = match scene::scene_size(&node) {
+        Ok(size) => size,
+        Err(err) => {
+            tracing::warn!(target: NS, pattern, error = %err, "scene refused");
+            return rsx! {};
+        }
+    };
+    let card_class = crate::components::core::atoms::card::card_class(props);
+    let title = props
+        .as_object()
+        .and_then(|fields| fields.get("title"))
+        .and_then(Value::as_str)
+        .filter(|title| !title.is_empty())
+        .map(|title| {
+            let spec =
+                serde_json::json!({ "type": "typography", "variant": "h4", "content": title });
+            let spec = serde_json::from_value::<Value>(spec).expect("title spec");
+            view.render_child(registry, &spec, None)
+        });
+    let inline_style = format!(
+        "width:100%;max-width:min(100%,calc(70vh * {w} / {h}));height:auto;aspect-ratio:{w} / {h};"
+    );
+    let a11y = SceneA11y {
+        role: Some("img".to_string()),
+        ..SceneA11y::default()
+    };
+    let sink = view.sink;
+    rsx! {
+        div { class: "{card_class}",
+            div { class: "flex flex-col gap-2",
+                {title}
+                SceneCanvas {
+                    node,
+                    sink,
+                    fill_parent: false,
+                    a11y,
+                    class_name: "almadar-game-canvas mx-auto block touch-none rounded-container",
+                    inline_style,
+                }
+            }
+        }
     }
 }
 
