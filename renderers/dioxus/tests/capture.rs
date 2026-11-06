@@ -839,6 +839,41 @@ fn gpu_paints_svg_ring_stroke_pixels() {
     );
 }
 
+fn red_extent_x(path: &std::path::Path, width: usize) -> usize {
+    capture_rgba(path)
+        .chunks_exact(4)
+        .enumerate()
+        .filter(|(_, px)| px[0] > 180 && px[1] < 90 && px[2] < 90 && px[3] > 0)
+        .map(|(i, _)| i % width + 1)
+        .max()
+        .unwrap_or(0)
+}
+
+#[test]
+fn svg_ring_keeps_its_width_and_height_attributes_on_gpu() {
+    let dir = std::env::temp_dir().join(format!("dioxus-svg-size-{}", std::process::id()));
+    let ring = |size: u32| {
+        // The shared web stylesheet makes every svg display:block (Tailwind preflight), as the host installs it.
+        serde_json::json!({
+            "type": "svg-ring", "cx": size / 2, "cy": size / 2, "r": size * 2 / 5, "strokeWidth": 6,
+            "color": "#ff0000", "width": size, "height": size
+        })
+    };
+    let sheets = orbital_client_dioxus::styles::preset_stylesheets();
+    mount_core(&program(ring(100))).unwrap();
+    orbital_client_dioxus::app::CSS_TEXT.with(|c| *c.borrow_mut() = sheets.clone());
+    let small = dir.join("small.png");
+    capture_gpu_png(&small, 800, 400).unwrap();
+    mount_core(&program(ring(300))).unwrap();
+    orbital_client_dioxus::app::CSS_TEXT.with(|c| *c.borrow_mut() = sheets);
+    let large = dir.join("large.png");
+    capture_gpu_png(&large, 800, 400).unwrap();
+    let (small_x, large_x) = (red_extent_x(&small, 800), red_extent_x(&large, 800));
+    std::fs::remove_dir_all(&dir).ok();
+    assert!(small_x > 0 && small_x <= 140, "100px ring reached x={small_x}");
+    assert!(large_x > 200 && large_x <= 340, "300px ring reached x={large_x}");
+}
+
 #[test]
 fn physics_canvas_paints_its_bodies_inside_the_card_on_gpu() {
     let dir = std::env::temp_dir().join(format!("dioxus-physics-gpu-{}", std::process::id()));
@@ -1440,6 +1475,70 @@ fn graph_view_paints_its_surface_and_nodes_on_gpu() {
     assert!(control == 0, "control: an empty box paints nothing, got {control}");
     assert!(painted > 200, "graph-view painted no nodes or labels: {painted} ink pixels");
     std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn block_replaced_elements_keep_their_natural_size_behind_a_contents_wrapper() {
+    use blitz_dom::DocumentConfig;
+    use blitz_traits::shell::{ColorScheme, Viewport};
+    use dioxus::prelude::*;
+    use dioxus_native::DioxusDocument;
+
+    fn app() -> Element {
+        rsx! {
+            div { class: "flex min-h-full flex-col",
+                div { class: "flex-1 min-w-0",
+                    div { class: "contents",
+                        svg { id: "wrapped", view_box: "0 0 100 100", width: "100", height: "100",
+                            circle { cx: "50", cy: "50", r: "40" }
+                        }
+                    }
+                    svg { id: "direct", view_box: "0 0 100 100", width: "100", height: "100",
+                        circle { cx: "50", cy: "50", r: "40" }
+                    }
+                    div { class: "contents",
+                        canvas { id: "canvas", width: "100", height: "100" }
+                    }
+                }
+                div { class: "flex flex-1 min-w-0 flex-col",
+                    div { class: "contents",
+                        svg { id: "flexed", view_box: "0 0 100 100", width: "100", height: "100",
+                            circle { cx: "50", cy: "50", r: "40" }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let mut doc = DioxusDocument::new(
+        dioxus_core::VirtualDom::new(app),
+        DocumentConfig {
+            viewport: Some(Viewport::new(800, 600, 1.0, ColorScheme::Light)),
+            font_ctx: Some(orbital_client_dioxus::offscreen::embedded_font_context()),
+            ..Default::default()
+        },
+    );
+    doc.initial_build();
+    // The host adds its stylesheet after a first layout: the svg is laid out inline, then as a block.
+    doc.resolve(0.0);
+    doc.create_head_element(
+        "style",
+        &[],
+        &Some(include_str!("../assets/css/web-client.css").into()),
+    );
+    doc.resolve(0.0);
+    let size = |selector| {
+        let id = doc.query_selector(selector).unwrap().unwrap();
+        doc.get_node(id).unwrap().final_layout.size
+    };
+    let (direct, wrapped) = (size("#direct"), size("#wrapped"));
+    assert_eq!((direct.width, direct.height), (100.0, 100.0), "control: a block svg in a block");
+    assert_eq!((wrapped.width, wrapped.height), (100.0, 100.0), "a block svg behind display:contents");
+    let canvas = size("#canvas");
+    assert_eq!((canvas.width, canvas.height), (100.0, 100.0), "a block canvas keeps its natural size");
+    let flexed = size("#flexed");
+    assert_eq!((flexed.width, flexed.height), (100.0, 100.0), "a flex item svg behind display:contents");
 }
 
 #[test]

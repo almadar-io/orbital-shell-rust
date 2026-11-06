@@ -35,6 +35,8 @@ done
 if [ $up = 1 ]; then
   $PY $SCR/desktop_shot.py $OUT/src/$NAME--$THEME.orb $NAME--$THEME.desktop $OUT "$ROUTE" "http://127.0.0.1:$PORT" > $OUT/log/$NAME--$THEME.desktop.log 2>&1 || echo "DESKTOP_FAIL $NAME $THEME"
   node $SCR/cdp_shot.mjs "http://127.0.0.1:$PORT$ROUTE" $OUT/$NAME--$THEME.web.png $SERVE_DIR/chrome ${CDP_PORT:-$(( PORT + 1000 ))} > $OUT/log/$NAME--$THEME.chrome.log 2>&1
+  read -r web_status _ < $OUT/log/$NAME--$THEME.chrome.log
+  [ "$web_status" = WEB_OK ] || echo "WEB_FAIL $NAME $THEME"
 else
   echo "SERVE_FAIL $NAME $THEME"
 fi
