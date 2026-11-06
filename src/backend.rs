@@ -83,8 +83,8 @@ impl Backend for RustBackend {
         let mut files = vec![];
         if mode != ShellMode::Client {
             files.push(GeneratedFile::new("src/main.rs", generate_server_main()));
-            files.extend(crate::models::files(module));
         }
+        files.extend(crate::models::files(module));
         if mode != ShellMode::Server {
             files.extend(client_bins());
         }
@@ -152,12 +152,15 @@ mod tests {
     }
 
     #[test]
-    fn client_mode_omits_the_host_entry() {
+    fn client_mode_omits_the_host_entry_and_keeps_the_models() {
         let output = RustBackend::new().generate_with_mode(&test_module(), ShellMode::Client);
         let paths: Vec<_> = output.files.iter().map(|f| f.path.as_str()).collect();
         assert_eq!(
             paths,
             [
+                "src/generated/mod.rs",
+                "src/generated/entities.rs",
+                "src/generated/events.rs",
                 "src/bin/desktop.rs",
                 "src/bin/terminal.rs",
                 "src/bin/game.rs"
