@@ -29,6 +29,8 @@ for w in {0..$(( WORKERS - 1 ))}; do
       CDP_REUSE=1 CDP_PORT=$cdp zsh $SCR/pair.sh $b $t $port $OUT >> $OUT/run.log 2>&1
     done < $OUT/shards/$w
     kill $cpid 2>/dev/null
+    wait $cpid 2>/dev/null
+    rm -rf $OUT/chrome-$w $ROOT/.parity-serve/${OUT:t}-$port
   ) &
 done
 wait

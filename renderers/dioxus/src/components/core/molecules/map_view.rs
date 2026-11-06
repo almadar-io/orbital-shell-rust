@@ -152,6 +152,12 @@ impl DioxusPatternRenderer for MapViewRenderer {
                             }
                         }
                     }
+                    div { class: "leaflet-top leaflet-left", style: "position:absolute;z-index:1000;top:0;left:0;pointer-events:none",
+                        div { class: "leaflet-control-zoom leaflet-bar leaflet-control", style: "margin-top:10px;margin-left:10px;pointer-events:auto;box-shadow:0 1px 5px rgba(0,0,0,0.65);border-radius:4px;background:#fff",
+                            a { class: "leaflet-control-zoom-in", role: "button", title: "Zoom in", "aria-label": "Zoom in", style: "display:block;width:30px;height:30px;line-height:30px;text-align:center;text-decoration:none;color:black;background:#fff;border-bottom:1px solid #ccc;border-radius:2px 2px 0 0;font:bold 18px 'Lucida Console',Monaco,monospace", "+" }
+                            a { class: "leaflet-control-zoom-out", role: "button", title: "Zoom out", "aria-label": "Zoom out", style: "display:block;width:30px;height:30px;line-height:30px;text-align:center;text-decoration:none;color:black;background:#fff;border-radius:0 0 2px 2px;font:bold 18px 'Lucida Console',Monaco,monospace", "\u{2212}" }
+                        }
+                    }
                     if show_attribution {
                         div { style: "position:absolute;right:0;bottom:0;padding:0 5px;background:rgba(255,255,255,0.8);color:#333;",
                             a { href: "https://leafletjs.com", title: "A JavaScript library for interactive maps", "Leaflet" }

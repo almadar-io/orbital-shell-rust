@@ -8,6 +8,8 @@ mod kurbo_css;
 mod layers;
 mod render;
 mod sizing;
+#[cfg(feature = "svg")]
+mod svg_pattern;
 mod text;
 
 use anyrender::PaintScene;

@@ -43,3 +43,7 @@ orb resolves behavior packages and the language data (`@almadar/core`) by walkin
 root without its own `node_modules/@almadar/core` falls back to the main checkout's. In a worktree, link the worktree's
 core at its root (`node_modules/@almadar/core -> orbital-rust/crates/orbital-shell-typescript/core`) and set
 `ALMADAR_ROOT` to the worktree, or both legs silently read the main checkout's std and pattern tables.
+
+Disk: every pair removes its `orb serve` scaffold (`.orbital/serve/<behavior>`, ~100 MB) and its resolved `.orb` once the
+composite is written; each worker removes its Chrome profile and serve dir when its shard ends. A pair refuses to start
+when the output volume has less than `H4_MIN_FREE_GB` (default 50) free.

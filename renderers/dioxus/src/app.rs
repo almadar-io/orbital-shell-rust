@@ -52,6 +52,7 @@ fn remote_mount(version: Signal<u32>) {
             Ok(begun) => Some((kernel, begun)),
             Err(error) => {
                 tracing::error!(target: "almadar::client", %error, "remote mount refused");
+                state.core.fail_mount(error.to_string());
                 state.core.status_message = Some((format!("Error: {error}"), true));
                 None
             }
@@ -678,6 +679,11 @@ pub fn App() -> Element {
                             div { key: "{slot_name}", class: "{slot_wrapper_class(slot_name)}", "data-slot": "{slot_name}",
                                 for sc in painted_slot_contents_at(core, slot_name, now).iter() {
                                     {paint_slot_content(registry, sc, &view.for_source(sc.source_trait.clone(), source_sink.call(sc.source_trait.clone())))}
+                                }
+                                if slot_name == "main" {
+                                    if let Some(fault) = core.mount_fault_content() {
+                                        {paint_slot_content(registry, &fault, &view.for_source(fault.source_trait.clone(), source_sink.call(fault.source_trait.clone())))}
+                                    }
                                 }
                             }
                         }

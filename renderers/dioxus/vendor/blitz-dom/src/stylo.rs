@@ -409,8 +409,11 @@ impl selectors::Element for BlitzNode<'_> {
             NonTSPseudoClass::Valid => false,
             NonTSPseudoClass::Invalid => false,
             NonTSPseudoClass::Defined => false,
-            NonTSPseudoClass::Disabled => false,
-            NonTSPseudoClass::Enabled => false,
+            // ORBITAL PATCH (blitz-dom 0.2, parity): `:disabled` / `:enabled` were stubbed to
+            // false, so `disabled:opacity-50` never applied. Form controls match by their own
+            // `disabled` attribute or a disabled `<fieldset>` ancestor.
+            NonTSPseudoClass::Disabled => self.form_control_disabled().unwrap_or(false),
+            NonTSPseudoClass::Enabled => self.form_control_disabled().map(|d| !d).unwrap_or(false),
             NonTSPseudoClass::Focus => self.element_state.contains(ElementState::FOCUS),
             NonTSPseudoClass::FocusWithin => false,
             NonTSPseudoClass::FocusVisible => false,

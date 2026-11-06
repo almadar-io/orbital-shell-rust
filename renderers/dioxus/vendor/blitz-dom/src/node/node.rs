@@ -754,6 +754,33 @@ impl Node {
         }
     }
 
+    /// ORBITAL PATCH (blitz-dom 0.2, parity): `Some(disabled)` for form controls that can be
+    /// `:disabled`/`:enabled`, `None` for every other element.
+    pub fn form_control_disabled(&self) -> Option<bool> {
+        let el = self.element_data()?;
+        let is_control = matches!(
+            &*el.name.local,
+            "button" | "input" | "select" | "textarea" | "optgroup" | "option" | "fieldset"
+        );
+        if !is_control {
+            return None;
+        }
+        if el.attr(local_name!("disabled")).is_some() {
+            return Some(true);
+        }
+        let mut cur = self.parent;
+        while let Some(id) = cur {
+            let anc = &self.tree()[id];
+            if let Some(a) = anc.element_data() {
+                if &*a.name.local == "fieldset" && a.attr(local_name!("disabled")).is_some() {
+                    return Some(true);
+                }
+            }
+            cur = anc.parent;
+        }
+        Some(false)
+    }
+
     pub fn attrs(&self) -> Option<&[Attribute]> {
         Some(&self.element_data()?.attrs)
     }

@@ -224,7 +224,41 @@ pub(crate) fn collect_layout_children(
                 }
             }
 
-            // TODO: fix display:contents
+            // ORBITAL PATCH (blitz-dom 0.2.4, parity): a `display: contents` child hid its own
+            // block-level descendants from the classification above, so a contents wrapper around a
+            // block/flex box made the parent an inline root and shrink-wrapped the box. Look through
+            // contents children; any block-level descendant disables the all-inline path.
+            if all_inline && has_contents {
+                fn contents_has_block(doc: &BaseDocument, id: usize) -> bool {
+                    doc.nodes[id].children.iter().copied().any(|c| {
+                        let n = &doc.nodes[c];
+                        let d = n.display_style().unwrap_or(Display::inline());
+                        if matches!(d.inside(), DisplayInside::Contents) {
+                            contents_has_block(doc, c)
+                        } else {
+                            !matches!(d.outside(), DisplayOutside::Inline | DisplayOutside::None)
+                                || n.is_or_contains_block()
+                        }
+                    })
+                }
+                let blocky = doc.nodes[container_node_id]
+                    .children
+                    .iter()
+                    .copied()
+                    .any(|c| {
+                        matches!(
+                            doc.nodes[c]
+                                .display_style()
+                                .unwrap_or(Display::inline())
+                                .inside(),
+                            DisplayInside::Contents
+                        ) && contents_has_block(doc, c)
+                    });
+                if blocky {
+                    all_inline = false;
+                    all_block = false;
+                }
+            }
             if all_inline {
                 let existing_layout = doc.nodes[container_node_id]
                     .element_data_mut()

@@ -2,7 +2,9 @@
 //! Text is the web's default-locale (en) catalog; the host has no translation catalog.
 
 use crate::registry::DioxusPatternRegistry;
-use crate::renderer::{object_value, pattern_spec, plain_text, DioxusPatternRenderer, DioxusView};
+use crate::renderer::{
+    array_value, object_value, pattern_spec, plain_text, DioxusPatternRenderer, DioxusView,
+};
 use dioxus::prelude::*;
 use orbital_core::client::helpers::*;
 use orbital_core::Value;
@@ -522,6 +524,36 @@ pub(crate) fn activity_row(
     registry: &DioxusPatternRegistry,
     view: &DioxusView<'_>,
 ) -> Element {
+    activity_row_with_jump(activity, facts, None, registry, view)
+}
+
+fn jump_target(activity: &Value) -> Option<Value> {
+    let orbital = get_string_or(activity, "orbitalName", "");
+    match kind_of(activity).as_str() {
+        "orbital_started" | "orbital_done" => {
+            Some(object_value([("orbital", Value::string(orbital))]))
+        }
+        "schema_change" => {
+            let mut fields = vec![("orbital", Value::string(orbital))];
+            if let Some(trait_name) = get_string(activity, "traitName") {
+                fields.push(("trait", Value::string(trait_name)));
+            }
+            if let Some(transition) = get_string(activity, "transitionEvent") {
+                fields.push(("transition", Value::string(transition)));
+            }
+            Some(object_value(fields))
+        }
+        _ => None,
+    }
+}
+
+pub(crate) fn activity_row_with_jump(
+    activity: &Value,
+    facts: RowFacts,
+    jump: Option<&str>,
+    registry: &DioxusPatternRegistry,
+    view: &DioxusView<'_>,
+) -> Element {
     let kind = kind_of(activity);
     if kind == "llm_response" {
         return llm_row(activity, registry, view);
@@ -609,6 +641,34 @@ pub(crate) fn activity_row(
         }
     };
     let testid = format!("agent-activity-{kind}");
+    let jump_button = jump
+        .filter(|event| !event.is_empty())
+        .zip(jump_target(activity))
+        .map(|(event, target)| {
+            pattern_spec(
+                "button",
+                [
+                    ("variant", Value::string("ghost")),
+                    ("size", Value::string("sm")),
+                    ("action", Value::string(event)),
+                    ("actionPayload", target),
+                    ("data-testid", Value::string("agent-activity-jump")),
+                    (
+                        "children",
+                        array_value(vec![
+                            typography_spec("caption", "Jump", None, None, None),
+                            pattern_spec(
+                                "icon",
+                                [
+                                    ("name", Value::string("arrow-right")),
+                                    ("size", Value::string("xs")),
+                                ],
+                            ),
+                        ]),
+                    ),
+                ],
+            )
+        });
     rsx! {
         div { class: "flex items-start gap-2 w-full", "data-testid": "{testid}",
             {icon}
@@ -618,6 +678,7 @@ pub(crate) fn activity_row(
                     {typography(registry, view, "caption", detail, Some("muted"), None, Some("break-all whitespace-pre-wrap"))}
                 }
             }
+            if let Some(button) = jump_button { {registry.render_spec(&button, None, view)} }
         }
     }
 }
@@ -662,6 +723,9 @@ impl DioxusPatternRenderer for AgentActivityRowRenderer {
                 ready_count: get_number_or(facts, "readyCount", 0.0) as usize,
             })
             .unwrap_or_default();
-        activity_row(activity, facts, registry, view)
+        let jump = get_string(props, "onJump")
+            .filter(|event| !event.is_empty())
+            .or_else(|| get_string(props, "jump").filter(|event| !event.is_empty()));
+        activity_row_with_jump(activity, facts, jump.as_deref(), registry, view)
     }
 }

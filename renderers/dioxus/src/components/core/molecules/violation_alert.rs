@@ -48,7 +48,10 @@ fn labelled(label: &str, value: &str) -> Value {
 }
 
 fn callback(props: &Value, key: &str) -> Option<Value> {
-    props.get(key).filter(|value| !value.is_null()).cloned()
+    props
+        .get(key)
+        .filter(|value| !value.is_null() && value.as_str() != Some(""))
+        .cloned()
 }
 
 impl DioxusPatternRenderer for ViolationAlertRenderer {

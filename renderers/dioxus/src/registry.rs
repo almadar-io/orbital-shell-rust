@@ -107,7 +107,6 @@ pub const CODE_PATTERN_UNSUPPORTED: &str = "ORB_PATTERN_UNSUPPORTED_BY_RENDERER"
 pub const STUBBED_PATTERNS: &[&str] = &[
     "action-palette",
     "action-tile",
-    "activity-rail",
     "animated-graphic",
     "avl-transition-detail",
     "box",
@@ -149,7 +148,6 @@ pub const STUBBED_PATTERNS: &[&str] = &[
     "score-display",
     "search-input",
     "sequence-bar",
-    "stat-badge",
     "svg-connection",
     "svg-flow",
     "svg-node",
@@ -382,11 +380,6 @@ pub fn default_registry() -> DioxusPatternRegistry {
         registry.register(Box::new(sequence_bar::SequenceBarRenderer));
         registry.register(Box::new(trait_slot::TraitSlotRenderer));
     }
-    #[cfg(all(
-        feature = "research-dock",
-        feature = "native",
-        not(target_arch = "wasm32")
-    ))]
     registry.register(Box::new(
         crate::components::core::molecules::activity_rail::ActivityRailRenderer,
     ));

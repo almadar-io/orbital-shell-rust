@@ -48,6 +48,40 @@ fn icon_spec(props: &Value, name_keys: &[&str], asset: Option<&Value>, px: i64) 
     Some(Value::Object(spec.into()))
 }
 
+/// The button root classes for `props`, shared with bodies that emit the button element around their own content.
+pub(crate) fn button_class(props: &Value) -> String {
+    let variant = get_string_or(props, "variant", "primary");
+    let size = get_string_or(props, "size", "md");
+    let variant_class = match variant.as_str() {
+            "secondary" => "bg-transparent text-foreground border border-accent hover:bg-accent hover:text-accent-foreground hover:border-accent active:scale-[var(--active-scale)]",
+            "ghost" => "bg-transparent text-muted-foreground border border-transparent hover:text-primary-foreground hover:bg-primary hover:border-primary active:scale-[var(--active-scale)]",
+            "danger" | "destructive" => "bg-surface text-foreground border-[length:var(--border-width)] border-error shadow-elevation-interactive hover:bg-error hover:text-error-foreground hover:shadow-elevation-popover active:scale-[var(--active-scale)] active:shadow-elevation-pressed",
+            "success" => "bg-surface text-foreground border-[length:var(--border-width)] border-success shadow-elevation-interactive hover:bg-success hover:text-success-foreground hover:shadow-elevation-popover active:scale-[var(--active-scale)] active:shadow-elevation-pressed",
+            "warning" => "bg-surface text-foreground border-[length:var(--border-width)] border-warning shadow-elevation-interactive hover:bg-warning hover:text-warning-foreground hover:shadow-elevation-popover active:scale-[var(--active-scale)] active:shadow-elevation-pressed",
+            "link" => "bg-transparent text-muted-foreground border-none shadow-none underline-offset-4 hover:text-foreground hover:underline",
+            "default" => "bg-secondary text-secondary-foreground border-[length:var(--border-width-thin)] border-border hover:bg-secondary-hover active:scale-[var(--active-scale)]",
+            _ => "bg-primary text-primary-foreground border-none shadow-elevation-interactive hover:bg-primary-hover hover:shadow-elevation-popover active:scale-[var(--active-scale)] active:shadow-elevation-pressed",
+        };
+    let size_class = if variant == "link" {
+        "h-auto px-0 text-sm"
+    } else {
+        match size.as_str() {
+            "sm" => "h-button-sm px-3 text-sm",
+            "lg" => "h-button-lg px-6 text-base",
+            _ => "h-button-md px-4 text-sm",
+        }
+    };
+    let chrome = if variant == "link" {
+        ""
+    } else {
+        "chrome-button"
+    };
+    let busy = get_bool_or(props, "isLoading", false);
+    let cursor = if busy { "cursor-progress" } else { "" };
+    let base = format!("relative inline-flex items-center justify-center gap-2 font-medium rounded-interactive interactive-border cursor-pointer {chrome} transition-all duration-normal focus:outline-none focus-visible:ring-[length:var(--focus-ring-width)] focus-visible:ring-ring focus-visible:ring-offset-[length:var(--focus-ring-offset)] disabled:opacity-50 disabled:cursor-not-allowed {variant_class} {size_class} {cursor}");
+    merge_class_name(&base, props)
+}
+
 impl ButtonRenderer {
     const NAME: &str = "button";
 }
@@ -64,37 +98,10 @@ impl DioxusPatternRenderer for ButtonRenderer {
         view: &DioxusView<'_>,
         registry: &DioxusPatternRegistry,
     ) -> Element {
-        let variant = get_string_or(props, "variant", "primary");
         let size = get_string_or(props, "size", "md");
-        let variant_class = match variant.as_str() {
-            "secondary" => "bg-transparent text-foreground border border-accent hover:bg-accent hover:text-accent-foreground hover:border-accent active:scale-[var(--active-scale)]",
-            "ghost" => "bg-transparent text-muted-foreground border border-transparent hover:text-primary-foreground hover:bg-primary hover:border-primary active:scale-[var(--active-scale)]",
-            "danger" | "destructive" => "bg-surface text-foreground border-[length:var(--border-width)] border-error shadow-elevation-interactive hover:bg-error hover:text-error-foreground hover:shadow-elevation-popover active:scale-[var(--active-scale)] active:shadow-elevation-pressed",
-            "success" => "bg-surface text-foreground border-[length:var(--border-width)] border-success shadow-elevation-interactive hover:bg-success hover:text-success-foreground hover:shadow-elevation-popover active:scale-[var(--active-scale)] active:shadow-elevation-pressed",
-            "warning" => "bg-surface text-foreground border-[length:var(--border-width)] border-warning shadow-elevation-interactive hover:bg-warning hover:text-warning-foreground hover:shadow-elevation-popover active:scale-[var(--active-scale)] active:shadow-elevation-pressed",
-            "link" => "bg-transparent text-muted-foreground border-none shadow-none underline-offset-4 hover:text-foreground hover:underline",
-            "default" => "bg-secondary text-secondary-foreground border-[length:var(--border-width-thin)] border-border hover:bg-secondary-hover active:scale-[var(--active-scale)]",
-            _ => "bg-primary text-primary-foreground border-none shadow-elevation-interactive hover:bg-primary-hover hover:shadow-elevation-popover active:scale-[var(--active-scale)] active:shadow-elevation-pressed",
-        };
-        let size_class = if variant == "link" {
-            "h-auto px-0 text-sm"
-        } else {
-            match size.as_str() {
-                "sm" => "h-button-sm px-3 text-sm",
-                "lg" => "h-button-lg px-6 text-base",
-                _ => "h-button-md px-4 text-sm",
-            }
-        };
-        let chrome = if variant == "link" {
-            ""
-        } else {
-            "chrome-button"
-        };
         let disabled = get_bool_or(props, "disabled", false);
         let busy = get_bool_or(props, "isLoading", false);
-        let cursor = if busy { "cursor-progress" } else { "" };
-        let base = format!("relative inline-flex items-center justify-center gap-2 font-medium rounded-interactive interactive-border cursor-pointer {chrome} transition-all duration-normal focus:outline-none focus-visible:ring-[length:var(--focus-ring-width)] focus-visible:ring-ring focus-visible:ring-offset-[length:var(--focus-ring-offset)] disabled:opacity-50 disabled:cursor-not-allowed {variant_class} {size_class} {cursor}");
-        let class = merge_class_name(&base, props);
+        let class = button_class(props);
         let style = crate::styles::style_with_props("", props);
         let html_type = get_string_or(props, "htmlType", "button");
         let action = get_string(props, "action");

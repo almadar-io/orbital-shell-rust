@@ -588,7 +588,13 @@ fn GraphViewCanvas(input: GraphProps) -> Element {
 
     let role = if on_click.is_some() { "group" } else { "img" };
     let aria = get_string(props, "aria-label").unwrap_or_else(|| "Graph".to_string());
-    let root_class = format!("relative overflow-hidden {class_name}");
+    let surface = if get_string_or(props, "surface", "auto") == "auto" {
+        "surface-content"
+    } else {
+        ""
+    };
+    let root_class =
+        crate::renderer::cn(&["relative overflow-hidden", surface, class_name.as_str()]);
     let root_style = format!(
         "width:{};height:{}px",
         match prop_width {

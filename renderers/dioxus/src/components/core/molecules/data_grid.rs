@@ -1,6 +1,8 @@
 use crate::components::core::atoms::checkbox::CheckboxRenderer;
 use crate::registry::{shared_root_attrs, DioxusPatternRegistry};
-use crate::renderer::{cn, format_display_value, merge_class_name, relation_cell_display, BOX_ATOM_BASE};
+use crate::renderer::{
+    cn, format_display_value, merge_class_name, relation_cell_display, BOX_ATOM_BASE,
+};
 use crate::renderer::{object_value as pattern_payload, pattern_spec as pattern};
 use crate::renderer::{DioxusPatternRenderer, DioxusView, EventSink, OwnedDioxusView};
 use dioxus::prelude::*;
@@ -263,18 +265,13 @@ fn Grid(input: GridProps) -> Element {
     if rows.is_empty() {
         return registry.render_spec(&empty_state(props), None, &view);
     }
-    let fields = {
-        let authored = get_array(props, "fields");
-        if authored.is_empty() {
-            let columns = get_array(props, "columns");
-            if columns.is_empty() {
-                get_columns(props, &rows)
-            } else {
-                columns
-            }
-        } else {
-            authored
-        }
+    let fields = if props
+        .get("fields")
+        .is_some_and(|fields| fields.as_array().is_some())
+    {
+        get_array(props, "fields")
+    } else {
+        get_array(props, "columns")
     };
     let title_field = fields
         .iter()
@@ -652,7 +649,12 @@ fn render_body(
         .filter(|field| variant_of(field) == "caption" && !is_boolean(field))
         .filter_map(|field| {
             let value = present(row, field)?;
-            let spec = text(field_text(props, field, value), "small", "secondary", "line-clamp-2");
+            let spec = text(
+                field_text(props, field, value),
+                "small",
+                "secondary",
+                "line-clamp-2",
+            );
             Some(registry.render_spec(&spec, None, view))
         })
         .collect::<Vec<_>>();

@@ -589,6 +589,10 @@ impl BaseDocument {
         let css = html_escape::decode_html_entities(&css);
         let sheet = self.make_stylesheet(&css, Origin::Author);
         self.add_stylesheet_for_node(sheet, target_id);
+        // ORBITAL PATCH (blitz-dom 0.2.4, parity): a body-level `<style>` inserted after the
+        // first style pass must restyle already-styled elements (and register its @keyframes),
+        // as a browser does; Stylo does not track late-attached sheets.
+        self.restyle_from_loaded_sheets();
     }
 
     pub fn remove_user_agent_stylesheet(&mut self, contents: &str) {

@@ -1,9 +1,8 @@
-use crate::renderer::{cn, merge_class_name, pattern_spec, BOX_ATOM_BASE};
 use crate::registry::{shared_root_attrs, DioxusPatternRegistry};
+use crate::renderer::{cn, merge_class_name, pattern_spec, BOX_ATOM_BASE};
 use crate::renderer::{DioxusPatternRenderer, DioxusView};
 use dioxus::prelude::*;
-use orbital_core::client::helpers::{
-    get_array, get_bool_or, get_number_or, get_string, };
+use orbital_core::client::helpers::{get_array, get_bool_or, get_number_or, get_string};
 use orbital_core::{Value, ValueMap};
 
 pub struct WizardProgressRenderer;
@@ -27,17 +26,19 @@ impl DioxusPatternRenderer for WizardProgressRenderer {
         let allow_navigation = get_bool_or(props, "allowNavigation", true);
         let step_click_event = get_string(props, "stepClickEvent");
         let class = merge_class_name(
-            if compact {
-                "@container border-b border-border px-4 py-2"
-            } else {
-                "@container border-b border-border px-6 py-4"
-            },
+            &cn(&[
+                BOX_ATOM_BASE,
+                "border-[length:var(--border-width)] border-border",
+                "@container border-b-heavy border-x-0 border-t-0 border-border",
+                if compact { "px-4 py-2" } else { "px-6 py-4" },
+            ]),
             props,
         );
+        let row_class = cn(&[BOX_ATOM_BASE, "flex items-center gap-2"]);
 
         rsx! {
             div { class: "{class}", ..shared_root_attrs(props),
-                div { class: "flex items-center gap-2",
+                div { class: "{row_class}",
                     for (index, step) in steps.iter().enumerate() {
                         {
                             let title = if let Some(title) = step.as_str() {
@@ -51,7 +52,7 @@ impl DioxusPatternRenderer for WizardProgressRenderer {
                             let label = if completed { String::new() } else { (index + 1).to_string() };
                             let aria_label = format!("Step {} of {}: {}", index + 1, total, title);
                             let button_class = format!(
-                                "flex-shrink-0 p-0 rounded-full text-sm tabular-nums border disabled:opacity-100 {} {} {}",
+                                "flex-shrink-0 p-0 rounded-full text-sm tabular-nums border-heavy disabled:opacity-100 {} {} {}",
                                 if compact { "w-6 h-6" } else { "w-8 h-8" },
                                 if active || completed { "bg-primary text-primary-foreground border-primary" } else { "bg-card text-muted-foreground border-border" },
                                 if can_navigate { "hover:bg-primary-hover" } else { "" },
@@ -89,11 +90,11 @@ impl DioxusPatternRenderer for WizardProgressRenderer {
                                     ("content", Value::string(title.to_string())),
                                 ],
                             );
-                            let separator_class = if index < current { "flex-1 min-w-4 h-0.5 bg-primary" } else { "flex-1 min-w-4 h-0.5 bg-border" };
+                            let separator_class = cn(&[BOX_ATOM_BASE, "flex-1 min-w-4 h-0.5", if index < current { "bg-primary" } else { "bg-border" }]);
                             rsx! {
                                 {registry.render_spec(&button, None, view)}
                                 if !compact { div { class: "{title_class}", "data-step-title": "", {registry.render_spec(&title_spec, None, view)} } }
-                                if index + 1 < total { span { aria_hidden: "true", class: "{separator_class}" } }
+                                if index + 1 < total { div { aria_hidden: "true", class: "{separator_class}" } }
                             }
                         }
                     }

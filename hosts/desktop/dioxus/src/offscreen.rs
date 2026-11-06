@@ -217,7 +217,13 @@ fn capture_with<R: OffscreenPaintRegistry>(
             break;
         }
     }
+    // Stylo starts CSS animations/transitions on the first resolve (clock 0.0) and evaluates them
+    // at the clock passed to each later resolve. The web capture settles for 1.5 s before
+    // shooting, so the document is advanced to the same instant: finite animations paint at
+    // their end state (`animation-fill-mode` honoured by Stylo), infinite ones at t = 1.5 s.
+    const ANIMATION_SETTLE_SECS: f64 = 1.5;
     doc.resolve(0.0);
+    doc.resolve(ANIMATION_SETTLE_SECS);
     let mut buffer = vec![255u8; width as usize * height as usize * 4];
     renderer.render(
         |painter| paint_scene(painter, &doc, 1.0, width, height),

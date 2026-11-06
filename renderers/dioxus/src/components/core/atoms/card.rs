@@ -8,6 +8,47 @@ use orbital_core::client::helpers::*;
 use orbital_core::client::recurse::*;
 use orbital_core::Value;
 
+/// The atom card root classes for `props`, shared with bodies that emit the card element around their own children.
+pub(crate) fn card_class(props: &Value) -> String {
+    let variant = get_string_or(props, "variant", "bordered");
+    let padding = get_string_or(props, "padding", "md");
+    let variant_class = match variant.as_str() {
+            "elevated" => {
+                "bg-card surface-material border-[length:var(--border-width)] border-border shadow transition-all duration-normal hover:shadow-elevation-dialog hover:translate-y-[var(--hover-translate-y)]"
+            }
+            "interactive" => {
+                "bg-card surface-material border-[length:var(--border-width)] border-border shadow cursor-pointer transition-all duration-normal hover:shadow-elevation-dialog"
+            }
+            _ => "surface-content transition-all duration-normal hover:shadow-elevation-dialog hover:translate-y-[var(--hover-translate-y)]",
+        };
+    let padding_class = match padding.as_str() {
+        "none" => "",
+        "sm" => "p-card-sm",
+        "lg" => "p-card-lg",
+        _ => "p-card-md",
+    };
+    let look_class = match get_string_or(props, "look", "elevated").as_str() {
+        "flat-bordered" => "shadow-none border-[length:var(--border-width)] border-border",
+        "borderless-divider" => "shadow-none border-0 border-b border-border rounded-none",
+        "ticket" => "shadow-none border-dashed border-[length:var(--border-width)] border-border",
+        "invoice" => {
+            "shadow-none border-[length:var(--border-width-thick)] border-border rounded-sm"
+        }
+        "chip" => "shadow-none rounded-pill border-[length:var(--border-width)] border-border",
+        "tile-image-first" => "p-0 overflow-hidden",
+        _ => "",
+    };
+    let shadow_class = match get_string(props, "shadow").as_deref() {
+        Some("none") => "shadow-none",
+        Some("sm") => "shadow-elevation-card",
+        Some("md") => "shadow",
+        Some("lg") => "shadow-elevation-dialog",
+        _ => "",
+    };
+    let base = format!("rounded-container relative transition-all duration-normal chrome-panel {variant_class} {padding_class} {look_class} {shadow_class}");
+    merge_class_name(&base, props)
+}
+
 /// Dioxus renderer for the `card` pattern.
 pub struct CardRenderer;
 
@@ -27,45 +68,7 @@ impl DioxusPatternRenderer for CardRenderer {
         view: &DioxusView<'_>,
         registry: &DioxusPatternRegistry,
     ) -> Element {
-        let variant = get_string_or(props, "variant", "bordered");
-        let padding = get_string_or(props, "padding", "md");
-        let variant_class = match variant.as_str() {
-            "elevated" => {
-                "bg-card surface-material border-[length:var(--border-width)] border-border shadow transition-all duration-normal hover:shadow-elevation-dialog hover:translate-y-[var(--hover-translate-y)]"
-            }
-            "interactive" => {
-                "bg-card surface-material border-[length:var(--border-width)] border-border shadow cursor-pointer transition-all duration-normal hover:shadow-elevation-dialog"
-            }
-            _ => "surface-content transition-all duration-normal hover:shadow-elevation-dialog hover:translate-y-[var(--hover-translate-y)]",
-        };
-        let padding_class = match padding.as_str() {
-            "none" => "",
-            "sm" => "p-card-sm",
-            "lg" => "p-card-lg",
-            _ => "p-card-md",
-        };
-        let look_class = match get_string_or(props, "look", "elevated").as_str() {
-            "flat-bordered" => "shadow-none border-[length:var(--border-width)] border-border",
-            "borderless-divider" => "shadow-none border-0 border-b border-border rounded-none",
-            "ticket" => {
-                "shadow-none border-dashed border-[length:var(--border-width)] border-border"
-            }
-            "invoice" => {
-                "shadow-none border-[length:var(--border-width-thick)] border-border rounded-sm"
-            }
-            "chip" => "shadow-none rounded-pill border-[length:var(--border-width)] border-border",
-            "tile-image-first" => "p-0 overflow-hidden",
-            _ => "",
-        };
-        let shadow_class = match get_string(props, "shadow").as_deref() {
-            Some("none") => "shadow-none",
-            Some("sm") => "shadow-elevation-card",
-            Some("md") => "shadow",
-            Some("lg") => "shadow-elevation-dialog",
-            _ => "",
-        };
-        let base = format!("rounded-container relative transition-all duration-normal chrome-panel {variant_class} {padding_class} {look_class} {shadow_class}");
-        let class = merge_class_name(&base, props);
+        let class = card_class(props);
         let title = get_string_or(props, "title", "");
         let subtitle = get_string_or(props, "subtitle", "");
         let loading = get_bool_or(props, "loading", false);

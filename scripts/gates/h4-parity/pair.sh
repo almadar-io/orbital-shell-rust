@@ -6,6 +6,8 @@
 REL=$1; THEME=$2; PORT=$3; OUT=$4
 NAME=${REL:t:r}
 [ -f $OUT/$NAME--$THEME.pair.png ] && exit 0
+free_gb=$(df -g $OUT:h | awk 'NR==2{print $4}')
+[ ${free_gb:-0} -ge ${H4_MIN_FREE_GB:-50} ] || { echo "DISK_LOW ${free_gb}GB free < ${H4_MIN_FREE_GB:-50}GB: refusing $NAME $THEME"; exit 5; }
 mkdir -p $OUT/src $OUT/log
 SRC=$OUT/src/$THEME/$NAME.lolo
 $PY $SCR/themed.py $STD/$REL $THEME $SRC || { echo "RESOLVE_FAIL $NAME $THEME"; exit 3; }
@@ -37,4 +39,7 @@ fi
 pkill -P $SPID 2>/dev/null; kill $SPID 2>/dev/null
 for pid in $(lsof -ti tcp:$PORT -sTCP:LISTEN); do kill $pid; done
 wait $SPID 2>/dev/null
-$PY $SCR/composite.py $OUT/$NAME--$THEME.web.png $OUT/$NAME--$THEME.desktop.png $OUT/$NAME--$THEME.pair.png
+# orb serve scaffolds a whole app (~100 MB) per program under .orbital/serve and keeps it: drop it with the pair.
+rm -rf $SERVE_DIR/.orbital/serve/$NAME
+$PY $SCR/composite.py $OUT/$NAME--$THEME.web.png $OUT/$NAME--$THEME.desktop.png $OUT/$NAME--$THEME.pair.png \
+  && rm -f $OUT/src/$NAME--$THEME.orb

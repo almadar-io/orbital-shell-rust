@@ -547,7 +547,38 @@ impl ElementCx<'_> {
         }
     }
 
+    // ORBITAL PATCH (blitz-paint 0.2, parity): table rows are laid out (as zero-content grid items
+    // spanning the row track) but are not layout children of the table, so their background and
+    // border were never painted. Paint each `<tr>` box before the cells, as browsers do.
+    fn draw_table_rows(&self, scene: &mut impl PaintScene) {
+        use style::values::specified::box_::DisplayInside;
+        fn collect(dom: &BaseDocument, id: usize, out: &mut Vec<usize>) {
+            for &child_id in &dom.tree()[id].children {
+                let child = &dom.tree()[child_id];
+                let Some(inside) = child.primary_styles().map(|s| s.clone_display().inside())
+                else {
+                    continue;
+                };
+                match inside {
+                    DisplayInside::TableRow => out.push(child_id),
+                    DisplayInside::TableRowGroup
+                    | DisplayInside::TableHeaderGroup
+                    | DisplayInside::TableFooterGroup => collect(dom, child_id, out),
+                    _ => {}
+                }
+            }
+        }
+        let mut rows = Vec::new();
+        collect(self.context.dom, self.node.id, &mut rows);
+        for row_id in rows {
+            self.context.render_node(scene, row_id, self.pos);
+        }
+    }
+
     fn draw_children(&self, scene: &mut impl PaintScene) {
+        if self.node.flags.is_table_root() {
+            self.draw_table_rows(scene);
+        }
         if let Some(children) = &*self.node.paint_children.borrow() {
             for child_id in children {
                 self.render_node(scene, *child_id, self.pos);
@@ -618,7 +649,7 @@ impl ElementCx<'_> {
                 Affine::translate((origin_x + tx, origin_y + ty)).pre_scale_non_uniform(sx, sy);
             let clip = Rect::from_origin_size((origin_x, origin_y), (cw, ch));
             crate::layers::maybe_with_layer(scene, slice, 1.0, Affine::IDENTITY, &clip, |scene| {
-                anyrender_svg::render_svg_tree(scene, svg, transform);
+                crate::svg_pattern::render_svg(scene, svg, transform);
             });
             return;
         }
@@ -641,7 +672,7 @@ impl ElementCx<'_> {
             Affine::translate((self.pos.x * self.scale + x, self.pos.y * self.scale + y))
                 .pre_scale_non_uniform(x_scale, y_scale);
 
-        anyrender_svg::render_svg_tree(scene, svg, transform);
+        crate::svg_pattern::render_svg(scene, svg, transform);
     }
 
     fn draw_image(&self, scene: &mut impl PaintScene) {

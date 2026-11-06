@@ -1,12 +1,11 @@
-use crate::renderer::merge_class_name;
-use crate::renderer::{pattern_spec as pattern};
 use crate::registry::{shared_root_attrs, DioxusPatternRegistry};
+use crate::renderer::pattern_spec as pattern;
+use crate::renderer::{cn, merge_class_name, BOX_ATOM_BASE};
 use crate::renderer::{
     emit_empty_event, DioxusPatternRenderer, DioxusView, EventSink, OwnedDioxusView,
 };
 use dioxus::prelude::*;
-use orbital_core::client::helpers::{
-    get_array, get_bool_or, get_number, get_string, };
+use orbital_core::client::helpers::{get_array, get_bool_or, get_number, get_string};
 use orbital_core::client::recurse::child_patterns;
 use orbital_core::{Value, ValueMap};
 
@@ -19,7 +18,6 @@ struct WizardContainerProps {
     registry: DioxusPatternRegistry,
 }
 
-
 fn step_event(sink: Option<EventSink>, name: Option<&str>, field: &str, step: usize) {
     if let (Some(sink), Some(name)) = (sink, name.filter(|name| !name.is_empty())) {
         let mut payload = ValueMap::new();
@@ -28,16 +26,27 @@ fn step_event(sink: Option<EventSink>, name: Option<&str>, field: &str, step: us
     }
 }
 
-fn button(label: &str, variant: &str, disabled: bool, action: &str) -> Value {
-    pattern(
-        "button",
-        [
-            ("label", Value::string(label)),
-            ("variant", Value::string(variant)),
-            ("disabled", Value::Bool(disabled)),
-            ("action", Value::string(action)),
-        ],
-    )
+fn button(
+    label: &str,
+    variant: &str,
+    disabled: bool,
+    action: &str,
+    left_icon: Option<&str>,
+    right_icon: Option<&str>,
+) -> Value {
+    let mut fields = vec![
+        ("label", Value::string(label)),
+        ("variant", Value::string(variant)),
+        ("disabled", Value::Bool(disabled)),
+        ("action", Value::string(action)),
+    ];
+    if let Some(icon) = left_icon {
+        fields.push(("leftIcon", Value::string(icon)));
+    }
+    if let Some(icon) = right_icon {
+        fields.push(("rightIcon", Value::string(icon)));
+    }
+    pattern("button", fields)
 }
 
 #[allow(non_snake_case)]
@@ -160,6 +169,8 @@ fn WizardContainer(props: WizardContainerProps) -> Element {
         "secondary",
         is_first || !allow_back,
         "__wizard_back",
+        Some("chevron-left"),
+        None,
     );
     let next = button(
         if is_last { "Complete" } else { "Next" },
@@ -170,30 +181,65 @@ fn WizardContainer(props: WizardContainerProps) -> Element {
         } else {
             "__wizard_next"
         },
+        None,
+        if is_last { None } else { Some("chevron-right") },
     );
-    let header_class = if compact {
-        "hidden"
-    } else {
-        "px-6 py-4 border-b border-border"
-    };
-    let content_class = if compact {
-        "flex-1 overflow-auto p-4"
-    } else {
-        "flex-1 overflow-auto p-6"
-    };
-    let footer_class = if compact {
-        "border-t border-border flex justify-between px-4 py-2"
-    } else {
-        "border-t border-border flex justify-between px-6 py-4"
-    };
+    let header_class = cn(&[
+        BOX_ATOM_BASE,
+        "px-6 py-4 border-[length:var(--border-width)] border-border",
+        "border-b-heavy border-x-0 border-t-0 border-border",
+    ]);
+    let content_class = cn(&[
+        BOX_ATOM_BASE,
+        "flex-1 overflow-auto",
+        if compact { "p-4" } else { "p-6" },
+    ]);
+    let footer_class = cn(&[
+        BOX_ATOM_BASE,
+        "border-[length:var(--border-width)] border-border",
+        "border-t-heavy border-x-0 border-b-0 border-border flex justify-between",
+        if compact { "px-4 py-2" } else { "px-6 py-4" },
+    ]);
+    let title_spec = pattern(
+        "typography",
+        [
+            ("variant", Value::string("h4")),
+            ("as", Value::string("h2")),
+            ("content", Value::string(title)),
+        ],
+    );
+    let description_spec = description.map(|text| {
+        pattern(
+            "typography",
+            [
+                ("variant", Value::string("body2")),
+                ("content", Value::string(text)),
+                ("className", Value::string("text-muted-foreground mt-1")),
+            ],
+        )
+    });
+    let step_label = pattern(
+        "typography",
+        [
+            ("variant", Value::string("caption")),
+            (
+                "content",
+                Value::string(format!("Step {} of {}", current + 1, total)),
+            ),
+            ("className", Value::string("text-muted-foreground")),
+        ],
+    );
+    let step_label_class = cn(&[BOX_ATOM_BASE, "flex items-center gap-2"]);
 
     rsx! {
         div { class: "{class}", ..shared_root_attrs(&props.props),
             if show_progress { {props.registry.render_spec(&progress, None, &action_view)} }
             if total > 0 {
-                div { class: "{header_class}",
-                    h2 { class: "text-lg font-semibold", "{title}" }
-                    if let Some(description) = description { p { class: "mt-1 text-sm text-muted-foreground", "{description}" } }
+                if !compact {
+                    div { class: "{header_class}",
+                        {props.registry.render_spec(&title_spec, None, &view)}
+                        if let Some(description) = description_spec { {props.registry.render_spec(&description, None, &view)} }
+                    }
                 }
                 div { class: "{content_class}",
                     if let Some(content) = content { {view.render_node(&props.registry, content)} }
@@ -201,7 +247,7 @@ fn WizardContainer(props: WizardContainerProps) -> Element {
                 }
                 div { class: "{footer_class}",
                     {props.registry.render_spec(&back, None, &action_view)}
-                    span { class: "text-sm text-muted-foreground", "Step {current + 1} of {total}" }
+                    div { class: "{step_label_class}", {props.registry.render_spec(&step_label, None, &view)} }
                     {props.registry.render_spec(&next, None, &action_view)}
                 }
             }

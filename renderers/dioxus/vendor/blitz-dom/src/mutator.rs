@@ -715,7 +715,14 @@ impl<'doc> DocumentMutator<'doc> {
         let node = &self.doc.nodes[target_id];
         if let Some(raw_src) = node.attr(local_name!("src")) {
             if !raw_src.is_empty() {
-                let src = self.doc.resolve_url(raw_src);
+                // ORBITAL PATCH: a src that cannot be resolved to a URL (e.g. "Author Avatar Url"
+                // against a base that cannot join it) used to panic in `resolve_url` or never
+                // start a fetch, so no error event reached the element. Hand the provider an
+                // unfetchable URL instead: every provider answers it with the handler's
+                // `ImageError`, which the document turns into the element's `error` event.
+                let src = self.doc.url.resolve_relative(raw_src).unwrap_or_else(|| {
+                    url::Url::parse("about:blank").expect("about:blank is a valid URL")
+                });
                 self.doc.net_provider.fetch(
                     self.doc.id(),
                     Request::get(src),
