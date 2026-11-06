@@ -9,7 +9,7 @@ or a path to a list file of behavior paths relative to `packages/almadar-std/beh
    implicit), composes std's mock page seed as `orb serve` does, and copies the locale catalogs beside it. `orb resolve`
    lowers it.
 2. `orb serve` runs it. The web client is captured with headless Chrome over the DevTools protocol once no request
-   is in flight (the server's open-ended `EventSource` stream excepted) and its DOM has been still for 1.5 s since the
+   is in flight (the server's open-ended `EventSource` stream and in-memory `blob:`/`data:` loads excepted) and its DOM has been still for 1.5 s since the
    last change or request completion (`cdp_shot.mjs`; writes `.web.png` and `.web.html`, and logs `WEB_OK`, or
    `WEB_TIMEOUT` with the requests still in flight). Anything but `WEB_OK` is a `WEB_FAIL`: a page that never settled
    is not scored. Each worker reuses one Chrome, run without site isolation so a cross-site iframe's requests

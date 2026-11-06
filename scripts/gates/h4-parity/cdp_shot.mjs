@@ -1,6 +1,6 @@
 // cdp_shot.mjs <url> <out.png> <profile-dir> <debug-port>
-// Capture <url> at 1280x900 once the page has rendered app content, no request is in flight (the open-ended EventSource
-// stream excepted), and its DOM has been
+// Capture <url> at 1280x900 once the page has rendered app content, no network request is in flight (the open-ended EventSource
+// stream and in-memory blob:/data: loads excepted), and its DOM has been
 // unchanged for 1.5 s since the last DOM change or request completion (25 s cap).
 // With CDP_REUSE=1 it opens a tab in the Chrome already listening on <debug-port> (one per worker) and closes it after;
 // otherwise it launches its own headless Chrome. Writes <out>.png and <out>.html; prints WEB_OK / WEB_TIMEOUT.
@@ -51,7 +51,7 @@ try {
   ws.addEventListener('message', (ev) => {
     const msg = JSON.parse(ev.data);
     if (msg.id && pending.has(msg.id)) { pending.get(msg.id)(msg); pending.delete(msg.id); }
-    if (msg.method === 'Network.requestWillBeSent' && msg.params.type !== 'EventSource') { inFlight.set(msg.params.requestId, `${msg.params.type ?? ''} ${msg.params.request.url}`); netChangedAt = Date.now(); }
+    if (msg.method === 'Network.requestWillBeSent' && msg.params.type !== 'EventSource' && !/^(blob|data):/.test(msg.params.request.url)) { inFlight.set(msg.params.requestId, `${msg.params.type ?? ''} ${msg.params.request.url}`); netChangedAt = Date.now(); }
     if (msg.method === 'Network.loadingFinished' || msg.method === 'Network.loadingFailed') { inFlight.delete(msg.params.requestId); netChangedAt = Date.now(); }
     if (msg.method === 'Runtime.exceptionThrown') errors.push(msg.params.exceptionDetails?.exception?.description ?? msg.params.exceptionDetails?.text);
     if (msg.method === 'Runtime.consoleAPICalled' && msg.params.type === 'error') errors.push(msg.params.args.map((a) => a.value ?? a.description).join(' '));
