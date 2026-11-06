@@ -16,9 +16,11 @@ impl CheckboxRenderer {
         view: &DioxusView<'_>,
         on_change: Option<Callback<bool>>,
     ) -> Element {
-        let class = merge_class_name("flex flex-col", props);
-        let label = get_string_or(props, "label", "");
-        let accessible_label = get_string(props, "aria-label").unwrap_or_else(|| label.clone());
+        let input_class = merge_class_name(
+            "peer h-4 w-4 border-[length:var(--border-width)] border-border accent-primary focus:ring-ring focus:ring-offset-0 bg-card checked:bg-primary disabled:opacity-50 disabled:cursor-not-allowed",
+            props,
+        );
+        let label = get_string(props, "label").filter(|text| !text.is_empty());
         let controlled = get_bool(props, "checked");
         let checked = controlled.unwrap_or_else(|| get_bool_or(props, "defaultChecked", false));
         let error = get_string(props, "error").filter(|text| !text.is_empty());
@@ -26,14 +28,30 @@ impl CheckboxRenderer {
         let required = get_bool_or(props, "required", false);
         let field_id = get_string(props, "id");
         let error_id = field_id.as_ref().map(|id| format!("{id}-error"));
-        let mut defaults: Vec<(&'static str, Value)> = Vec::new();
-        if required {
-            defaults.push(("aria-required", Value::Bool(true)));
-        }
-        if error.is_some() {
-            defaults.push(("aria-invalid", Value::Bool(true)));
-        }
-        let attrs = passthrough_attrs(props, &defaults);
+        let described_by = {
+            let extra = get_string(props, "aria-describedby");
+            let joined = [extra, error_id.clone().filter(|_| error.is_some())]
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>()
+                .join(" ");
+            (!joined.is_empty()).then_some(joined)
+        };
+        let attrs: Vec<Attribute> = passthrough_attrs(props, &[])
+            .into_iter()
+            .filter(|attr| {
+                !matches!(
+                    attr.name,
+                    "aria-required" | "aria-invalid" | "aria-describedby"
+                )
+            })
+            .collect();
+        let invalid = if error.is_some() {
+            Some("true".to_string())
+        } else {
+            get_string(props, "aria-invalid")
+        };
+        let name = get_string(props, "name");
         let action = get_string(props, "onChange");
         let sink = view.sink;
         let emit_change = move |next_checked: bool| {
@@ -47,42 +65,36 @@ impl CheckboxRenderer {
             }
         };
         let emit_label_change = emit_change.clone();
-        let state = if checked {
-            dioxus_primitives::checkbox::CheckboxState::Checked
-        } else {
-            dioxus_primitives::checkbox::CheckboxState::Unchecked
-        };
+        let label_for = field_id.clone();
 
         rsx! {
-            div {
-                class: "{class}",
-                ..attrs,
+            div { class: "flex flex-col",
                 div { class: "flex items-center",
-                dioxus_primitives::checkbox::Checkbox {
-                    class: "peer h-4 w-4 shrink-0 flex items-center justify-center border-[length:var(--border-width)] border-border bg-card focus:ring-ring focus:ring-offset-0 disabled:opacity-50 disabled:cursor-not-allowed data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground",
-                    checked: controlled.map(|_| state),
-                    default_checked: state,
-                    aria_label: "{accessible_label}",
-                    disabled: disabled,
-                    required: required,
-                    on_checked_change: move |state: dioxus_primitives::checkbox::CheckboxState| {
-                        emit_change(bool::from(state));
-                    },
-                    dioxus_primitives::checkbox::CheckboxIndicator {
-                        class: "hidden data-[state=checked]:block data-[state=indeterminate]:block text-xs leading-none",
-                        span {
-                            style: "display:block;width:5px;height:9px;border-right:2px solid currentColor;border-bottom:2px solid currentColor;transform:rotate(45deg);margin-top:-2px"
+                    div { class: "relative flex items-center",
+                        input {
+                            r#type: "checkbox",
+                            class: "{input_class}",
+                            checked: checked,
+                            disabled: disabled,
+                            required: required,
+                            id: field_id.clone(),
+                            name: name,
+                            aria_required: required.then_some("true"),
+                            aria_invalid: invalid,
+                            aria_describedby: described_by,
+                            onchange: move |event| emit_change(event.checked()),
+                            ..attrs,
                         }
                     }
-                }
-                if !label.is_empty() {
-                    span {
-                        class: "ml-2 text-sm text-foreground font-medium cursor-pointer select-none",
-                        onclick: move |_| { if !disabled { emit_label_change(!checked) } },
-                        "{label}"
-                        if required { span { aria_hidden: "true", class: "text-error ml-1", "*" } }
+                    if let Some(text) = label.as_ref() {
+                        label {
+                            r#for: label_for.clone(),
+                            class: "ml-2 text-sm text-foreground font-medium cursor-pointer select-none",
+                            onclick: move |_| { if label_for.is_none() && !disabled { emit_label_change(!checked) } },
+                            "{text}"
+                            if required { span { aria_hidden: "true", class: "text-error ml-1", "*" } }
+                        }
                     }
-                }
                 }
                 if let Some(text) = error.as_ref() {
                     span { id: error_id.clone(), class: "text-xs font-normal text-error mt-1", "{text}" }

@@ -19,29 +19,43 @@ static LUCIDE_ALIASES: LazyLock<HashMap<String, String>> = LazyLock::new(|| {
     serde_json::from_str(include_str!("../../../../assets/lucide-aliases.json"))
         .expect("generated web Lucide aliases must be valid JSON")
 });
+/// The web's `kebabToPascal`: each hyphen part capitalised (digit-only parts unchanged), joined.
+fn kebab_to_pascal(name: &str) -> String {
+    name.split('-')
+        .map(|part| {
+            let mut chars = part.chars();
+            match chars.next() {
+                Some(first) => first.to_ascii_uppercase().to_string() + chars.as_str(),
+                None => String::new(),
+            }
+        })
+        .collect()
+}
+
 static LUCIDE_PASCAL: LazyLock<HashMap<String, String>> = LazyLock::new(|| {
     LUCIDE_NODES
         .keys()
-        .map(|name| {
-            let pascal = name
-                .split('-')
-                .map(|part| {
-                    let mut chars = part.chars();
-                    match chars.next() {
-                        Some(first) => first.to_ascii_uppercase().to_string() + chars.as_str(),
-                        None => String::new(),
-                    }
-                })
-                .collect::<String>();
-            (pascal, name.clone())
-        })
+        .map(|name| (kebab_to_pascal(name), name.clone()))
         .collect()
+});
+// The alias table's keys are glued-digit spellings ("edit3"); the web's split-digit keys ("edit-3") share their PascalCase.
+static LUCIDE_ALIAS_PASCAL: LazyLock<HashMap<String, String>> = LazyLock::new(|| {
+    let mut keys: Vec<&String> = LUCIDE_ALIASES.keys().collect();
+    keys.sort();
+    let mut map = HashMap::new();
+    for key in keys {
+        map.entry(kebab_to_pascal(key))
+            .or_insert_with(|| LUCIDE_ALIASES[key].clone());
+    }
+    map
 });
 
 fn icon_nodes(name: &str) -> &'static [IconNode] {
+    let pascal = kebab_to_pascal(name);
     let canonical = LUCIDE_ALIASES
         .get(name)
-        .or_else(|| LUCIDE_PASCAL.get(name))
+        .or_else(|| LUCIDE_PASCAL.get(&pascal))
+        .or_else(|| LUCIDE_ALIAS_PASCAL.get(&pascal))
         .map(String::as_str)
         .unwrap_or(name);
     LUCIDE_NODES

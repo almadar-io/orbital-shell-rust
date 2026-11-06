@@ -1,4 +1,4 @@
-use crate::renderer::merge_class_name;
+use crate::renderer::{cn, merge_class_name, pattern_spec, BOX_ATOM_BASE};
 use crate::registry::{shared_root_attrs, DioxusPatternRegistry};
 use crate::renderer::{DioxusPatternRenderer, DioxusView};
 use dioxus::prelude::*;
@@ -74,11 +74,25 @@ impl DioxusPatternRenderer for WizardProgressRenderer {
                                 }
                             }
                             let button = Value::Object(button.into());
-                            let title_class = if active { "min-w-0 text-foreground" } else { "min-w-0 text-muted-foreground hidden @md:block" };
+                            let title_class = cn(&[
+                                BOX_ATOM_BASE,
+                                "min-w-0",
+                                if active { "" } else { "hidden @md:block" },
+                                if active { "text-foreground" } else { "text-muted-foreground" },
+                            ]);
+                            let title_spec = pattern_spec(
+                                "typography",
+                                [
+                                    ("variant", Value::string("small")),
+                                    ("weight", Value::string("medium")),
+                                    ("truncate", Value::Bool(true)),
+                                    ("content", Value::string(title.to_string())),
+                                ],
+                            );
                             let separator_class = if index < current { "flex-1 min-w-4 h-0.5 bg-primary" } else { "flex-1 min-w-4 h-0.5 bg-border" };
                             rsx! {
                                 {registry.render_spec(&button, None, view)}
-                                if !compact { span { class: "{title_class}", "{title}" } }
+                                if !compact { div { class: "{title_class}", "data-step-title": "", {registry.render_spec(&title_spec, None, view)} } }
                                 if index + 1 < total { span { aria_hidden: "true", class: "{separator_class}" } }
                             }
                         }

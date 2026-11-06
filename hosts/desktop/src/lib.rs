@@ -6,6 +6,7 @@ use orbital_client_dioxus::{offscreen, shell as dioxus};
 use orbital_client_tui::TuiApp;
 use orbital_core::client::bridge::{KernelBridge, ServerBridge};
 use orbital_core::client::client_core::ClientCore;
+use orbital_core::client::client_kernel::ClientKernel;
 use orbital_core::client::http::SyncServerBridge;
 use orbital_core::client::render_probe::{GameCanvasOutcome, RenderTarget};
 use orbital_core::desktop_protocol::{DesktopProgram, DesktopReply, DesktopRequest, RENDERERS};
@@ -52,10 +53,37 @@ fn client_schema(schema: &OrbitalSchema) -> Result<OrbitalSchema, String> {
     serde_json::from_value(orbital_core::effects::runs_on::client_program(&program)).map_err(|e| format!("client program: {e}"))
 }
 
+/// The viewer's locales and their catalogs (locale, then qualified key, to message).
+type Messages = (Vec<String>, std::collections::HashMap<String, std::collections::HashMap<String, String>>);
+
+/// The catalogs of a program that declares `locales`, read from beside its resolved `.orb` as the served host reads
+/// them. A program without locales has none; one with locales and no path to read them from is refused, not
+/// painted with empty messages.
+fn messages_of(schema: &OrbitalSchema, program_path: Option<&Path>) -> Result<Option<Messages>, String> {
+    let Some(locales) = schema.locales.clone() else {
+        return Ok(None);
+    };
+    let path = program_path.ok_or_else(|| format!("{} declares locales {locales:?} but no program path says where their catalogs are", schema.name))?;
+    let catalogs = crate::host::boot::read_catalogs(path, &locales).map_err(|e| e.to_string())?;
+    Ok(Some((locales, catalogs)))
+}
+
 /// An in-process kernel over the app's own rows.
-fn kernel(schema: &OrbitalSchema) -> Result<Arc<dyn ServerBridge>, String> {
+fn kernel(schema: &OrbitalSchema, messages: Option<&Messages>) -> Result<Arc<dyn ServerBridge>, String> {
     let kernel = KernelBridge::new(schema.clone()).map_err(|e| format!("kernel bridge: {e}"))?;
+    if let Some((locales, catalogs)) = messages {
+        kernel.set_messages(locales.clone(), catalogs.clone());
+    }
     Ok(Arc::new(kernel))
+}
+
+/// The client-role circuit over `bridge`, with the viewer's messages installed before its first INIT.
+fn circuit(schema: &OrbitalSchema, bridge: Arc<dyn ServerBridge>, messages: Option<&Messages>) -> Result<ClientCore, String> {
+    let kernel = ClientKernel::new(schema.clone(), Some(bridge)).map_err(|e| format!("client kernel: {e}"))?;
+    if let Some((locales, catalogs)) = messages {
+        kernel.set_messages(locales.clone(), catalogs.clone());
+    }
+    Ok(ClientCore::with_client_kernel(schema.clone(), Arc::new(kernel)))
 }
 
 /// One mounted app on one renderer: drive its circuit, capture what it shows.
@@ -65,14 +93,15 @@ enum Surface {
 }
 
 impl Surface {
-    fn mount(renderer: Renderer, schema: &OrbitalSchema, bridge: Arc<dyn ServerBridge>) -> Result<Self, String> {
+    fn mount(renderer: Renderer, schema: &OrbitalSchema, bridge: Arc<dyn ServerBridge>, messages: Option<&Messages>) -> Result<Self, String> {
+        let core = circuit(schema, bridge, messages)?;
         Ok(match renderer {
             Renderer::Dioxus => {
-                dioxus::mount(schema.clone(), bridge)?;
+                dioxus::mount_circuit(core);
                 orbital_client_dioxus::app::CSS_TEXT.with(|c| *c.borrow_mut() = orbital_client_dioxus::styles::program_stylesheets(schema));
                 Surface::Dioxus
             }
-            Renderer::Tui => Surface::Tui(Box::new(TuiApp::new(schema.clone(), Some(bridge), Vec::new()).map_err(|e| format!("{e:#}"))?)),
+            Renderer::Tui => Surface::Tui(Box::new(TuiApp::with_core(core, Vec::new()))),
         })
     }
 
@@ -102,9 +131,10 @@ impl Surface {
 }
 
 /// Every orbital, initialised, captured once.
-fn screenshot(renderer: Renderer, item: &str, schema: &OrbitalSchema, out_dir: &Path) -> Result<Vec<PathBuf>, String> {
+fn screenshot(renderer: Renderer, item: &str, schema: &OrbitalSchema, out_dir: &Path, program_path: Option<&Path>) -> Result<Vec<PathBuf>, String> {
     std::fs::create_dir_all(out_dir).map_err(|e| format!("{}: {e}", out_dir.display()))?;
-    let mut surface = Surface::mount(renderer, schema, kernel(schema)?)?;
+    let messages = messages_of(schema, program_path)?;
+    let mut surface = Surface::mount(renderer, schema, kernel(schema, messages.as_ref())?, messages.as_ref())?;
     let mut written = Vec::new();
     for idx in 0..schema.orbitals.len().max(1) {
         surface.drive(|core| {
@@ -125,13 +155,15 @@ fn screenshot_route(
     out_dir: &Path,
     route: &str,
     server: Option<&str>,
+    program_path: Option<&Path>,
 ) -> Result<PathBuf, String> {
     std::fs::create_dir_all(out_dir).map_err(|e| format!("{}: {e}", out_dir.display()))?;
+    let messages = messages_of(schema, program_path)?;
     let (schema, bridge): (OrbitalSchema, Arc<dyn ServerBridge>) = match server {
         Some(url) => (client_schema(schema)?, Arc::new(SyncServerBridge::new(url))),
-        None => (schema.clone(), kernel(schema)?),
+        None => (schema.clone(), kernel(schema, messages.as_ref())?),
     };
-    let mut surface = Surface::mount(renderer, &schema, bridge)?;
+    let mut surface = Surface::mount(renderer, &schema, bridge, messages.as_ref())?;
     let painted = surface.drive(|core| {
         // The window's first mount already opened the program's first page; another route is opened as navigation.
         if core.page_mount_route().as_deref() != Some(route) {
@@ -207,11 +239,11 @@ impl DesktopProgram for Desktop {
                 Renderer::Dioxus => orbital_client_dioxus::probe_target::DioxusTarget::new().probe_game_canvas(&pattern, &props),
                 Renderer::Tui => GameCanvasOutcome::Skip(format!("`{pattern}`: the terminal renderer paints no canvases")),
             })),
-            DesktopRequest::Screenshot { renderer, item, schema, out_dir, route, server } => match route {
-                Some(route) => screenshot_route(Renderer::parse(&renderer)?, &item, &schema, &out_dir, &route, server.as_deref())
+            DesktopRequest::Screenshot { renderer, item, schema, out_dir, route, server, program_path } => match route {
+                Some(route) => screenshot_route(Renderer::parse(&renderer)?, &item, &schema, &out_dir, &route, server.as_deref(), program_path.as_deref())
                     .map(|file| DesktopReply::Files(vec![file]))
                     .map_err(failed),
-                None => screenshot(Renderer::parse(&renderer)?, &item, &schema, &out_dir).map(DesktopReply::Files).map_err(failed),
+                None => screenshot(Renderer::parse(&renderer)?, &item, &schema, &out_dir, program_path.as_deref()).map(DesktopReply::Files).map_err(failed),
             },
         }
     }
@@ -224,10 +256,12 @@ impl DesktopProgram for Desktop {
                 let schema = orbital_core::schema::parse_schema(&json).map_err(|e| e.to_string())?;
                 let title = schema.name.clone();
                 let css = orbital_client_dioxus::styles::program_stylesheets(&schema);
-                match server {
-                    Some(url) => dioxus::mount(client_schema(&schema)?, Arc::new(SyncServerBridge::new(url)))?,
-                    None => dioxus::mount_core(&json)?,
+                let messages = messages_of(&schema, Some(schema_path))?;
+                let (circuit_schema, bridge): (OrbitalSchema, Arc<dyn ServerBridge>) = match server {
+                    Some(url) => (client_schema(&schema)?, Arc::new(SyncServerBridge::new(url))),
+                    None => (schema.clone(), kernel(&schema, messages.as_ref())?),
                 };
+                dioxus::mount_circuit(circuit(&circuit_schema, bridge, messages.as_ref())?);
                 orbital_client_dioxus::native::open_window(css, &title);
                 Ok(())
             }

@@ -937,7 +937,7 @@ fn scatter_chart(
                     let cx = pl + ((p.x - min_x) / range_x) * chart_width;
                     let cy = pt + chart_height - ((p.y - min_y) / range_y) * chart_height;
                     let r = p.size.unwrap_or(5.0);
-                    let color = p.color.clone().unwrap_or_else(|| CHART_COLORS[idx % CHART_COLORS.len()].to_string());
+                    let color = p.color.clone().filter(|c| !c.is_empty()).unwrap_or_else(|| CHART_COLORS[idx % CHART_COLORS.len()].to_string());
                     let label = p.label.clone().unwrap_or_else(|| format!("({}, {})", num(p.x), num(p.y)));
                     let drill_event = drill.clone();
                     let payload = emit_payload(&label, p.y, "default");

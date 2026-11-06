@@ -916,6 +916,23 @@ impl<'a> TElement for BlitzNode<'a> {
                 }
             }
 
+            // ORBITAL PATCH (blitz-dom 0.2, parity): an `<svg>`'s width/height attributes are
+            // presentation hints for CSS width/height (SVG2). Without them `width="100%"
+            // height="280"` took its height from the aspect ratio instead of 280px.
+            if *tag == local_name!("svg")
+                && (*name == local_name!("width") || *name == local_name!("height"))
+            {
+                use style::values::generics::{length::Size, NonNegative};
+                if let Some(len) = parse_size_attr(value.trim(), |v| *v >= 0.0) {
+                    let size = Size::LengthPercentage(NonNegative(len));
+                    push_style(if *name == local_name!("width") {
+                        PropertyDeclaration::Width(size)
+                    } else {
+                        PropertyDeclaration::Height(size)
+                    });
+                }
+            }
+
             if *name == local_name!("bgcolor") {
                 use style::values::specified::Color;
                 if let Some((r, g, b, a)) = parse_color_attr(value) {

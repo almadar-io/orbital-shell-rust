@@ -353,6 +353,9 @@ pub fn default_registry() -> DioxusPatternRegistry {
             crate::components::core::atoms::atlas_panel::AtlasPanelRenderer,
         ));
     }
+    registry.register(Box::new(
+        crate::components::core::atoms::video_frame::VideoFrameRenderer,
+    ));
     #[cfg(all(feature = "research-video", not(target_arch = "wasm32")))]
     registry.register(Box::new(
         crate::components::core::atoms::video_embed::VideoEmbedRenderer,

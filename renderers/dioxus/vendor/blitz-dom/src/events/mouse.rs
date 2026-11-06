@@ -26,6 +26,7 @@ pub(crate) fn handle_mousemove(
         return changed;
     }
 
+    let input_y_offset = doc.nodes[target].single_line_input_y_offset(doc.viewport.scale_f64());
     let node = &mut doc.nodes[target];
     let Some(el) = node.data.downcast_element_mut() else {
         return changed;
@@ -43,7 +44,7 @@ pub(crate) fn handle_mousemove(
 
         let content_box_offset = taffy::Point {
             x: node.final_layout.padding.left + node.final_layout.border.left,
-            y: node.final_layout.padding.top + node.final_layout.border.top,
+            y: node.final_layout.padding.top + node.final_layout.border.top + input_y_offset,
         };
 
         let x = (hit.x - content_box_offset.x) as f64 * doc.viewport.scale_f64();
@@ -68,6 +69,7 @@ pub(crate) fn handle_mousedown(doc: &mut BaseDocument, target: usize, x: f32, y:
         return;
     }
 
+    let input_y_offset = doc.nodes[target].single_line_input_y_offset(doc.viewport.scale_f64());
     let node = &mut doc.nodes[target];
     let Some(el) = node.data.downcast_element_mut() else {
         return;
@@ -81,7 +83,7 @@ pub(crate) fn handle_mousedown(doc: &mut BaseDocument, target: usize, x: f32, y:
     if let SpecialElementData::TextInput(ref mut text_input_data) = el.special_data {
         let content_box_offset = taffy::Point {
             x: node.final_layout.padding.left + node.final_layout.border.left,
-            y: node.final_layout.padding.top + node.final_layout.border.top,
+            y: node.final_layout.padding.top + node.final_layout.border.top + input_y_offset,
         };
         let x = (hit.x - content_box_offset.x) as f64 * doc.viewport.scale_f64();
         let y = (hit.y - content_box_offset.y) as f64 * doc.viewport.scale_f64();

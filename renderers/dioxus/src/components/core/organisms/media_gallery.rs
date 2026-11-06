@@ -1,6 +1,6 @@
 //! Native Dioxus body for the `media-gallery` pattern, mirroring `MediaGallery.tsx`.
 
-use crate::renderer::merge_class_name;
+use crate::renderer::cn;
 use crate::registry::DioxusPatternRegistry;
 use crate::renderer::{
     number_value, object_value, pattern_spec, DioxusPatternRenderer, DioxusView, EventSink,
@@ -161,7 +161,14 @@ fn Gallery(input: GalleryProps) -> Element {
         "portrait" => "aspect-[3/4]",
         _ => "aspect-square",
     };
-    let root_class = merge_class_name("bg-transparent shadow-none p-6 rounded-container", props);
+    let surface_class = if get_string_or(props, "surface", "auto") == "auto" { "surface-content" } else { "" };
+    let root_class = cn(&[
+        BOX_ATOM_BASE,
+        surface_class,
+        "p-6 rounded-container",
+        get_string_or(props, "className", "").trim(),
+    ]);
+    let grid_class = cn(&[BOX_ATOM_BASE, "grid gap-3", columns_class]);
     let sink = view.sink;
 
     let header = (title.is_some() || show_upload || !actions.is_empty()).then(|| {
@@ -292,7 +299,7 @@ fn Gallery(input: GalleryProps) -> Element {
             div { class: "flex flex-col gap-4 items-stretch justify-start", style: "height:auto",
                 if let Some(spec) = header.as_ref() { {registry.render_spec(spec, None, &view)} }
                 if let Some(spec) = count_spec.as_ref() { {registry.render_spec(spec, None, &view)} }
-                div { class: "{BOX_ATOM_BASE} grid gap-3 {columns_class}",
+                div { class: "{grid_class}",
                     for (index, item) in items.iter().enumerate() {
                         {
                             let is_selected = selected.contains(&item.id);
@@ -315,6 +322,13 @@ fn Gallery(input: GalleryProps) -> Element {
                                 ("variant", Value::string("caption")),
                                 ("className", Value::string("text-primary-foreground text-xs")),
                                 ("content", Value::string("\u{2713}")),
+                            ]);
+                            let item_class = cn(&[
+                                BOX_ATOM_BASE,
+                                "group relative overflow-hidden rounded-container cursor-pointer",
+                                "border-heavy transition-all duration-fast",
+                                tone,
+                                aspect,
                             ]);
                             let mut pick = {
                                 let id = item.id.clone();
@@ -344,7 +358,7 @@ fn Gallery(input: GalleryProps) -> Element {
                             rsx! {
                                 div {
                                     key: "{item.id}",
-                                    class: "{BOX_ATOM_BASE} group relative overflow-hidden rounded-container cursor-pointer border-heavy transition-all duration-fast {tone} {aspect}",
+                                    class: "{item_class}",
                                     role: "button",
                                     tabindex: "0",
                                     "aria-label": "{label}",

@@ -220,46 +220,59 @@ impl BlitzDomPainter<'_> {
         cx.draw_outline(scene);
         cx.draw_outset_box_shadow(scene);
 
-        let opacity_clip = cx.frame.border_box_path();
+        // ORBITAL PATCH (blitz-paint 0.2, parity): `clip-path: polygon(...)` (the only basic
+        // shape implemented; reference box is always the border box) clips the element.
+        let shape_clip = polygon_clip_path(&cx.style, &cx.frame, self.scale);
+        let shape_clip_path = shape_clip.clone().unwrap_or_default();
         maybe_with_layer(
             scene,
-            has_opacity,
-            opacity,
+            shape_clip.is_some(),
+            1.0,
             cx.transform,
-            &opacity_clip,
+            &shape_clip_path,
             |scene| {
-                cx.draw_background(scene);
-                cx.draw_border(scene);
+                let opacity_clip = cx.frame.border_box_path();
+                maybe_with_layer(
+                    scene,
+                    has_opacity,
+                    opacity,
+                    cx.transform,
+                    &opacity_clip,
+                    |scene| {
+                        cx.draw_background(scene);
+                        cx.draw_border(scene);
 
-                let clip = cx.frame.padding_box_path();
-                maybe_with_layer(scene, should_clip, 1.0, cx.transform, &clip, |scene| {
-                    cx.draw_inset_box_shadow(scene);
-                    cx.stroke_devtools(scene);
+                        let clip = cx.frame.padding_box_path();
+                        maybe_with_layer(scene, should_clip, 1.0, cx.transform, &clip, |scene| {
+                            cx.draw_inset_box_shadow(scene);
+                            cx.stroke_devtools(scene);
 
-                    // Now that background has been drawn, offset pos and cx in order to draw our contents scrolled
-                    let content_position = Point {
-                        x: content_position.x - node.scroll_offset.x,
-                        y: content_position.y - node.scroll_offset.y,
-                    };
-                    cx.pos = Point {
-                        x: cx.pos.x - node.scroll_offset.x,
-                        y: cx.pos.y - node.scroll_offset.y,
-                    };
-                    cx.transform = cx.transform.then_translate(Vec2 {
-                        x: -node.scroll_offset.x,
-                        y: -node.scroll_offset.y,
-                    });
-                    cx.draw_image(scene);
-                    #[cfg(feature = "svg")]
-                    cx.draw_svg(scene);
-                    cx.draw_canvas(scene);
-                    cx.draw_input(scene);
+                            // Now that background has been drawn, offset pos and cx in order to draw our contents scrolled
+                            let content_position = Point {
+                                x: content_position.x - node.scroll_offset.x,
+                                y: content_position.y - node.scroll_offset.y,
+                            };
+                            cx.pos = Point {
+                                x: cx.pos.x - node.scroll_offset.x,
+                                y: cx.pos.y - node.scroll_offset.y,
+                            };
+                            cx.transform = cx.transform.then_translate(Vec2 {
+                                x: -node.scroll_offset.x,
+                                y: -node.scroll_offset.y,
+                            });
+                            cx.draw_image(scene);
+                            #[cfg(feature = "svg")]
+                            cx.draw_svg(scene);
+                            cx.draw_canvas(scene);
+                            cx.draw_input(scene);
 
-                    cx.draw_text_input_text(scene, content_position);
-                    cx.draw_inline_layout(scene, content_position);
-                    cx.draw_marker(scene, content_position);
-                    cx.draw_children(scene);
-                });
+                            cx.draw_text_input_text(scene, content_position);
+                            cx.draw_inline_layout(scene, content_position);
+                            cx.draw_marker(scene, content_position);
+                            cx.draw_children(scene);
+                        });
+                    },
+                );
             },
         );
     }
@@ -444,6 +457,11 @@ impl ElementCx<'_> {
     }
 
     fn draw_text_input_text(&self, scene: &mut impl PaintScene, pos: Point) {
+        // ORBITAL PATCH (blitz-paint 0.2, parity): centre single-line input text vertically.
+        let pos = Point {
+            x: pos.x,
+            y: pos.y + self.node.single_line_input_y_offset(self.scale) as f64,
+        };
         // Render the text in text inputs
         if let Some(input_data) = self.text_input {
             if input_data.editor.text() == "" && input_data.placeholder_editor.text() != "" {
@@ -564,6 +582,46 @@ impl ElementCx<'_> {
             width: svg_size.width(),
             height: svg_size.height(),
         };
+        // ORBITAL PATCH (blitz-paint 0.2, parity): an inline `<svg>` maps its viewBox onto
+        // the content box by `preserveAspectRatio` (default xMidYMid meet), not by
+        // object-fit/object-position; `slice` overflows and is clipped to the box.
+        if self.element.name.local == local_name!("svg") {
+            let (align, slice) = parse_preserve_aspect_ratio(
+                self.element
+                    .attrs()
+                    .iter()
+                    .find(|a| (&*a.name.local).eq_ignore_ascii_case("preserveAspectRatio"))
+                    .map(|a| a.value.as_str()),
+            );
+            let (cw, ch) = (
+                self.frame.content_box.width(),
+                self.frame.content_box.height(),
+            );
+            let (ow, oh) = (object_size.width as f64, object_size.height as f64);
+            if cw <= 0.0 || ch <= 0.0 || ow <= 0.0 || oh <= 0.0 {
+                return;
+            }
+            let (sx, sy) = match align {
+                None => (cw / ow, ch / oh),
+                Some(_) => {
+                    let (rx, ry) = (cw / ow, ch / oh);
+                    let uniform = if slice { rx.max(ry) } else { rx.min(ry) };
+                    (uniform, uniform)
+                }
+            };
+            let (ax, ay) = align.unwrap_or((0.0, 0.0));
+            let tx = (cw - ow * sx) * ax;
+            let ty = (ch - oh * sy) * ay;
+            let origin_x = self.pos.x * self.scale + x;
+            let origin_y = self.pos.y * self.scale + y;
+            let transform =
+                Affine::translate((origin_x + tx, origin_y + ty)).pre_scale_non_uniform(sx, sy);
+            let clip = Rect::from_origin_size((origin_x, origin_y), (cw, ch));
+            crate::layers::maybe_with_layer(scene, slice, 1.0, Affine::IDENTITY, &clip, |scene| {
+                anyrender_svg::render_svg_tree(scene, svg, transform);
+            });
+            return;
+        }
         let paint_size = compute_object_fit(container_size, Some(object_size), ObjectFit::Contain);
 
         // Compute object-position
@@ -828,4 +886,66 @@ fn create_css_rect(style: &ComputedValues, layout: &Layout, scale: f64) -> CssBo
     };
 
     CssBox::new(border_box, border, padding, outline_width, border_radii)
+}
+
+/// Parses an SVG `preserveAspectRatio` value into `(alignment fractions, slice)`.
+/// `None` alignment means `none` (stretch). Invalid values fall back to xMidYMid meet.
+fn parse_preserve_aspect_ratio(value: Option<&str>) -> (Option<(f64, f64)>, bool) {
+    const DEFAULT: (Option<(f64, f64)>, bool) = (Some((0.5, 0.5)), false);
+    let Some(value) = value else {
+        return DEFAULT;
+    };
+    let mut parts = value.split_whitespace().peekable();
+    if parts.peek() == Some(&"defer") {
+        parts.next();
+    }
+    let align = match parts.next() {
+        Some("none") => None,
+        Some("xMinYMin") => Some((0.0, 0.0)),
+        Some("xMidYMin") => Some((0.5, 0.0)),
+        Some("xMaxYMin") => Some((1.0, 0.0)),
+        Some("xMinYMid") => Some((0.0, 0.5)),
+        Some("xMidYMid") => Some((0.5, 0.5)),
+        Some("xMaxYMid") => Some((1.0, 0.5)),
+        Some("xMinYMax") => Some((0.0, 1.0)),
+        Some("xMidYMax") => Some((0.5, 1.0)),
+        Some("xMaxYMax") => Some((1.0, 1.0)),
+        _ => return DEFAULT,
+    };
+    match parts.next() {
+        None | Some("meet") => (align, false),
+        Some("slice") => (align, true),
+        _ => DEFAULT,
+    }
+}
+
+fn polygon_clip_path(style: &ComputedValues, frame: &CssBox, scale: f64) -> Option<kurbo::BezPath> {
+    use style::values::generics::basic_shape::{BasicShape, ClipPath};
+
+    let ClipPath::Shape(shape, _) = style.clone_clip_path() else {
+        return None;
+    };
+    let BasicShape::Polygon(polygon) = &*shape else {
+        return None;
+    };
+    if polygon.coordinates.len() < 3 || scale <= 0.0 {
+        return None;
+    }
+    let bounds = frame.border_box;
+    let (width, height) = (
+        (bounds.width() / scale) as f32,
+        (bounds.height() / scale) as f32,
+    );
+    let mut path = kurbo::BezPath::new();
+    for (index, coord) in polygon.coordinates.iter().enumerate() {
+        let x = bounds.x0 + coord.0.resolve(CSSPixelLength::new(width)).px() as f64 * scale;
+        let y = bounds.y0 + coord.1.resolve(CSSPixelLength::new(height)).px() as f64 * scale;
+        if index == 0 {
+            path.move_to((x, y));
+        } else {
+            path.line_to((x, y));
+        }
+    }
+    path.close_path();
+    Some(path)
 }

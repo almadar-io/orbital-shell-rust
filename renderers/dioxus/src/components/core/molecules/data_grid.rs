@@ -1,6 +1,6 @@
 use crate::components::core::atoms::checkbox::CheckboxRenderer;
 use crate::registry::{shared_root_attrs, DioxusPatternRegistry};
-use crate::renderer::merge_class_name;
+use crate::renderer::{cn, format_display_value, merge_class_name, relation_cell_display, BOX_ATOM_BASE};
 use crate::renderer::{object_value as pattern_payload, pattern_spec as pattern};
 use crate::renderer::{DioxusPatternRenderer, DioxusView, EventSink, OwnedDioxusView};
 use dioxus::prelude::*;
@@ -105,7 +105,29 @@ fn emit_selection(sink: Option<EventSink>, event: &Option<String>, ids: &[String
     }
 }
 
+fn relation_options(props: &Value, field: &str) -> Option<Vec<Value>> {
+    props
+        .get("relationsData")?
+        .get(field)?
+        .as_array()
+        .map(|items| items.to_vec())
+}
+
+fn field_text(props: &Value, field: &Value, value: &Value) -> String {
+    let options = get_string(field, "name").and_then(|name| relation_options(props, &name));
+    relation_cell_display(value, options.as_deref())
+        .unwrap_or_else(|| format_display_value(value, get_string(field, "format").as_deref()))
+}
+
 fn action_button(action: &Value, row: &Value) -> Option<Value> {
+    action_button_with(action, row, false)
+}
+
+fn overlay_action_button(action: &Value, row: &Value) -> Option<Value> {
+    action_button_with(action, row, true)
+}
+
+fn action_button_with(action: &Value, row: &Value, overlay: bool) -> Option<Value> {
     let route = crate::renderer::logged_row_route(action, row);
     let event = if action.get("navigatesTo").is_some() {
         None
@@ -116,7 +138,7 @@ fn action_button(action: &Value, row: &Value) -> Option<Value> {
         return None;
     }
     let label = get_string_or(action, "label", "");
-    let icon_only = action.get("icon").is_some();
+    let icon_only = !overlay && action.get("icon").is_some();
     let mut fields = vec![
         (
             "label",
@@ -126,22 +148,28 @@ fn action_button(action: &Value, row: &Value) -> Option<Value> {
                 label.clone()
             }),
         ),
-        ("aria-label", Value::string(label.clone())),
-        ("title", Value::string(label)),
-        (
-            "className",
-            Value::string(if icon_only { "px-2" } else { "" }),
-        ),
         (
             "actionPayload",
             crate::renderer::logged_row_payload(action, row)?,
         ),
         (
             "variant",
-            Value::string(get_string_or(action, "variant", "ghost")),
+            Value::string(if overlay {
+                "primary".to_string()
+            } else {
+                get_string_or(action, "variant", "ghost")
+            }),
         ),
         ("size", Value::string("sm")),
     ];
+    if !overlay {
+        fields.push(("aria-label", Value::string(label.clone())));
+        fields.push(("title", Value::string(label)));
+        fields.push((
+            "className",
+            Value::string(if icon_only { "px-2" } else { "" }),
+        ));
+    }
     if let Some(route) = route {
         fields.push(("href", Value::string(route)));
     }
@@ -368,15 +396,18 @@ fn Grid(input: GridProps) -> Element {
                         let row_for_click = row.clone();
                         let click_event = item_click.clone();
                         let custom = lambda.as_ref().map(|lambda| lambda.apply(row, index));
-                        let title = title_field.and_then(|field| field_value(row, field)).map(display);
+                        let title = title_field.and_then(|field| field_value(row, field).map(|value| {
+                            let options = get_string(field, "name").and_then(|name| relation_options(props, &name));
+                            relation_cell_display(value, options.as_deref()).unwrap_or_else(|| display(value))
+                        }));
                         let title_variant = if title_field.and_then(|field| get_string(field, "variant")).as_deref() == Some("h3") && !as_rows { "h3" } else { "h4" };
                         let title_spec = title.as_ref().map(|title| pattern("typography", [("content", Value::string(title.clone())), ("variant", Value::string(title_variant)), ("className", Value::string(if as_rows { "font-semibold min-w-0 truncate" } else { "font-semibold min-w-0 line-clamp-2 break-words" }))]));
                         let title_clickable = click_event.is_some();
                         let title_box_class = if title_clickable { format!("{TITLE_BOX} {STRETCHED_CONTROL}") } else { TITLE_BOX.to_string() };
                         let title_icon = title_field.and_then(|field| icon_node(field, "sm", "text-primary flex-shrink-0", registry, &view));
                         let badge_fields = fields.iter().filter(|field| get_string(field, "variant").as_deref() == Some("badge") && Some(*field) != title_field).collect::<Vec<_>>();
-                        let badge_nodes = badge_fields.iter().filter_map(|field| render_badge(field, row, registry, &view)).collect::<Vec<_>>();
-                        let body_node = render_body(&fields, title_field, row, registry, &view);
+                        let badge_nodes = badge_fields.iter().filter_map(|field| render_badge(props, field, row, registry, &view)).collect::<Vec<_>>();
+                        let body_node = render_body(props, &fields, title_field, row, registry, &view);
                         let has_body = body_node.is_some();
                         let image_value = image_field.as_deref().and_then(|field| row.get_path(field));
                         let image_url = image_value.and_then(|value| value.as_str().or_else(|| value.get("url").and_then(Value::as_str)));
@@ -386,6 +417,8 @@ fn Grid(input: GridProps) -> Element {
                         let inline_limit = get_number_or(props, "maxInlineActions", 1.0) > 0.0;
                         let inline_index = if inline_limit { row_actions.iter().position(|action| get_string(action, "variant").as_deref() == Some("primary") && action_button(action, row).is_some()) } else { None };
                         let inline_action = inline_index.and_then(|index| action_button(&row_actions[index], row));
+                        let overlay_inline = inline_index.and_then(|index| overlay_action_button(&row_actions[index], row));
+                        let has_overlay = !row_actions.is_empty();
                         let menu_actions = row_actions.iter().enumerate().filter(|(index, _)| Some(*index) != inline_index).map(|(_, action)| action.clone()).collect::<Vec<_>>();
                         let menu = if menu_actions.is_empty() { None } else { Some(action_menu(&menu_actions, row)) };
                         let menu_view = sink.map(|sink| {
@@ -412,7 +445,26 @@ fn Grid(input: GridProps) -> Element {
                         let row_class = if as_rows { "bg-transparent rounded-none shadow-none flex flex-row items-center gap-3 px-card-md transition-colors duration-fast hover:bg-muted/50" } else { "rounded-container border border-border hover:shadow-elevation-dialog hover:border-primary transition-all flex flex-col" };
                         let selected_class = if is_selected { if as_rows { "bg-primary/5" } else { "ring-2 ring-primary border-primary" } } else { "" };
                         let clickable = if click_event.is_some() { "cursor-pointer" } else { "" };
-                        rsx! { div { key: "{id}", class: "relative {row_class} {selected_class} {clickable} {item_enter}", "data-entity-row": "", "data-entity-id": "{id}", aria_current: if is_selected { Some("true") } else { None },
+                        let has_open = click_event.is_some();
+                        let key_event = click_event.clone();
+                        let row_for_key = row.clone();
+                        let full_class = if custom.is_some() {
+                            cn(&[
+                                BOX_ATOM_BASE,
+                                "relative group/rowactions",
+                                clickable,
+                                if is_selected { "ring-2 ring-primary rounded-container" } else { "" },
+                                &item_enter,
+                            ])
+                        } else {
+                            format!("relative {row_class} {selected_class} {clickable} {item_enter}")
+                        };
+                        let open_class = cn(&[BOX_ATOM_BASE, "absolute inset-0 rounded-[inherit] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-inset"]);
+                        let inner_class = cn(&[BOX_ATOM_BASE, if has_open { "relative" } else { "" }]);
+                        let overlay_class = cn(&[BOX_ATOM_BASE, "absolute top-2 right-2 z-10 opacity-0 group-hover/rowactions:opacity-100 focus-within:opacity-100 [@media(pointer:coarse)]:opacity-100 transition-opacity duration-fast"]);
+                        let cluster_class = cn(&["flex flex-row gap-1 items-stretch justify-start", "rounded-container border border-border bg-card/95 backdrop-blur-sm shadow-elevation-popover surface-material p-0.5"]);
+                        let open_label = format!("Open item {}", index + 1);
+                        rsx! { div { key: "{id}", class: "{full_class}", "data-entity-row": "", "data-entity-id": "{id}", "data-item-key": "{id}", aria_current: if is_selected { Some("true") } else { None },
                             onclick: move |_| {
                                 if let (Some(sink), Some(event)) = (sink, &click_event) {
                                     let empty = Value::Object(ValueMap::new().into());
@@ -420,7 +472,29 @@ fn Grid(input: GridProps) -> Element {
                                 }
                             },
                             if let Some(custom) = custom.as_ref() {
-                                {registry.render_spec(custom, None, &view)}
+                                if has_open {
+                                    div {
+                                        class: "{open_class}", role: "button", tabindex: "0", "aria-label": "{open_label}",
+                                        onkeydown: move |event| {
+                                            if event.key() == Key::Enter || event.key() == Key::Character(" ".to_string()) {
+                                                event.prevent_default();
+                                                if let (Some(sink), Some(name)) = (sink, &key_event) {
+                                                    let empty = Value::Object(ValueMap::new().into());
+                                                    if let Some(payload) = crate::renderer::logged_row_payload(&empty, &row_for_key) { sink.call((name.clone(), payload)); }
+                                                }
+                                            }
+                                        },
+                                    }
+                                }
+                                div { class: "{inner_class}", {registry.render_spec(custom, None, &view)} }
+                                if has_overlay {
+                                    div { class: "{overlay_class}", onclick: move |event| event.stop_propagation(),
+                                        div { class: "{cluster_class}",
+                                            if let Some(action) = overlay_inline.as_ref() { {registry.render_spec(action, None, &view)} }
+                                            if let Some(menu) = menu.as_ref() { {registry.render_spec(menu, None, menu_view.as_ref().unwrap_or(&view))} }
+                                        }
+                                    }
+                                }
                             } else {
                                 if image_field.is_some() {
                                     div { class: if as_rows { "w-12 h-12 flex-shrink-0 overflow-hidden rounded-container" } else { "w-full aspect-video overflow-hidden rounded-t-container" },
@@ -506,17 +580,27 @@ fn present<'a>(row: &'a Value, field: &Value) -> Option<&'a Value> {
 }
 
 fn render_badge(
+    props: &Value,
     field: &Value,
     row: &Value,
     registry: &DioxusPatternRegistry,
     view: &DioxusView<'_>,
 ) -> Option<Element> {
-    let value = display(present(row, field)?);
-    let label = field
-        .get("labels")
-        .and_then(|labels| labels.get(&value))
-        .and_then(Value::as_str)
-        .unwrap_or(&value);
+    let raw = present(row, field)?;
+    let value = display(raw);
+    let options = get_string(field, "name").and_then(|name| relation_options(props, &name));
+    let label = match relation_cell_display(raw, options.as_deref()) {
+        Some(text) => text,
+        None => {
+            let text = format_display_value(raw, get_string(field, "format").as_deref());
+            field
+                .get("labels")
+                .and_then(|labels| labels.get(&text))
+                .and_then(Value::as_str)
+                .map(str::to_string)
+                .unwrap_or(text)
+        }
+    };
     let variant = field
         .get("colorMap")
         .and_then(|colors| colors.get(&value))
@@ -545,6 +629,7 @@ fn render_badge(
 }
 
 fn render_body(
+    props: &Value,
     fields: &[Value],
     title_field: Option<&Value>,
     row: &Value,
@@ -567,7 +652,7 @@ fn render_body(
         .filter(|field| variant_of(field) == "caption" && !is_boolean(field))
         .filter_map(|field| {
             let value = present(row, field)?;
-            let spec = text(display(value), "small", "secondary", "line-clamp-2");
+            let spec = text(field_text(props, field, value), "small", "secondary", "line-clamp-2");
             Some(registry.render_spec(&spec, None, view))
         })
         .collect::<Vec<_>>();
@@ -603,7 +688,7 @@ fn render_body(
             }
             let label_class = if icon.is_some() { "sr-only" } else { "" };
             let label_spec = text(format!("{label}:"), "caption", "secondary", label_class);
-            let value_spec = text(display(value), "small", "secondary", "");
+            let value_spec = text(field_text(props, field, value), "small", "secondary", "");
             Some(
                 rsx! { div { class: "flex flex-row gap-1 justify-start items-center",
                     if let Some(icon) = icon { {icon} }

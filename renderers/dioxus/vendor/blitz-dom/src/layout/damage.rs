@@ -260,6 +260,7 @@ impl BaseDocument {
     /// Walk the whole tree, converting styles to layout
     pub fn flush_styles_to_layout(&mut self, node_id: usize) {
         let doc_id = self.id();
+        let viewport_width = self.stylist.device().au_viewport_size().width.to_f32_px();
 
         let display = {
             let node = self.nodes.get_mut(node_id).unwrap();
@@ -275,6 +276,7 @@ impl BaseDocument {
 
             // if damage.intersects(RestyleDamage::RELAYOUT | CONSTRUCT_BOX) {
             node.style = stylo_taffy::to_taffy_style(style);
+            resolve_auto_repeat_calc_tracks(&mut node.style, viewport_width);
             node.display_constructed_as = style.clone_display();
             // }
 
@@ -385,6 +387,38 @@ impl BaseDocument {
                             left_position.cmp(&right_position)
                         })
                 })
+        }
+    }
+}
+
+// ORBITAL PATCH (blitz-dom 0.2.4, parity): Taffy 0.9 treats an auto-repeat template as invalid
+// unless every track has a length/percentage component, and a calc() minimum such as
+// `minmax(min(280px, 100%), 1fr)` does not count, so `repeat(auto-fit, ...)` collapses to one
+// column. Pre-resolve calc minimums of auto-repeat tracks against the viewport width, which
+// gives 280px for `min(280px, 100%)`. A container narrower than that is a single column in
+// both engines, but the track keeps 280px instead of clamping to 100%.
+fn resolve_auto_repeat_calc_tracks(style: &mut taffy::Style<style::Atom>, viewport_width: f32) {
+    for template in [
+        &mut style.grid_template_columns,
+        &mut style.grid_template_rows,
+    ] {
+        for component in template.iter_mut() {
+            let taffy::GridTemplateComponent::Repeat(repeat) = component else {
+                continue;
+            };
+            if !matches!(
+                repeat.count,
+                taffy::RepetitionCount::AutoFit | taffy::RepetitionCount::AutoFill
+            ) {
+                continue;
+            }
+            for track in repeat.tracks.iter_mut() {
+                let raw = track.min.into_raw();
+                if raw.is_calc() {
+                    let px = super::resolve_calc_value(raw.calc_value(), viewport_width);
+                    track.min = taffy::MinTrackSizingFunction::length(px);
+                }
+            }
         }
     }
 }

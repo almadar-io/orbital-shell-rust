@@ -578,6 +578,27 @@ impl Node {
         s
     }
 
+    /// ORBITAL PATCH (blitz-dom 0.2, parity): browsers centre a single-line text input's
+    /// line box vertically inside its content box. Returns that offset in CSS px (0 for
+    /// multiline editors and non-inputs); paint and pointer hit-testing both apply it.
+    pub fn single_line_input_y_offset(&self, scale: f64) -> f32 {
+        let Some(input) = self.element_data().and_then(|el| el.text_input_data()) else {
+            return 0.0;
+        };
+        if input.is_multiline || scale <= 0.0 {
+            return 0.0;
+        }
+        let Some(layout) = input.editor.try_layout() else {
+            return 0.0;
+        };
+        let layout_height = layout.height() as f64 / scale;
+        let l = &self.final_layout;
+        let content_height =
+            (l.size.height - l.padding.top - l.padding.bottom - l.border.top - l.border.bottom)
+                as f64;
+        ((content_height - layout_height) / 2.0).max(0.0) as f32
+    }
+
     pub fn outer_html(&self) -> String {
         let mut output = String::new();
         self.write_outer_html(&mut output);
@@ -624,6 +645,46 @@ impl Node {
             (width.is_finite() && width > 0.0).then(|| width.to_string())
         }
 
+        // ORBITAL PATCH (blitz-dom 0.2, parity): usvg cannot resolve `var()` in SVG
+        // presentation attributes, so `fill="var(--color-primary)"` painted nothing. Resolve
+        // the whole-value `var(--x[, fallback])` against the element's computed custom
+        // properties, only when the result is a colour the `color` crate parses.
+        fn resolve_var_color(value: &str, style: &ComputedValues) -> Option<String> {
+            let inner = value.trim().strip_prefix("var(")?.strip_suffix(')')?;
+            let (name, fallback) = match inner.split_once(',') {
+                Some((name, fallback)) => (name, Some(fallback)),
+                None => (inner, None),
+            };
+            let key = Atom::from(name.trim().strip_prefix("--")?);
+            let custom = style.custom_properties();
+            let token = custom
+                .inherited
+                .get(&key)
+                .or_else(|| custom.non_inherited.get(&key))
+                .map(|value| value.to_variable_value().css);
+            let token = token.as_deref().or(fallback)?;
+            let [r, g, b, a] = ::color::parse_color(token.trim())
+                .ok()?
+                .to_alpha_color::<::color::Srgb>()
+                .components;
+            let channel = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+            Some(format!(
+                "rgba({}, {}, {}, {})",
+                channel(r),
+                channel(g),
+                channel(b),
+                a.clamp(0.0, 1.0)
+            ))
+        }
+        const COLOR_ATTRS: [&str; 6] = [
+            "fill",
+            "stroke",
+            "stop-color",
+            "flood-color",
+            "lighting-color",
+            "color",
+        ];
+
         let has_children = !self.children.is_empty();
         let current_color = self
             .primary_styles()
@@ -658,6 +719,12 @@ impl Node {
                         .filter(|_| attr.name.local == local_name!("stroke-width"))
                     {
                         encode_quoted_attribute_to_string(width, writer);
+                    } else if let Some(resolved) = Some(&*attr.name.local)
+                        .filter(|name| COLOR_ATTRS.contains(name) && attr.value.contains("var("))
+                        .and_then(|_| self.primary_styles())
+                        .and_then(|style| resolve_var_color(&attr.value, &style))
+                    {
+                        encode_quoted_attribute_to_string(&resolved, writer);
                     } else if let Some(color) = current_color
                         .as_ref()
                         .filter(|_| attr.value.contains("currentColor"))

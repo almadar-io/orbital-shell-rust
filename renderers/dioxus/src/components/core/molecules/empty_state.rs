@@ -1,4 +1,4 @@
-use crate::renderer::merge_class_name;
+use crate::renderer::{cn, merge_class_name};
 use crate::renderer::{pattern_spec as pattern};
 use crate::registry::{shared_root_attrs, DioxusPatternRegistry};
 use crate::renderer::{DioxusPatternRenderer, DioxusView, EventSink};
@@ -122,22 +122,26 @@ impl DioxusPatternRenderer for EmptyStateRenderer {
             "mascot" => "[&_svg]:w-24 [&_svg]:h-24 [&_svg]:rounded-pill",
             _ => "",
         };
-        let icon_bg = if destructive {
-            "bg-error/10"
-        } else if success {
-            "bg-success/10"
-        } else {
-            "bg-muted"
-        };
+        let icon_bg = cn(&[
+            "bg-transparent rounded-none shadow-none",
+            "mb-4 rounded-full p-3",
+            if destructive {
+                "bg-error/10"
+            } else if success {
+                "bg-success/10"
+            } else {
+                "bg-muted"
+            },
+        ]);
         let class = merge_class_name(
-            &format!("flex flex-col items-center justify-center py-12 text-center {look_class}"),
+            &cn(&["flex flex-col gap-4 items-center justify-start", "justify-center py-12 text-center", look_class]),
             props,
         );
         rsx! {
             div { class: "contents", "data-empty-state": "", ..shared_root_attrs(props),
                 div { class: "{class}",
                     if let Some(icon) = icon {
-                        div { class: "mb-4 rounded-full p-3 {icon_bg}", {registry.render_spec(&icon, None, view)} }
+                        div { class: "{icon_bg}", {registry.render_spec(&icon, None, view)} }
                     }
                     {registry.render_spec(&title_spec, None, view)}
                     if let Some(description) = description_spec { {registry.render_spec(&description, None, view)} }

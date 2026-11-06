@@ -10,7 +10,6 @@ pub struct TabsRenderer;
 
 fn tab_id(item: &Value) -> String {
     get_string(item, "id")
-        .filter(|id| !id.is_empty())
         .or_else(|| get_string(item, "value"))
         .unwrap_or_default()
 }

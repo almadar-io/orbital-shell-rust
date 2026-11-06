@@ -14,7 +14,7 @@ use crate::renderer::{DioxusView, EventSink, NavigationSink};
 use dioxus::prelude::*;
 use orbital_core::client::helpers::{resolve_row_set_markers, SlotContent};
 use orbital_core::runtime::theme::resolve_preset_key;
-use orbital_core::{ThemeMode, ThemePresets, Value, ValueMap};
+use orbital_core::{slot_role, SlotRole, ThemeMode, ThemePresets, Value, ValueMap};
 use std::cell::RefCell;
 #[cfg(all(feature = "native-http", not(target_arch = "wasm32")))]
 fn spawn_server_leg<T: Send + 'static>(
@@ -625,12 +625,14 @@ pub fn App() -> Element {
         let orbital = core.orbital_name();
         let now = web_time::Instant::now();
         let mut slot_names: Vec<String> = core.ui_slots.keys().cloned().collect();
-        if !core.awaiting_main_contents(now).is_empty() && !slot_names.iter().any(|name| name == "main") {
-            slot_names.push("main".into());
-        }
         slot_names.extend(core.awaiting_slot_contents(now).into_iter().map(|(slot, _)| slot));
-        slot_names.sort();
+        slot_names.push("sidebar".into());
+        slot_names.push("main".into());
+        slot_names.sort_by_cached_key(|name| slot_paint_rank(name));
         slot_names.dedup();
+        let (layout_slots, overlay_slots): (Vec<String>, Vec<String>) = slot_names
+            .into_iter()
+            .partition(|name| in_layout_row(name));
 
         let trait_content = painted_trait_content_at(core, now);
         let host_theme = THEME.with(|theme| theme.borrow().clone());
@@ -670,10 +672,21 @@ pub fn App() -> Element {
                     #[cfg(all(feature = "native-audio", not(target_arch = "wasm32")))]
                     crate::audio::user_gesture();
                 },
-                for slot_name in slot_names.iter() {
-                    div { key: "{slot_name}", class: "almadar-slot", "data-slot": "{slot_name}",
-                        for sc in painted_slot_contents_at(core, slot_name, now).iter() {
-                            {registry.render_spec(&sc.props, sc.entity.as_ref(), &view.for_source(sc.source_trait.clone(), source_sink.call(sc.source_trait.clone())))}
+                div { class: "ui-slot-renderer relative min-h-full",
+                    div { class: "flex min-h-full flex-col lg:flex-row",
+                        for slot_name in layout_slots.iter() {
+                            div { key: "{slot_name}", class: "{slot_wrapper_class(slot_name)}", "data-slot": "{slot_name}",
+                                for sc in painted_slot_contents_at(core, slot_name, now).iter() {
+                                    {paint_slot_content(registry, sc, &view.for_source(sc.source_trait.clone(), source_sink.call(sc.source_trait.clone())))}
+                                }
+                            }
+                        }
+                    }
+                    for slot_name in overlay_slots.iter() {
+                        div { key: "{slot_name}", class: "{slot_wrapper_class(slot_name)}", "data-slot": "{slot_name}",
+                            for sc in painted_slot_contents_at(core, slot_name, now).iter() {
+                                {paint_slot_content(registry, sc, &view.for_source(sc.source_trait.clone(), source_sink.call(sc.source_trait.clone())))}
+                            }
                         }
                     }
                 }
@@ -682,10 +695,145 @@ pub fn App() -> Element {
     })
 }
 
+/// One slot entry: a bare `@trait.X` embed paints that trait's content, any other entry its pattern.
+fn paint_slot_content(
+    registry: &DioxusPatternRegistry,
+    content: &SlotContent,
+    view: &DioxusView<'_>,
+) -> Element {
+    match &content.props {
+        Value::String(_) => view.render_node(registry, &content.props),
+        props => registry.render_spec(props, content.entity.as_ref(), view),
+    }
+}
+
+/// Whether `slot` sits in the sidebar/main row (the web's `flex min-h-full flex-col lg:flex-row`).
+fn in_layout_row(slot: &str) -> bool {
+    matches!(slot_role(slot), SlotRole::Sidebar | SlotRole::Main)
+}
+
+/// Paint order of the web's `UISlotRenderer`: the sidebar/main row, then dock, modal, drawer, overlay, center,
+/// toast, hud-top, hud-bottom, floating; any other slot follows by its role, then by name.
+fn slot_paint_rank(slot: &str) -> (u8, u8, String) {
+    let role = slot_role(slot);
+    let group = match role {
+        SlotRole::Sidebar => 0,
+        SlotRole::Main => 1,
+        _ => 2,
+    };
+    let within = match (role, slot) {
+        (SlotRole::Sidebar | SlotRole::Main, "sidebar" | "main") => 0,
+        (SlotRole::Sidebar | SlotRole::Main, _) => 1,
+        (_, "dock") => 0,
+        (_, "modal") => 1,
+        (_, "drawer") => 2,
+        (_, "overlay") => 3,
+        (_, "center") => 4,
+        (_, "toast") => 5,
+        (_, "hud-top") => 6,
+        (_, "hud-bottom") => 7,
+        (_, "floating") => 8,
+        (SlotRole::Modal, _) => 1,
+        (SlotRole::Drawer, _) => 2,
+        (SlotRole::Overlay, _) => 3,
+        (SlotRole::Toast, _) => 5,
+        (SlotRole::HudTop, _) => 6,
+        (SlotRole::HudBottom, _) => 7,
+        (SlotRole::Floating, _) => 8,
+        _ => 9,
+    };
+    (group, within, slot.to_string())
+}
+
+/// The wrapper classes the web's `UISlotRenderer` gives `slot`, chosen by core's `slot_role`.
+fn slot_wrapper_class(slot: &str) -> String {
+    let region = match slot_role(slot) {
+        SlotRole::Sidebar => "ui-slot-sidebar min-w-0 lg:shrink-0",
+        SlotRole::Main => "ui-slot-main flex-1 min-w-0 min-h-[200px]",
+        SlotRole::HudTop => "fixed top-0 inset-x-0 z-40",
+        SlotRole::HudBottom => "fixed bottom-0 inset-x-0 z-40",
+        SlotRole::Floating => "fixed z-50",
+        _ => "",
+    };
+    format!("ui-slot ui-slot-{slot} {region}")
+        .trim_end()
+        .to_string()
+}
+
 /// Compile-time proof that the shared substrate links into this crate without
 /// egui. Called nowhere at runtime; if it type-checks, the seam holds.
 pub fn probe_shared_substrate() {
     let _circuit = std::any::type_name::<crate::client_core::ClientCore>();
     let _ctx = std::any::type_name::<crate::RenderContext<'_>>();
     let _peer = recurse::trait_ref_name("@trait.Search");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{in_layout_row, slot_paint_rank, slot_wrapper_class};
+
+    #[test]
+    fn layout_slots_get_the_web_region_classes() {
+        assert_eq!(
+            slot_wrapper_class("main"),
+            "ui-slot ui-slot-main ui-slot-main flex-1 min-w-0 min-h-[200px]"
+        );
+        assert_eq!(
+            slot_wrapper_class("sidebar"),
+            "ui-slot ui-slot-sidebar ui-slot-sidebar min-w-0 lg:shrink-0"
+        );
+        assert_eq!(
+            slot_wrapper_class("hud-top"),
+            "ui-slot ui-slot-hud-top fixed top-0 inset-x-0 z-40"
+        );
+        assert_eq!(
+            slot_wrapper_class("hud.health"),
+            "ui-slot ui-slot-hud.health fixed top-0 inset-x-0 z-40"
+        );
+        assert_eq!(
+            slot_wrapper_class("hud-bottom"),
+            "ui-slot ui-slot-hud-bottom fixed bottom-0 inset-x-0 z-40"
+        );
+        assert_eq!(
+            slot_wrapper_class("floating"),
+            "ui-slot ui-slot-floating fixed z-50"
+        );
+        // control: a portal slot carries only the base classes.
+        assert_eq!(slot_wrapper_class("modal"), "ui-slot ui-slot-modal");
+    }
+
+    #[test]
+    fn slots_paint_in_the_web_order_not_alphabetically() {
+        let mut names: Vec<String> = [
+            "floating",
+            "modal",
+            "hud-bottom",
+            "main",
+            "toast",
+            "sidebar",
+            "hud-top",
+            "drawer",
+            "content",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+        names.sort_by_cached_key(|n| slot_paint_rank(n));
+        assert_eq!(
+            names,
+            [
+                "sidebar",
+                "main",
+                "content",
+                "modal",
+                "drawer",
+                "toast",
+                "hud-top",
+                "hud-bottom",
+                "floating"
+            ]
+        );
+        assert!(in_layout_row("sidebar") && in_layout_row("main") && in_layout_row("content"));
+        assert!(!in_layout_row("modal") && !in_layout_row("floating"));
+    }
 }

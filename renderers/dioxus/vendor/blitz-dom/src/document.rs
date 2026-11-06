@@ -863,6 +863,7 @@ impl BaseDocument {
         // Merge stylo into taffy
         self.flush_styles_to_layout(root_node_id);
         self.resolve_fixed_viewport_sizes();
+        self.neutralize_indefinite_percent_heights();
         timer.record_time("flush");
 
         // Next we resolve layout with the data resolved by stlist
@@ -1317,6 +1318,101 @@ impl BaseDocument {
     ///
     /// TODO: update taffy to use an associated type instead of slab key
     /// TODO: update taffy to support traited styles so we don't even need to rely on taffy for storage
+    // ORBITAL PATCH (blitz-dom 0.2.4, parity): CSS resolves a percentage height only against
+    // a containing block whose height is definite; otherwise it behaves as `auto`. Taffy
+    // resolves it against the block parent's available space, stretching `h-full` cards to
+    // the viewport or content-size extremes. Walk the block-container chain and turn
+    // percentage heights under an auto-height block into auto. Flex/grid parents are left to
+    // Taffy because their items can be definite through stretch.
+    fn neutralize_indefinite_percent_heights(&mut self) {
+        let root = self.root_element().id;
+        let root_definite = !self.nodes[root].style.size.height.is_auto();
+        let is_block = self.nodes[root].style.display == taffy::Display::Block;
+        self.neutralize_percent_heights_below(root, root_definite, is_block);
+    }
+
+    fn neutralize_percent_heights_below(
+        &mut self,
+        id: usize,
+        self_definite: bool,
+        self_is_block: bool,
+    ) {
+        let children = self.nodes[id]
+            .layout_children
+            .borrow()
+            .clone()
+            .unwrap_or_default();
+        for child in children {
+            let node = &mut self.nodes[child];
+            let positioned = node.style.position == taffy::Position::Absolute;
+            let is_pct = |d: taffy::Dimension| {
+                let raw = d.into_raw();
+                raw.tag() == taffy::CompactLength::PERCENT_TAG || raw.is_calc()
+            };
+            if self_is_block && !self_definite && !positioned {
+                if is_pct(node.style.size.height) {
+                    node.style.size.height = taffy::Dimension::auto();
+                }
+                if is_pct(node.style.min_size.height) {
+                    node.style.min_size.height = taffy::Dimension::auto();
+                }
+                if is_pct(node.style.max_size.height) {
+                    node.style.max_size.height = taffy::Dimension::auto();
+                }
+            }
+            let height = node.style.size.height;
+            let definite = if height.is_auto() {
+                !self_is_block
+            } else if is_pct(height) {
+                self_definite
+            } else {
+                true
+            };
+            let is_block = node.style.display == taffy::Display::Block;
+            self.neutralize_percent_heights_below(child, definite, is_block);
+        }
+    }
+
+    // ORBITAL PATCH (blitz-dom 0.2.4, parity): hoisted `position: fixed` boxes are laid out
+    // by Taffy as absolute children of the root element, whose height is the whole document,
+    // so a `bottom`/`right` inset anchors to the document end. The initial containing block
+    // is the viewport: re-anchor those axes against the viewport after layout.
+    fn anchor_fixed_to_viewport(&mut self) {
+        use style::properties::generated::longhands::position::computed_value::T as Position;
+
+        let size = self.stylist.device().au_viewport_size();
+        let viewport_width = size.width.to_f32_px();
+        let viewport_height = size.height.to_f32_px();
+        for (_, node) in self.nodes.iter_mut() {
+            if !node
+                .primary_styles()
+                .is_some_and(|style| style.clone_position() == Position::Fixed)
+            {
+                continue;
+            }
+            let inset = node.style.inset;
+            let layout = &mut node.final_layout;
+            if inset.top.is_auto() {
+                if let Some(bottom) = inset
+                    .bottom
+                    .resolve_to_option(viewport_height, crate::layout::resolve_calc_value)
+                {
+                    layout.location.y =
+                        viewport_height - bottom - layout.margin.bottom - layout.size.height;
+                }
+            }
+            if inset.left.is_auto() {
+                if let Some(right) = inset
+                    .right
+                    .resolve_to_option(viewport_width, crate::layout::resolve_calc_value)
+                {
+                    layout.location.x =
+                        viewport_width - right - layout.margin.right - layout.size.width;
+                }
+            }
+        }
+    }
+
     pub fn resolve_layout(&mut self) {
         let size = self.stylist.device().au_viewport_size();
 
@@ -1331,6 +1427,7 @@ impl BaseDocument {
 
         taffy::compute_root_layout(self, root_element_id, available_space);
         taffy::round_layout(self, root_element_id);
+        self.anchor_fixed_to_viewport();
 
         // println!("\n\n");
         // taffy::print_tree(self, root_node_id)

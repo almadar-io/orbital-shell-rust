@@ -63,4 +63,5 @@ pub mod typewriter_text;
 pub mod typography;
 #[cfg(all(feature = "native", not(target_arch = "wasm32")))]
 pub mod video_embed;
+pub mod video_frame;
 pub mod vstack;

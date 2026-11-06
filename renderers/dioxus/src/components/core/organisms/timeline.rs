@@ -1,7 +1,7 @@
 //! Native Dioxus body for the `timeline` pattern, ported from web `Timeline.tsx`.
 
 use crate::registry::DioxusPatternRegistry;
-use crate::renderer::{object_value, pattern_spec, DioxusPatternRenderer, DioxusView};
+use crate::renderer::{cn, object_value, pattern_spec, DioxusPatternRenderer, DioxusView};
 use dioxus::prelude::*;
 use orbital_core::client::helpers::*;
 use orbital_core::Value;
@@ -411,11 +411,16 @@ impl DioxusPatternRenderer for TimelineRenderer {
             ],
             rows,
         ));
+        let surface_class = if get_string_or(props, "surface", "auto") == "auto" {
+            "surface-content"
+        } else {
+            ""
+        };
         let spec = node(
             "box",
             vec![(
                 "className",
-                Value::string(format!("p-6 rounded-container {class_name}")),
+                Value::string(cn(&[surface_class, "p-6 rounded-container", &class_name])),
             )],
             vec![stack("vstack", vec![("gap", Value::string("md"))], body)],
         );

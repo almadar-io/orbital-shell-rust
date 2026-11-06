@@ -86,6 +86,26 @@ pub(crate) fn dom_passthrough(props: &Value) -> Vec<(String, Value)> {
         .collect()
 }
 
+/// A navigation landmark's forwarded attributes: `role="navigation"` and the default `aria-label`, with authored `aria-*`/`role` values taking over, as the web's `role=... aria-label=... {...domPassthrough(rest)}`.
+pub(crate) fn nav_landmark(props: &Value, default_label: &str) -> Vec<(String, Value)> {
+    let mut fields = vec![
+        ("role".to_string(), Value::string("navigation")),
+        ("aria-label".to_string(), Value::string(default_label)),
+    ];
+    for (key, value) in dom_passthrough(props) {
+        fields.retain(|(existing, _)| *existing != key);
+        fields.push((key, value));
+    }
+    fields
+}
+
+/// Doc navigation row states shared by the doc-sidebar, doc-toc and doc-pagination bodies (web `lib/doc-nav-classes.ts`).
+pub(crate) const DOC_NAV_ROW_HOVER: &str = "hover:bg-muted hover:text-foreground hover:border-transparent";
+pub(crate) const DOC_NAV_ROW_ACTIVE: &str = "bg-accent/10 text-accent font-semibold hover:bg-accent/15 hover:text-accent hover:border-transparent";
+pub(crate) const DOC_NAV_ROW_IDLE: &str = "text-muted-foreground";
+pub(crate) const DOC_NAV_RULE_HOVER: &str = "hover:bg-transparent hover:text-foreground";
+pub(crate) const DOC_NAV_CARD_HOVER: &str = "hover:bg-card hover:text-foreground hover:border-accent";
+
 /// A `typography` spec for the text a body writes where the web writes `<Typography>`.
 pub(crate) fn typography_spec(variant: &str, color: Option<&str>, class: &str, content: &str) -> Value {
     let mut fields = vec![
