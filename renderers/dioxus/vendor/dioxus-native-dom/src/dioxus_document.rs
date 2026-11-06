@@ -1,6 +1,7 @@
 //! Integration between Dioxus and Blitz
 use crate::events::{
     BlitzKeyboardData, NativeClickData, NativeConverter, NativeFormData, NativeImageData,
+    NativeWheelData,
 };
 use crate::mutation_writer::{DioxusState, MutationWriter};
 use crate::qual_name;
@@ -311,7 +312,18 @@ impl EventHandler for DioxusEventHandler<'_> {
             | DomEventData::MouseDown(mevent)
             | DomEventData::MouseUp(mevent)
             | DomEventData::MouseLeave(mevent)
-            | DomEventData::Click(mevent) => Some(wrap_event_data(NativeClickData(mevent.clone()))),
+            | DomEventData::Click(mevent) => {
+                // ORBITAL PATCH: element coordinates on mouse events
+                let origin = mutr
+                    .doc
+                    .get_node(event.target)
+                    .map(|node| node.absolute_position(0.0, 0.0))
+                    .unwrap_or_default();
+                Some(wrap_event_data(NativeClickData(
+                    mevent.clone(),
+                    ((mevent.x - origin.x) as f64, (mevent.y - origin.y) as f64),
+                )))
+            }
 
             DomEventData::KeyDown(kevent)
             | DomEventData::KeyUp(kevent)
@@ -331,6 +343,19 @@ impl EventHandler for DioxusEventHandler<'_> {
             | DomEventData::Drop(data)
             | DomEventData::DragEnd(data) => {
                 Some(wrap_event_data(crate::events::NativeDragData(data.clone())))
+            }
+
+            // ORBITAL PATCH: wheel events (G-ORBITAL-SHELL-RUST-033)
+            DomEventData::Wheel(wevent) => {
+                let origin = mutr
+                    .doc
+                    .get_node(event.target)
+                    .map(|node| node.absolute_position(0.0, 0.0))
+                    .unwrap_or_default();
+                Some(wrap_event_data(NativeWheelData {
+                    event: wevent.clone(),
+                    element: ((wevent.x - origin.x) as f64, (wevent.y - origin.y) as f64),
+                }))
             }
 
             // TODO: Implement IME handling

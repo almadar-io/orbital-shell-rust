@@ -1,15 +1,16 @@
 use blitz_traits::events::{
-    BlitzDragEvent, BlitzDragTransfer, BlitzKeyEvent, BlitzMouseButtonEvent, MouseEventButton,
+    BlitzDragEvent, BlitzDragTransfer, BlitzKeyEvent, BlitzMouseButtonEvent, BlitzWheelEvent,
+    MouseEventButton, WheelDeltaMode,
 };
 use dioxus_html::{
-    geometry::{ClientPoint, ElementPoint, PagePoint, ScreenPoint},
+    geometry::{ClientPoint, ElementPoint, PagePoint, ScreenPoint, WheelDelta},
     input_data::{MouseButton, MouseButtonSet},
     point_interaction::{
         InteractionElementOffset, InteractionLocation, ModifiersInteraction, PointerInteraction,
     },
     AnimationData, CancelData, ClipboardData, CompositionData, DataTransfer, DragData, FocusData,
     FormData, FormValue, HasDataTransferData, HasDragData, HasFileData, HasFocusData, HasFormData,
-    HasImageData, HasKeyboardData, HasMouseData, HtmlEventConverter, ImageData, KeyboardData,
+    HasImageData, HasKeyboardData, HasMouseData, HasWheelData, HtmlEventConverter, ImageData, KeyboardData,
     MediaData, MountedData, MouseData, NativeDataTransfer, PlatformEventData, PointerData,
     ResizeData, ScrollData, SelectionData, ToggleData, TouchData, TransitionData, VisibleData,
     WheelData,
@@ -96,8 +97,9 @@ impl HtmlEventConverter for NativeConverter {
         unimplemented!("todo: convert_transition_data in dioxus-native. requires support in blitz")
     }
 
-    fn convert_wheel_data(&self, _event: &PlatformEventData) -> WheelData {
-        unimplemented!("todo: convert_wheel_data in dioxus-native. requires support in blitz")
+    // ORBITAL PATCH: wheel events (G-ORBITAL-SHELL-RUST-033)
+    fn convert_wheel_data(&self, event: &PlatformEventData) -> WheelData {
+        event.downcast::<NativeWheelData>().unwrap().clone().into()
     }
 
     fn convert_resize_data(&self, _event: &PlatformEventData) -> ResizeData {
@@ -203,7 +205,8 @@ impl HasKeyboardData for BlitzKeyboardData {
 }
 
 #[derive(Clone)]
-pub struct NativeClickData(pub(crate) BlitzMouseButtonEvent);
+// ORBITAL PATCH: element coordinates on mouse events (the target's offset, as wheel events carry it)
+pub struct NativeClickData(pub(crate) BlitzMouseButtonEvent, pub(crate) (f64, f64));
 
 impl InteractionLocation for NativeClickData {
     fn client_coordinates(&self) -> ClientPoint {
@@ -222,7 +225,7 @@ impl InteractionLocation for NativeClickData {
 
 impl InteractionElementOffset for NativeClickData {
     fn element_coordinates(&self) -> ElementPoint {
-        unimplemented!()
+        ElementPoint::new(self.1 .0, self.1 .1)
     }
 }
 
@@ -248,6 +251,70 @@ impl PointerInteraction for NativeClickData {
     }
 }
 impl HasMouseData for NativeClickData {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self as &dyn std::any::Any
+    }
+}
+
+// ORBITAL PATCH: wheel events (G-ORBITAL-SHELL-RUST-033)
+/// A wheel event plus the pointer's offset inside the element it landed on.
+#[derive(Clone)]
+pub struct NativeWheelData {
+    pub(crate) event: BlitzWheelEvent,
+    pub(crate) element: (f64, f64),
+}
+
+impl InteractionLocation for NativeWheelData {
+    fn client_coordinates(&self) -> ClientPoint {
+        ClientPoint::new(self.event.x as _, self.event.y as _)
+    }
+
+    fn screen_coordinates(&self) -> ScreenPoint {
+        ScreenPoint::new(self.event.x as _, self.event.y as _)
+    }
+
+    fn page_coordinates(&self) -> PagePoint {
+        PagePoint::new(self.event.x as _, self.event.y as _)
+    }
+}
+
+impl InteractionElementOffset for NativeWheelData {
+    fn element_coordinates(&self) -> ElementPoint {
+        ElementPoint::new(self.element.0, self.element.1)
+    }
+}
+
+impl ModifiersInteraction for NativeWheelData {
+    fn modifiers(&self) -> Modifiers {
+        self.event.mods
+    }
+}
+
+impl PointerInteraction for NativeWheelData {
+    fn trigger_button(&self) -> Option<MouseButton> {
+        None
+    }
+
+    fn held_buttons(&self) -> MouseButtonSet {
+        dioxus_html::input_data::decode_mouse_button_set(self.event.buttons.bits() as u16)
+    }
+}
+
+impl HasMouseData for NativeWheelData {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self as &dyn std::any::Any
+    }
+}
+
+impl HasWheelData for NativeWheelData {
+    fn delta(&self) -> WheelDelta {
+        let e = &self.event;
+        match e.delta_mode {
+            WheelDeltaMode::Pixel => WheelDelta::pixels(e.delta_x, e.delta_y, 0.0),
+            WheelDeltaMode::Line => WheelDelta::lines(e.delta_x, e.delta_y, 0.0),
+        }
+    }
+
     fn as_any(&self) -> &dyn std::any::Any {
         self as &dyn std::any::Any
     }

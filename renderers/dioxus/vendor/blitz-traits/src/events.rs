@@ -56,6 +56,8 @@ pub enum UiEvent {
     KeyUp(BlitzKeyEvent),
     KeyDown(BlitzKeyEvent),
     Ime(BlitzImeEvent),
+    // ORBITAL PATCH: wheel events (G-ORBITAL-SHELL-RUST-033)
+    Wheel(BlitzWheelEvent),
 }
 impl UiEvent {
     pub fn discriminant(&self) -> u8 {
@@ -115,6 +117,8 @@ pub enum DomEventKind {
     DragLeave,
     Drop,
     DragEnd,
+    // ORBITAL PATCH: wheel events (G-ORBITAL-SHELL-RUST-033)
+    Wheel,
 }
 impl DomEventKind {
     pub fn discriminant(self) -> u8 {
@@ -141,6 +145,8 @@ impl FromStr for DomEventKind {
             "dragleave" => Ok(Self::DragLeave),
             "drop" => Ok(Self::Drop),
             "dragend" => Ok(Self::DragEnd),
+            // ORBITAL PATCH: wheel events (G-ORBITAL-SHELL-RUST-033)
+            "wheel" => Ok(Self::Wheel),
             _ => Err(()),
         }
     }
@@ -165,6 +171,8 @@ pub enum DomEventData {
     DragLeave(BlitzDragEvent),
     Drop(BlitzDragEvent),
     DragEnd(BlitzDragEvent),
+    // ORBITAL PATCH: wheel events (G-ORBITAL-SHELL-RUST-033)
+    Wheel(BlitzWheelEvent),
 }
 impl DomEventData {
     pub fn discriminant(&self) -> u8 {
@@ -195,6 +203,8 @@ impl DomEventData {
             Self::DragLeave { .. } => "dragleave",
             Self::Drop { .. } => "drop",
             Self::DragEnd { .. } => "dragend",
+            // ORBITAL PATCH: wheel events (G-ORBITAL-SHELL-RUST-033)
+            Self::Wheel { .. } => "wheel",
         }
     }
 
@@ -216,6 +226,8 @@ impl DomEventData {
             Self::DragLeave { .. } => DomEventKind::DragLeave,
             Self::Drop { .. } => DomEventKind::Drop,
             Self::DragEnd { .. } => DomEventKind::DragEnd,
+            // ORBITAL PATCH: wheel events (G-ORBITAL-SHELL-RUST-033)
+            Self::Wheel { .. } => DomEventKind::Wheel,
         }
     }
 
@@ -236,6 +248,8 @@ impl DomEventData {
             | Self::DragOver { .. }
             | Self::Drop { .. } => true,
             Self::DragLeave { .. } | Self::DragEnd { .. } => false,
+            // ORBITAL PATCH: wheel events (G-ORBITAL-SHELL-RUST-033)
+            Self::Wheel { .. } => true,
         }
     }
 
@@ -257,6 +271,8 @@ impl DomEventData {
             | Self::DragLeave { .. }
             | Self::Drop { .. }
             | Self::DragEnd { .. } => true,
+            // ORBITAL PATCH: wheel events (G-ORBITAL-SHELL-RUST-033)
+            Self::Wheel { .. } => true,
         }
     }
 }
@@ -341,6 +357,27 @@ pub struct HitResult {
     pub x: f32,
     /// The y coordinate of the hit within the hit target's border-box
     pub y: f32,
+}
+
+// ORBITAL PATCH: wheel events (G-ORBITAL-SHELL-RUST-033)
+/// How a wheel event's deltas are measured, as in the DOM's `deltaMode`.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum WheelDeltaMode {
+    Pixel,
+    Line,
+}
+
+// ORBITAL PATCH: wheel events (G-ORBITAL-SHELL-RUST-033)
+/// A wheel event with DOM sign convention: positive `delta_y` scrolls content down (wheel toward the user).
+#[derive(Clone, Debug)]
+pub struct BlitzWheelEvent {
+    pub x: f32,
+    pub y: f32,
+    pub delta_x: f64,
+    pub delta_y: f64,
+    pub delta_mode: WheelDeltaMode,
+    pub buttons: MouseEventButtons,
+    pub mods: Modifiers,
 }
 
 #[derive(Clone, Debug)]

@@ -335,7 +335,28 @@ fn SceneCanvas(props: SceneCanvasProps) -> Element {
                     }
                 }
             },
-            onmouseup: move |evt: MouseEvent| pointer(&host, sink, "touch-up", &evt),
+            onmouseup: {
+                let host = host.clone();
+                move |evt: MouseEvent| pointer(&host, sink, "touch-up", &evt)
+            },
+            onwheel: move |evt: WheelEvent| {
+                let delta_y_pixels = match evt.delta() {
+                    dioxus::html::geometry::WheelDelta::Pixels(v) => v.y,
+                    dioxus::html::geometry::WheelDelta::Lines(v) => v.y * 20.0,
+                    dioxus::html::geometry::WheelDelta::Pages(_) => {
+                        unreachable!("blitz delivers wheel deltas in pixels or lines")
+                    }
+                };
+                let at = evt.element_coordinates();
+                let factor = 1.1f32.powf(-(delta_y_pixels as f32) / 100.0);
+                let zoomed = host
+                    .lock()
+                    .expect("scene host poisoned")
+                    .zoom(factor, at.x as f32, at.y as f32);
+                if zoomed {
+                    evt.prevent_default();
+                }
+            },
         }
     }
 }

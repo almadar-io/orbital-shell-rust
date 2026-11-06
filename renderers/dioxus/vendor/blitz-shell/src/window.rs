@@ -11,7 +11,11 @@ use android_activity::input::{TextInputState, TextSpan};
 use anyrender::WindowRenderer;
 use blitz_dom::Document;
 use blitz_paint::paint_scene;
-use blitz_traits::events::{BlitzMouseButtonEvent, MouseEventButton, MouseEventButtons, UiEvent};
+// ORBITAL PATCH: wheel events (G-ORBITAL-SHELL-RUST-033)
+use blitz_traits::events::{
+    BlitzMouseButtonEvent, BlitzWheelEvent, MouseEventButton, MouseEventButtons, UiEvent,
+    WheelDeltaMode,
+};
 use blitz_traits::shell::Viewport;
 use winit::keyboard::PhysicalKey;
 
@@ -522,21 +526,26 @@ impl<Rend: WindowRenderer> View<Rend> {
 
                 self.button_pointer(button, state);
             }
+            // ORBITAL PATCH: wheel events (G-ORBITAL-SHELL-RUST-033)
             WindowEvent::MouseWheel { delta, .. } => {
-                let (scroll_x, scroll_y)= match delta {
-                    winit::event::MouseScrollDelta::LineDelta(x, y) => (x as f64 * 20.0, y as f64 * 20.0),
-                    winit::event::MouseScrollDelta::PixelDelta(offsets) => (offsets.x, offsets.y)
+                // winit's y is positive when scrolling up; the DOM's deltaY is positive when scrolling down.
+                let (delta_x, delta_y, delta_mode) = match delta {
+                    winit::event::MouseScrollDelta::LineDelta(x, y) => {
+                        (-(x as f64), -(y as f64), WheelDeltaMode::Line)
+                    }
+                    winit::event::MouseScrollDelta::PixelDelta(offsets) => {
+                        (-offsets.x, -offsets.y, WheelDeltaMode::Pixel)
+                    }
                 };
-
-                let has_changed = if let Some(hover_node_id) = self.doc.get_hover_node_id() {
-                    self.doc.scroll_node_by_has_changed(hover_node_id, scroll_x, scroll_y)
-                } else {
-                    self.doc.scroll_viewport_by_has_changed(scroll_x, scroll_y)
-                };
-
-                if has_changed {
-                    self.request_redraw();
-                }
+                self.doc.handle_ui_event(UiEvent::Wheel(BlitzWheelEvent {
+                    x: self.mouse_pos.0,
+                    y: self.mouse_pos.1,
+                    delta_x,
+                    delta_y,
+                    delta_mode,
+                    buttons: self.buttons,
+                    mods: winit_modifiers_to_kbt_modifiers(self.keyboard_modifiers.state()),
+                }));
             }
 
             // File events

@@ -1,7 +1,7 @@
 use crate::{BaseDocument, DocumentMutator};
 use blitz_traits::events::{
-    BlitzDragEvent, BlitzDragTransfer, BlitzMouseButtonEvent, DomEvent, DomEventData, EventState,
-    MouseEventButton, MouseEventButtons, UiEvent,
+    BlitzDragEvent, BlitzDragTransfer, BlitzMouseButtonEvent, BlitzWheelEvent, DomEvent,
+    DomEventData, EventState, MouseEventButton, MouseEventButtons, UiEvent,
 };
 use keyboard_types::Key;
 use markup5ever::LocalName;
@@ -301,6 +301,8 @@ impl<'doc, Handler: EventHandler> EventDriver<'doc, Handler> {
             UiEvent::KeyUp(_) => focussed_node_id,
             UiEvent::KeyDown(_) => focussed_node_id,
             UiEvent::Ime(_) => focussed_node_id,
+            // ORBITAL PATCH: wheel events (G-ORBITAL-SHELL-RUST-033)
+            UiEvent::Wheel(_) => hover_node_id,
         };
 
         let data = match event {
@@ -323,6 +325,12 @@ impl<'doc, Handler: EventHandler> EventDriver<'doc, Handler> {
             UiEvent::KeyUp(data) => DomEventData::KeyUp(data),
             UiEvent::KeyDown(data) => DomEventData::KeyDown(data),
             UiEvent::Ime(data) => DomEventData::Ime(data),
+            // ORBITAL PATCH: wheel events (G-ORBITAL-SHELL-RUST-033)
+            UiEvent::Wheel(data) => DomEventData::Wheel(BlitzWheelEvent {
+                x: data.x + viewport_scroll.x as f32 / zoom,
+                y: data.y + viewport_scroll.y as f32 / zoom,
+                ..data
+            }),
         };
 
         let target = target.unwrap_or_else(|| self.doc().root_element().id);

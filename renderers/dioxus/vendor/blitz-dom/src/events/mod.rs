@@ -3,7 +3,7 @@ mod ime;
 mod keyboard;
 mod mouse;
 
-use blitz_traits::events::{DomEvent, DomEventData};
+use blitz_traits::events::{DomEvent, DomEventData, WheelDeltaMode};
 pub use driver::{EventDriver, EventHandler, NoopEventHandler};
 pub(crate) use ime::handle_ime_event;
 pub(crate) use keyboard::handle_keypress;
@@ -63,5 +63,22 @@ pub(crate) fn handle_dom_event<F: FnMut(DomEvent)>(
         | DomEventData::DragLeave(_)
         | DomEventData::Drop(_)
         | DomEventData::DragEnd(_) => {}
+        // ORBITAL PATCH: wheel events (G-ORBITAL-SHELL-RUST-033)
+        DomEventData::Wheel(wheel) => {
+            let px = match wheel.delta_mode {
+                WheelDeltaMode::Pixel => 1.0,
+                WheelDeltaMode::Line => 20.0,
+            };
+            // `scroll_*_by` takes winit's sign (positive scrolls up); DOM deltas are the opposite.
+            let (dx, dy) = (-wheel.delta_x * px, -wheel.delta_y * px);
+            let changed = if let Some(hover_node_id) = doc.get_hover_node_id() {
+                doc.scroll_node_by_has_changed(hover_node_id, dx, dy)
+            } else {
+                doc.scroll_viewport_by_has_changed(dx, dy)
+            };
+            if changed {
+                doc.shell_provider.request_redraw();
+            }
+        }
     }
 }
