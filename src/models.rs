@@ -441,14 +441,10 @@ fn payloads(module: &OirModule) -> BTreeMap<String, Vec<OirField>> {
     let mut out = BTreeMap::new();
     for t in &module.traits {
         for event in &t.events {
-            let Some(schema) = event.payload_schema.as_ref().filter(|s| !s.is_empty()) else {
+            let fields = event.payload_fields();
+            if fields.is_empty() {
                 continue;
-            };
-            let mut fields: Vec<OirField> = schema
-                .iter()
-                .map(|(k, v)| OirField::new(k.clone(), v.clone()))
-                .collect();
-            fields.sort_by(|a, b| a.name.cmp(&b.name));
+            }
             out.insert(format!("{}{}Payload", symbol(&t.name), symbol(&event.key)), fields);
         }
     }
@@ -562,10 +558,12 @@ mod tests {
             schema.insert("text".into(), OirType::String);
             schema.insert("size".into(), OirType::Number);
             listened.payload_schema = Some(schema);
+            listened.payload_required_fields = ["text", "size"].into_iter().map(String::from).collect();
             let mut emitted = OirEvent::new("CHUNKED");
             let mut schema = OirTypeMap::new();
             schema.insert("count".into(), OirType::Integer);
             emitted.payload_schema = Some(schema);
+            emitted.payload_required_fields = ["count"].into_iter().map(String::from).collect();
             t.events = vec![listened, emitted, OirEvent::new("RESET")];
             m.traits.push(t);
         }
@@ -698,6 +696,7 @@ mod tests {
         schema.insert("reason".into(), ty);
         schema.insert("plain".into(), OirType::String);
         m.traits[0].events[1].payload_schema = Some(schema);
+        m.traits[0].events[1].payload_required_fields = ["reason", "plain"].into_iter().map(String::from).collect();
         m
     }
 
@@ -758,5 +757,14 @@ mod tests {
         assert!(content.contains(default_fn), "{content}");
         assert!(content.contains("#[serde(default = \"default_Holder_host\")]\n    pub host: HolderHost,"), "{content}");
         assert!(!content.contains("HolderHostString"), "{content}");
+    }
+
+    #[test]
+    fn a_payload_key_not_marked_required_renders_an_option() {
+        let mut m = module(true);
+        m.traits[0].events[0].payload_required_fields.remove("size");
+        let content = events_file(&m).content;
+        assert!(content.contains("    pub size: Option<f64>,"), "{content}");
+        assert!(content.contains("    pub text: String,"), "control: a `!` key stays required: {content}");
     }
 }
