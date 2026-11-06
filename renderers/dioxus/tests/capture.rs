@@ -1719,3 +1719,100 @@ fn grid_item_percent_height_resolves_against_the_sized_row_not_the_grid() {
         "control: items without a percent height keep their content height: {plain_a}/{plain_b}"
     );
 }
+
+const CLAMP_TEXT: &str = "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho sigma tau";
+
+#[test]
+fn line_clamp_limits_a_long_text_to_its_lines_and_records_the_ellipsis() {
+    use blitz_dom::DocumentConfig;
+    use blitz_traits::shell::{ColorScheme, Viewport};
+    use dioxus::prelude::*;
+    use dioxus_native::DioxusDocument;
+
+    fn app() -> Element {
+        let clamp = "width: 120px; font-size: 16px; line-height: 20px; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2";
+        rsx! {
+            div {
+                div { id: "clamped", style: "{clamp}", "{CLAMP_TEXT}" }
+                div { id: "free", style: "width: 120px; font-size: 16px; line-height: 20px", "{CLAMP_TEXT}" }
+                div { id: "short", style: "{clamp}", "hi" }
+            }
+        }
+    }
+
+    let mut doc = DioxusDocument::new(
+        dioxus_core::VirtualDom::new(app),
+        DocumentConfig {
+            viewport: Some(Viewport::new(800, 900, 1.0, ColorScheme::Light)),
+            ..Default::default()
+        },
+    );
+    doc.initial_build();
+    doc.resolve(0.0);
+    let measure = |selector: &str| {
+        let id = doc.query_selector(selector).unwrap().unwrap();
+        let node = doc.get_node(id).unwrap();
+        let text = node.element_data().unwrap().inline_layout_data.as_ref().unwrap();
+        (node.final_layout.size.height, text.layout.len(), text.clamp)
+    };
+    let (clamped_height, clamped_lines, clamped) = measure("#clamped");
+    assert!(
+        clamped_lines > 2 && (clamped_height - 40.0).abs() < 0.5,
+        "line-clamp 2 must lay out more than 2 lines but be 2 lines tall: lines={clamped_lines} height={clamped_height}"
+    );
+    assert_eq!(clamped.and_then(|c| c.max_lines), Some(2));
+    let (free_height, free_lines, free_clamp) = measure("#free");
+    assert!(
+        free_lines > 2 && free_height > clamped_height + 0.5 && free_clamp.is_none(),
+        "control: without a clamp the box is taller and paints every line: lines={free_lines} height={free_height}"
+    );
+    let (short_height, short_lines, _) = measure("#short");
+    assert!(
+        short_lines == 1 && (short_height - 20.0).abs() < 0.5,
+        "control: short text with line-clamp 2 stays one line: lines={short_lines} height={short_height}"
+    );
+}
+
+#[test]
+fn text_overflow_ellipsis_with_nowrap_keeps_one_line_and_marks_the_ellipsis() {
+    use blitz_dom::DocumentConfig;
+    use blitz_traits::shell::{ColorScheme, Viewport};
+    use dioxus::prelude::*;
+    use dioxus_native::DioxusDocument;
+
+    fn app() -> Element {
+        rsx! {
+            div {
+                div { id: "truncated", style: "width: 120px; font-size: 16px; line-height: 20px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap", "{CLAMP_TEXT}" }
+                div { id: "wrapping", style: "width: 120px; font-size: 16px; line-height: 20px", "{CLAMP_TEXT}" }
+            }
+        }
+    }
+
+    let mut doc = DioxusDocument::new(
+        dioxus_core::VirtualDom::new(app),
+        DocumentConfig {
+            viewport: Some(Viewport::new(800, 900, 1.0, ColorScheme::Light)),
+            ..Default::default()
+        },
+    );
+    doc.initial_build();
+    doc.resolve(0.0);
+    let measure = |selector: &str| {
+        let id = doc.query_selector(selector).unwrap().unwrap();
+        let node = doc.get_node(id).unwrap();
+        let text = node.element_data().unwrap().inline_layout_data.as_ref().unwrap();
+        (node.final_layout.size, text.layout.len(), text.layout.width(), text.clamp)
+    };
+    let (size, lines, text_width, clamp) = measure("#truncated");
+    assert!(
+        lines == 1 && (size.height - 20.0).abs() < 0.5 && (size.width - 120.0).abs() < 0.5 && text_width > 120.0,
+        "nowrap text must stay on one line wider than its 120px box: lines={lines} size={size:?} text_width={text_width}"
+    );
+    assert!(clamp.is_some_and(|c| c.ellipsis_on_overflow && c.max_lines.is_none()));
+    let (wrapped_size, wrapped_lines, _, wrapped_clamp) = measure("#wrapping");
+    assert!(
+        wrapped_lines > 1 && wrapped_size.height > size.height + 0.5 && wrapped_clamp.is_none(),
+        "control: without nowrap/ellipsis the text wraps and carries no clamp: lines={wrapped_lines} size={wrapped_size:?}"
+    );
+}

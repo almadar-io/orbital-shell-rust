@@ -5,7 +5,19 @@ use taffy::{
 };
 
 use super::resolve_calc_value;
+use crate::node::{TextBrush, TextClamp};
 use crate::BaseDocument;
+
+// ORBITAL PATCH (blitz-dom 0.2.4, parity): the height of a clamped layout is the bottom of its last visible line.
+fn clamped_height(layout: &parley::Layout<TextBrush>, max_lines: Option<usize>) -> f32 {
+    match max_lines {
+        Some(max) if max > 0 && layout.len() > max => layout
+            .get(max - 1)
+            .map(|line| line.metrics().max_coord)
+            .unwrap_or_else(|| layout.height()),
+        _ => layout.height(),
+    }
+}
 
 impl BaseDocument {
     pub(crate) fn compute_inline_layout(
@@ -25,6 +37,29 @@ impl BaseDocument {
 
         // TODO: eliminate clone
         let style = self.nodes[node_id].style.clone();
+
+        // ORBITAL PATCH (blitz-dom 0.2.4, parity): -webkit-line-clamp, text-overflow: ellipsis and
+        // white-space: nowrap are read here; blitz-paint cuts the lines and draws the ellipsis.
+        let (max_lines, ellipsis_on_overflow, nowrap) = self.nodes[node_id]
+            .primary_styles()
+            .map(|s| {
+                use style::computed_values::text_wrap_mode::T as TextWrapMode;
+                use style::values::computed::Overflow;
+                use style::values::specified::text::TextOverflowSide;
+
+                let lines = s.clone__webkit_line_clamp().0;
+                let max_lines = (lines > 0).then_some(lines as usize);
+                let ellipsis = matches!(
+                    s.get_text().text_overflow.second,
+                    TextOverflowSide::Ellipsis
+                ) && s.clone_overflow_x() != Overflow::Visible;
+                (
+                    max_lines,
+                    ellipsis,
+                    s.clone_text_wrap_mode() == TextWrapMode::Nowrap,
+                )
+            })
+            .unwrap_or((None, false, false));
 
         let output = compute_leaf_layout(
             inputs,
@@ -79,7 +114,10 @@ impl BaseDocument {
                         // This is a little tricky as the size of the inline boxes may depend on whether we are sizing under
                         // and a min-content or max-content constraint. So if we want to compute both widths in one pass then
                         // we need to store both a min-content and max-content size on each box.
-                        let content_sizes = inline_layout.layout.calculate_content_widths();
+                        let mut content_sizes = inline_layout.layout.calculate_content_widths();
+                        if nowrap {
+                            content_sizes.min = content_sizes.max;
+                        }
                         let computed_width = match available_space.width {
                             AvailableSpace::MinContent => content_sizes.min,
                             AvailableSpace::MaxContent => content_sizes.max,
@@ -122,16 +160,25 @@ impl BaseDocument {
                     //
                     // FIXME: avoid the need to clone the layout each time
                     let mut layout = inline_layout.clone();
-                    layout.layout.break_all_lines(Some(width));
+                    layout.layout.break_all_lines((!nowrap).then_some(width));
 
                     return taffy::Size {
                         width: width.ceil() / scale,
-                        height: layout.layout.height() / scale,
+                        height: clamped_height(&layout.layout, max_lines) / scale,
                     };
                 }
 
                 // Perform inline layout
-                inline_layout.layout.break_all_lines(Some(width));
+                inline_layout
+                    .layout
+                    .break_all_lines((!nowrap).then_some(width));
+                inline_layout.clamp = (max_lines.is_some() || ellipsis_on_overflow).then_some(
+                    TextClamp {
+                        max_lines,
+                        ellipsis_on_overflow,
+                        width,
+                    },
+                );
 
                 let alignment = self.nodes[node_id]
                     .primary_styles()
@@ -255,7 +302,7 @@ impl BaseDocument {
 
                 inputs.known_dimensions.unwrap_or(taffy::Size {
                     width: inline_layout.layout.width().ceil() / scale,
-                    height: inline_layout.layout.height() / scale,
+                    height: clamped_height(&inline_layout.layout, max_lines) / scale,
                 })
             },
         );

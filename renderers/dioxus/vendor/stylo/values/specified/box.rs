@@ -142,7 +142,7 @@ impl Display {
     );
     pub const Block: Self =
         Self(((DisplayOutside::Block as u16) << Self::OUTSIDE_SHIFT) | DisplayInside::Flow as u16);
-    #[cfg(feature = "gecko")]
+    // ORBITAL PATCH (stylo 0.8.0, parity): available under servo so `-webkit-box` can parse as flow-root.
     pub const FlowRoot: Self = Self(
         ((DisplayOutside::Block as u16) << Self::OUTSIDE_SHIFT) | DisplayInside::FlowRoot as u16,
     );
@@ -426,6 +426,11 @@ impl DisplayKeyword {
             "-webkit-box" => Full(Display::WebkitBox),
             #[cfg(feature = "gecko")]
             "-webkit-inline-box" => Full(Display::WebkitInlineBox),
+            // ORBITAL PATCH (stylo 0.8.0, parity): under servo -webkit-box is the flow-root Blink computes when -webkit-line-clamp is set (Tailwind line-clamp-N); legacy flexbox behaviour is not carried.
+            #[cfg(feature = "servo")]
+            "-webkit-box" => Full(Display::FlowRoot),
+            #[cfg(feature = "servo")]
+            "-webkit-inline-box" => Full(Display::InlineBlock),
 
             /// <display-outside> = block | inline | run-in
             /// https://drafts.csswg.org/css-display/#typedef-display-outside

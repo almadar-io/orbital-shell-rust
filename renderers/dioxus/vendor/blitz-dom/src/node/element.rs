@@ -589,6 +589,19 @@ pub struct TextLayout {
     pub text: String,
     pub content_widths: Option<ContentWidths>,
     pub layout: parley::layout::Layout<TextBrush>,
+    // ORBITAL PATCH (blitz-dom 0.2.4, parity): -webkit-line-clamp / text-overflow: ellipsis state recorded by inline layout and read by blitz-paint.
+    pub clamp: Option<TextClamp>,
+}
+
+/// How the lines of an inline layout are cut when painting: `max_lines` hides every line past
+/// it (and ends the last one with an ellipsis when more text follows), `ellipsis_on_overflow`
+/// ends any line wider than `width` with an ellipsis.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TextClamp {
+    pub max_lines: Option<usize>,
+    pub ellipsis_on_overflow: bool,
+    /// The width the lines were broken to, in device pixels.
+    pub width: f32,
 }
 
 impl TextLayout {

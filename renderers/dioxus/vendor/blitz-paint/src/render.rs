@@ -457,10 +457,12 @@ impl ElementCx<'_> {
                 });
 
             // Render text
-            crate::text::stroke_text(
+            crate::text::stroke_text_clamped(
                 self.scale,
                 scene,
                 text_layout.layout.lines(),
+                text_layout.layout.len(),
+                text_layout.clamp,
                 self.context.dom,
                 pos,
             );

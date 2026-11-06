@@ -586,11 +586,14 @@ ${helpers.predefined_type(
     affects="paint",
 )}
 
+// ORBITAL PATCH (stylo 0.8.0, parity): -webkit-line-clamp is enabled under servo (behind layout.unimplemented, which blitz sets) so blitz-dom inline layout can clamp lines.
 ${helpers.predefined_type(
     "-webkit-line-clamp",
     "LineClamp",
     "computed::LineClamp::none()",
-    engines="gecko",
+    engines="gecko servo",
+    servo_pref="layout.unimplemented",
+    servo_restyle_damage="rebuild_box",
     spec="https://drafts.csswg.org/css-overflow-3/#line-clamp",
     affects="layout",
 )}
