@@ -16,7 +16,7 @@ if os.path.exists(skip_path):
         if line and not line.startswith('#'):
             name, _, reason = line.partition(' ')
             skips[name] = reason.strip()
-deltas, fails, jobs = {}, {}, None
+deltas, fails, jobs, no_route = {}, {}, None, set()
 for line in open(os.path.join(out, 'run.log')):
     line = line.strip()
     m = re.match(r'(.+)--(.+)\.pair\.png delta=([\d.]+)', line)
@@ -26,6 +26,10 @@ for line in open(os.path.join(out, 'run.log')):
     m = re.match(r'(\w+_FAIL) (\S+) (\S+)', line)
     if m:
         fails[(m.group(2), m.group(3))] = m.group(1)
+    m = re.match(r'NO_ROUTE (\S+) (\S+)', line)
+    if m:
+        no_route.add((m.group(1), m.group(2)))
+        continue
     m = re.match(r'jobs=(\d+)', line)
     if m:
         jobs = int(m.group(1))
@@ -48,8 +52,8 @@ problems = []
 for (b, t), kind in sorted(fails.items()):
     if b not in skips:
         problems.append(f'capture failure {kind} {b} {t}')
-if jobs is not None and len(deltas) + len(fails) < jobs and not any(k[0] not in skips for k in fails):
-    problems.append(f'{jobs - len(deltas)} of {jobs} pairs produced no delta line (run incomplete; rerun to resume)')
+if jobs is not None and len(deltas) + len(fails) + len(no_route) < jobs and not any(k[0] not in skips for k in fails):
+    problems.append(f'{jobs - len(deltas) - len(no_route)} of {jobs} pairs produced no delta line (run incomplete; rerun to resume)')
 for (b, t), d in sorted(deltas.items()):
     if b in skips or (b, t) in fails:
         continue
@@ -58,7 +62,9 @@ for (b, t), d in sorted(deltas.items()):
     elif d > base[(b, t)] + slack:
         problems.append(f'regression {b} {t}: delta {d:.1f} > baseline {base[(b, t)]:.1f} + {slack}')
 improved = sum(1 for k, d in deltas.items() if k in base and d < base[k] - slack)
-print(f'h4: pairs {len(deltas)}  capture failures {len(fails)}  skipped behaviors {len(skips)}  improved {improved}')
+print(f'h4: pairs {len(deltas)}  capture failures {len(fails)}  skipped behaviors {len(skips)}  no route page {len({b for b, _ in no_route})}  improved {improved}')
+if no_route:
+    print('  no route page (not compared): ' + ' '.join(sorted({b for b, _ in no_route})))
 for p in problems:
     print('  FAIL', p)
 if improved:

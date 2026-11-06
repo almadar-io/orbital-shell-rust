@@ -79,12 +79,15 @@ fn kernel(schema: &OrbitalSchema, messages: Option<&Messages>) -> Result<Arc<dyn
 
 /// The client-role circuit over `bridge`, with the viewer's messages installed before its first INIT.
 fn circuit(schema: &OrbitalSchema, bridge: Arc<dyn ServerBridge>, messages: Option<&Messages>) -> Result<ClientCore, String> {
-    // A client program left with no orbital (every orbital serves only protocol endpoints, EXEC-ENDPOINT-5) has no
-    // circuit to run: the window paints its empty page, as the browser does, instead of refusing the program.
-    if schema.orbitals.is_empty() {
-        return Ok(ClientCore::new(schema.clone(), None));
-    }
-    let kernel = ClientKernel::new(schema.clone(), Some(bridge)).map_err(|e| format!("client kernel: {e}"))?;
+    // The kernel's refusal is painted as the web paints it (an error-state), not turned into a failed capture.
+    let kernel = match ClientKernel::new(schema.clone(), Some(bridge)) {
+        Ok(kernel) => kernel,
+        Err(refusal) => {
+            let mut core = ClientCore::new(schema.clone(), None);
+            core.refuse_circuit(refusal.to_string());
+            return Ok(core);
+        }
+    };
     if let Some((locales, catalogs)) = messages {
         kernel.set_messages(locales.clone(), catalogs.clone());
     }

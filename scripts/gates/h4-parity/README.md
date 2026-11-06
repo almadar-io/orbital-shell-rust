@@ -12,6 +12,8 @@ or a path to a list file of behavior paths relative to `packages/almadar-std/beh
    been still for 1.5 s (`cdp_shot.mjs`; writes `.web.png` and `.web.html`). Each worker reuses one Chrome.
 3. `orb-desktop request` captures the same route against the same server (`Screenshot { route, server }`, the client
    projection of the program, host frames run until quiet), writing `.desktop.png` and `.desktop.tree.json`.
+   A program with no non-protocol route page has nothing a user can open: `pair.sh` prints `NO_ROUTE <name> <theme>`
+   and captures nothing; `summary.py` and `compare.py` list those behaviors apart and leave them out of deltas.
 4. `composite.py` writes a side-by-side `.pair.png` and the mean pixel delta.
 
 Then `compare.py` checks the run against `baseline/<tier>.tsv` (`behavior<TAB>theme<TAB>delta`). It exits 1 on:

@@ -16,6 +16,7 @@ for line in open(os.path.join(out, 'run.log')):
     m = re.match(r'(\w+_FAIL) (\S+) (\S+)', line.strip())
     if m:
         fails[m.group(2)].append(f'{m.group(1)}:{m.group(3)}')
+no_route = sorted({m.group(1) for m in (re.match(r'NO_ROUTE (\S+) (\S+)', l.strip()) for l in open(os.path.join(out, 'run.log'))) if m})
 web_status = collections.defaultdict(list)
 for f in os.listdir(os.path.join(out, 'log')):
     if f.endswith('.chrome.log'):
@@ -30,6 +31,8 @@ print(f'behaviors {len(names)}  pairs {sum(len(v) for v in deltas.values())}')
 print('== failures')
 for n in sorted(fails):
     print(n, ' '.join(sorted(set(fails[n]))))
+print('== no route page (not compared)')
+print(' '.join(no_route))
 print('== web not settled')
 for n in sorted(web_status):
     print(n, ' '.join(web_status[n]))

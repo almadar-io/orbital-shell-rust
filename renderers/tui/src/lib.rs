@@ -353,7 +353,8 @@ impl TuiApp {
     }
 
     fn render_main_content(&mut self, frame: &mut Frame, area: Rect) {
-        let main_contents = self.core.slot_contents("main");
+        let mut main_contents = self.core.slot_contents("main");
+        main_contents.extend(self.core.circuit_fault_content());
         if main_contents.is_empty() {
             let empty = Paragraph::new("No content to display")
                 .alignment(Alignment::Center)
@@ -751,8 +752,8 @@ impl PatternRenderer for ErrorStateRenderer {
         _entity: Option<&Value>,
         _ctx: &mut RenderContext<'_>,
     ) {
-        let title = get_string_or(props, "title", "Error");
-        let message = get_string_or(props, "message", "Something went wrong.");
+        let title = get_string_or(props, "title", "Something went wrong");
+        let message = get_string_or(props, "message", "An error occurred");
         let text = Text::from(vec![
             Line::from(Span::styled(
                 title,

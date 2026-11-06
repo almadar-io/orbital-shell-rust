@@ -681,6 +681,9 @@ pub fn App() -> Element {
                                     {paint_slot_content(registry, sc, &view.for_source(sc.source_trait.clone(), source_sink.call(sc.source_trait.clone())))}
                                 }
                                 if slot_name == "main" {
+                                    if let Some(refusal) = core.circuit_fault_content() {
+                                        {paint_slot_content(registry, &refusal, &view.for_source(refusal.source_trait.clone(), source_sink.call(refusal.source_trait.clone())))}
+                                    }
                                     if let Some(fault) = core.mount_fault_content() {
                                         {paint_slot_content(registry, &fault, &view.for_source(fault.source_trait.clone(), source_sink.call(fault.source_trait.clone())))}
                                     }

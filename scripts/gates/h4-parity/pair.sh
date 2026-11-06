@@ -17,7 +17,9 @@ ROUTE=$($PY -c "
 import json,sys
 d=json.load(open('$OUT/src/$NAME--$THEME.orb'))
 paths=[p.get('path') for o in d['orbitals'] for p in o.get('pages',[]) if p.get('path') and not p.get('protocol')]
-print(paths[0] if paths else '/')")
+print(paths[0] if paths else '')")
+# A program with no route page has nothing a user can open: not compared.
+[ -n "$ROUTE" ] || { echo "NO_ROUTE $NAME $THEME"; rm -f $OUT/src/$NAME--$THEME.orb; exit 0; }
 # orb resolves behavior packages by walking up from its cwd: serve from inside ROOT so the web leg compiles the same
 # std the desktop leg resolved (a cwd outside ROOT silently picks the installed std).
 SERVE_DIR=$ROOT/.parity-serve/${OUT:t}-$PORT

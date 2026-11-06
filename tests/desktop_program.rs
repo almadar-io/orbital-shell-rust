@@ -119,9 +119,10 @@ fn served_shot(schema: OrbitalSchema, server: Option<&str>, out: &Path) -> Resul
 }
 
 #[test]
-fn a_route_capture_of_a_boot_only_program_against_a_server_paints_the_empty_client_page() {
+fn a_route_capture_of_a_boot_only_program_against_a_server_paints_the_kernel_refusal_as_the_web_does() {
     let out = std::env::temp_dir().join(format!("orb-desktop-boot-{}", std::process::id()));
-    served_shot(boot_only_program(), Some("http://127.0.0.1:9"), &out).unwrap();
+    let painted = served_shot(boot_only_program(), Some("http://127.0.0.1:9"), &out).unwrap();
+    assert!(painted.contains("Something went wrong") && painted.contains("resolved schema declares no orbitals"), "{painted}");
     std::fs::remove_dir_all(&out).unwrap();
 }
 
