@@ -405,9 +405,43 @@ impl DioxusPatternRenderer for SceneCanvasRenderer {
         if learning::CARD_PATTERNS.contains(&self.name) {
             return learning_card(self.name, props, node, view, registry);
         }
+        if self.name == "graph-view" {
+            return graph_view_frame(props, node, view);
+        }
         let (class_name, a11y) = scene_presentation(props);
         let inline_style = style_with_props("", props);
         rsx! { SceneCanvas { node, sink: view.sink, fill_parent: false, a11y, class_name, inline_style } }
+    }
+}
+
+/// The web GraphView's root around the scene: a `relative overflow-hidden` box (a content surface
+/// unless one is already painted around it), `width` px or the full width, `height` px (400), with
+/// the scene filling it.
+fn graph_view_frame(props: &Value, node: serde_json::Value, view: &DioxusView<'_>) -> Element {
+    use orbital_core::client::helpers::{get_number, get_string_or};
+    let paints_surface = get_string_or(props, "surface", "auto") == "auto"
+        && try_consume_context::<crate::components::core::atoms::card::OnSurface>().is_none();
+    let surface = if paints_surface { "surface-content" } else { "" };
+    let root_class = merge_class_name(&format!("relative overflow-hidden {surface}"), props);
+    let width = match get_number(props, "width") {
+        Some(width) => format!("{width}px"),
+        None => "100%".to_string(),
+    };
+    let height = get_number(props, "height").unwrap_or(400.0);
+    let root_style = format!("width:{width};height:{height}px");
+    let (_, a11y) = scene_presentation(props);
+    let sink = view.sink;
+    rsx! {
+        div { class: "{root_class}", style: "{root_style}",
+            SceneCanvas {
+                node,
+                sink,
+                fill_parent: true,
+                a11y,
+                class_name: "almadar-game-canvas",
+                inline_style: String::new(),
+            }
+        }
     }
 }
 
