@@ -1419,3 +1419,132 @@ fn aspect_square_overflow_hidden_grid_items_give_their_rows_height_in_a_flex_col
         "overflow-hidden rows collapsed: clipped={clipped} visible={visible}"
     );
 }
+
+#[test]
+fn tiled_hairline_grid_gradient_keeps_the_page_white_between_lines_on_gpu() {
+    use anyrender::ImageRenderer;
+    use blitz_dom::DocumentConfig;
+    use blitz_paint::paint_scene;
+    use blitz_traits::shell::{ColorScheme, Viewport};
+    use dioxus::prelude::*;
+    use dioxus_native::DioxusDocument;
+
+    fn app() -> Element {
+        rsx! { div { class: "grid-page" } }
+    }
+
+    let mut doc = DioxusDocument::new(
+        dioxus_core::VirtualDom::new(app),
+        DocumentConfig {
+            viewport: Some(Viewport::new(160, 160, 1.0, ColorScheme::Light)),
+            ..Default::default()
+        },
+    );
+    doc.add_user_agent_stylesheet(
+        ".grid-page { display: block; width: 160px; height: 900px; background-color: white; \
+         background-image: linear-gradient(rgba(17,17,17,0.5) 1px, transparent 1px), \
+         linear-gradient(90deg, rgba(17,17,17,0.5) 1px, transparent 1px); \
+         background-size: 64px 64px; }",
+    );
+    doc.initial_build();
+    doc.resolve(0.0);
+    let mut renderer = anyrender_vello::VelloImageRenderer::new(160, 160);
+    let mut pixels = vec![0u8; 160 * 160 * 4];
+    renderer.render(
+        |painter| paint_scene(painter, &doc, 1.0, 160, 160),
+        &mut pixels,
+    );
+    let px = |x: usize, y: usize| pixels[(y * 160 + x) * 4];
+    assert!(
+        px(30, 30) > 250 && px(40, 100) > 250,
+        "page between grid lines is not white: {}/{}",
+        px(30, 30),
+        px(40, 100)
+    );
+    assert!(
+        px(30, 0) < 200 && px(0, 30) < 200,
+        "control: the 1px grid lines must still paint: {}/{}",
+        px(30, 0),
+        px(0, 30)
+    );
+}
+
+#[test]
+fn card_title_beside_an_action_group_keeps_one_line_when_it_fits() {
+    use blitz_dom::DocumentConfig;
+    use blitz_traits::shell::{ColorScheme, Viewport};
+    use dioxus::prelude::*;
+    use dioxus_native::DioxusDocument;
+
+    fn row(prefix: &'static str, title: &'static str) -> Element {
+        let title_id = format!("{prefix}-title");
+        let row_id = format!("{prefix}-row");
+        rsx! {
+            div { class: "flex flex-row gap-2 justify-between items-start", id: "{row_id}", style: "width: 280px",
+                div { class: "flex flex-col gap-1 items-stretch justify-start flex-1 min-w-0",
+                    div { class: "flex flex-row gap-1 justify-start items-center min-w-0",
+                        div { class: "min-w-0",
+                            h4 { id: "{title_id}", class: "text-xl font-semibold min-w-0 line-clamp-2 break-words",
+                                style: "font-weight: 800; letter-spacing: -0.03em", "{title}" }
+                        }
+                    }
+                }
+                div { class: "flex flex-row gap-1 items-stretch justify-start flex-shrink-0",
+                    button { class: "inline-flex items-center justify-center gap-2 h-button-sm px-3 text-sm", "Send" }
+                    button { class: "inline-flex items-center justify-center gap-2 h-button-sm px-3 text-sm", "..." }
+                }
+            }
+        }
+    }
+
+    fn app() -> Element {
+        rsx! {
+            div { class: "flex flex-col gap-4",
+                {row("fits", "Glen Ridge")}
+                {row("wraps", "Estuary Juniper Meridian")}
+            }
+        }
+    }
+
+    let mut doc = DioxusDocument::new(
+        dioxus_core::VirtualDom::new(app),
+        DocumentConfig {
+            viewport: Some(Viewport::new(320, 200, 1.0, ColorScheme::Light)),
+            font_ctx: Some(orbital_client_dioxus::offscreen::embedded_font_context()),
+            ..Default::default()
+        },
+    );
+    doc.initial_build();
+    doc.create_head_element(
+        "style",
+        &[],
+        &Some(include_str!("../assets/css/web-client.css").into()),
+    );
+    doc.resolve(0.0);
+    let measure = |selector: &str| {
+        let id = doc.query_selector(selector).unwrap().unwrap();
+        let node = doc.get_node(id).unwrap();
+        let text = node
+            .element_data()
+            .unwrap()
+            .inline_layout_data
+            .as_ref()
+            .unwrap();
+        (
+            node.final_layout.size,
+            text.layout.len(),
+            text.layout.width(),
+        )
+    };
+    let (box_size, painted_lines, painted_width) = measure("#fits-title");
+    let line_height = box_size.height / painted_lines.max(1) as f32;
+    assert!(
+        painted_lines == 1 && box_size.height < line_height * 1.5,
+        "title that fits wrapped: lines={painted_lines} box={box_size:?} text_width={painted_width}"
+    );
+    let (wrapped_box, wrapped_lines, _) = measure("#wraps-title");
+    assert!(
+        wrapped_lines >= 2 && wrapped_box.height > box_size.height * 1.5,
+        "control: a title that cannot fit must wrap and grow its box: lines={wrapped_lines} box={wrapped_box:?}"
+    );
+}

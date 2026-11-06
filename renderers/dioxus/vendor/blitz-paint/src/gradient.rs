@@ -88,13 +88,17 @@ pub(crate) fn to_peniko_gradient(
 fn linear_gradient(
     gradient: LinearGradient,
     rect: Rect,
-    bounding_box: Rect,
+    _bounding_box: Rect,
     scale: f64,
     current_color: &AbsoluteColor,
 ) -> (peniko::Gradient, Option<Affine>) {
     let (direction, items, flags) = gradient;
 
-    let center = bounding_box.center();
+    // ORBITAL PATCH (blitz-paint 0.2, parity): the fill rect is the background tile at the
+    // local origin, so the angled gradient line is centred on the tile. Centring it on the
+    // element's border box put a tiled gradient (a 64px grid on a tall page) far outside the
+    // tile, where Extend::Pad painted the first stop colour across the whole tile.
+    let center = rect.center();
     let (start, end) = match direction {
         LineDirection::Angle(angle) => {
             let angle = -angle.radians64() + std::f64::consts::PI;
