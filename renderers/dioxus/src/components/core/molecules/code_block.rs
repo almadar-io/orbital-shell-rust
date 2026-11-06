@@ -214,7 +214,9 @@ fn Block(input: BlockProps) -> Element {
         || (show_line_numbers && !editable)
         || diff.is_some()
         || mode == "diff"
-        || !actions.is_empty();
+        || props
+            .get("actions")
+            .is_some_and(|authored| !authored.is_null());
     let effective_copy = props
         .get("showCopy")
         .and_then(Value::as_bool)

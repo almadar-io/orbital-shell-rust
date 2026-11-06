@@ -338,7 +338,7 @@ fn SelectField(field: SelectFieldProps) -> Element {
             },
             dioxus_primitives::select::SelectTrigger {
                 id: field_id.clone(), aria_label: label.clone(),
-                class: "block w-full rounded-interactive border-[length:var(--border-width)] shadow-elevation-interactive interactive-border appearance-none px-3 py-2 pr-10 text-sm text-foreground font-medium bg-card focus:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:bg-muted disabled:text-muted-foreground disabled:cursor-not-allowed border-border focus:border-primary",
+                class: "block w-full rounded-interactive border-[length:var(--border-width)] shadow-elevation-interactive interactive-border appearance-none whitespace-nowrap overflow-hidden px-3 py-2 pr-10 text-sm text-foreground font-medium bg-card focus:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:bg-muted disabled:text-muted-foreground disabled:cursor-not-allowed border-border focus:border-primary",
                 dioxus_primitives::select::SelectValue { placeholder: placeholder }
             }
             {chevron.clone()}

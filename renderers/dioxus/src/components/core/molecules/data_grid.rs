@@ -332,6 +332,8 @@ fn Grid(input: GridProps) -> Element {
     } else {
         cols_class
     };
+    let paints_surface = get_string_or(props, "surface", "auto") == "auto"
+        && try_consume_context::<crate::components::core::atoms::card::OnSurface>().is_none();
     let grid_class = if as_rows {
         merge_class_name(
             "bg-transparent rounded-none shadow-none flex flex-col divide-y divide-border surface-content overflow-hidden",
@@ -439,7 +441,7 @@ fn Grid(input: GridProps) -> Element {
                             selected.set(next.clone());
                             emit_selection(selection_sink, &selection_name, &next);
                         });
-                        let row_class = if as_rows { "bg-transparent rounded-none shadow-none flex flex-row items-center gap-3 px-card-md transition-colors duration-fast hover:bg-muted/50" } else { "rounded-container border border-border hover:shadow-elevation-dialog hover:border-primary transition-all flex flex-col" };
+                        let row_class = if as_rows { "bg-transparent rounded-none shadow-none flex flex-row items-center gap-3 px-card-md transition-colors duration-fast hover:bg-muted/50".to_string() } else { format!("{} hover:shadow-elevation-dialog hover:border-primary transition-all flex flex-col", if paints_surface { "surface-content" } else { "rounded-container border border-border" }) };
                         let selected_class = if is_selected { if as_rows { "bg-primary/5" } else { "ring-2 ring-primary border-primary" } } else { "" };
                         let clickable = if click_event.is_some() { "cursor-pointer" } else { "" };
                         let has_open = click_event.is_some();
