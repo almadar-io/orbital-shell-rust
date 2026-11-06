@@ -73,15 +73,15 @@ fn the_terminal_cannot_paint_a_canvas_and_says_so() {
 #[test]
 fn screenshots_write_one_png_per_orbital_and_text_for_the_terminal() {
     let out = std::env::temp_dir().join(format!("orb-desktop-shots-{}", std::process::id()));
-    let png = files(request(Path::new(BINARY), DesktopRequest::Screenshot { renderer: "dioxus".into(), item: "t".into(), schema: Box::new(program()), out_dir: out.clone(), route: None, server: None, program_path: None }).unwrap());
-    let txt = files(request(Path::new(BINARY), DesktopRequest::Screenshot { renderer: "tui".into(), item: "t".into(), schema: Box::new(program()), out_dir: out.clone(), route: None, server: None, program_path: None }).unwrap());
+    let png = files(request(Path::new(BINARY), DesktopRequest::Screenshot { renderer: "dioxus".into(), item: "t".into(), schema: Box::new(program()), out_dir: out.clone(), route: None, server: None }).unwrap());
+    let txt = files(request(Path::new(BINARY), DesktopRequest::Screenshot { renderer: "tui".into(), item: "t".into(), schema: Box::new(program()), out_dir: out.clone(), route: None, server: None }).unwrap());
     assert_eq!(png, vec![out.join("t.orbital0.png"), out.join("t.orbital1.png")]);
     assert!(std::fs::read_to_string(&txt[0]).unwrap().contains("Hello frames"));
     std::fs::remove_dir_all(&out).unwrap();
 }
 
 fn route_shot(route: &str, out: &Path) -> String {
-    let txt = files(request(Path::new(BINARY), DesktopRequest::Screenshot { renderer: "tui".into(), item: "r".into(), schema: Box::new(program()), out_dir: out.to_path_buf(), route: Some(route.into()), server: None, program_path: None }).unwrap());
+    let txt = files(request(Path::new(BINARY), DesktopRequest::Screenshot { renderer: "tui".into(), item: "r".into(), schema: Box::new(program()), out_dir: out.to_path_buf(), route: Some(route.into()), server: None }).unwrap());
     assert_eq!(txt, vec![out.join("r.txt")]);
     std::fs::read_to_string(&txt[0]).unwrap()
 }
@@ -114,7 +114,7 @@ fn boot_only_program() -> OrbitalSchema {
 }
 
 fn served_shot(schema: OrbitalSchema, server: Option<&str>, out: &Path) -> Result<String, String> {
-    let shot = DesktopRequest::Screenshot { renderer: "tui".into(), item: "s".into(), schema: Box::new(schema), out_dir: out.to_path_buf(), route: Some("/".into()), server: server.map(str::to_string), program_path: None };
+    let shot = DesktopRequest::Screenshot { renderer: "tui".into(), item: "s".into(), schema: Box::new(schema), out_dir: out.to_path_buf(), route: Some("/".into()), server: server.map(str::to_string) };
     request(Path::new(BINARY), shot).map(|reply| std::fs::read_to_string(&files(reply)[0]).unwrap()).map_err(|e| e.message)
 }
 

@@ -10,7 +10,7 @@ server = sys.argv[5] if len(sys.argv) > 5 else None
 binary = os.environ['ORB_DESKTOP']
 envelope = {
     'protocol': 1,
-    'request': {'command': 'screenshot', 'renderer': 'dioxus', 'item': item, 'schema': json.load(open(orb)), 'outDir': out_dir, 'programPath': os.path.abspath(orb), **({'route': route} if route else {}), **({'server': server} if server else {})},
+    'request': {'command': 'screenshot', 'renderer': 'dioxus', 'item': item, 'schema': json.load(open(orb)), 'outDir': out_dir, **({'route': route} if route else {}), **({'server': server} if server else {})},
 }
 proc = subprocess.run([binary, 'request'], input=json.dumps(envelope), capture_output=True, text=True, timeout=180)
 sys.stdout.write(proc.stdout)
