@@ -323,23 +323,47 @@ fn SceneCanvas(props: SceneCanvasProps) -> Element {
             "src": "{id}",
             width: w,
             height: h,
-            onclick: move |evt: MouseEvent| {
-                let at = evt.element_coordinates();
-                let (x, y) = (at.x as f32, at.y as f32);
-                let emits = {
-                    let mut host = host.lock().expect("scene host poisoned");
-                    host.input("touch-down", x, y, 0, None);
-                    host.input("touch-up", x, y, 0, None);
-                    host.take_scene_events()
-                };
-                let Some(sink) = sink else { return };
-                for emit in emits {
-                    match serde_json::from_value::<Value>(emit.delivered()) {
-                        Ok(payload) => sink.call((emit.event, payload)),
-                        Err(err) => tracing::warn!(target: NS, error = %err, "scene payload refused"),
+            onmousedown: {
+                let host = host.clone();
+                move |evt: MouseEvent| pointer(&host, sink, "touch-down", &evt)
+            },
+            onmousemove: {
+                let host = host.clone();
+                move |evt: MouseEvent| {
+                    if !evt.held_buttons().is_empty() {
+                        pointer(&host, sink, "touch-move", &evt);
                     }
                 }
             },
+            onmouseup: move |evt: MouseEvent| pointer(&host, sink, "touch-up", &evt),
+        }
+    }
+}
+
+/// One pointer event in element coordinates into the scene host (a 2D tap or drag, a 3D orbit or pick),
+/// then the events it queued to the sink.
+fn pointer(
+    host: &Mutex<SceneHost>,
+    sink: Option<crate::renderer::EventSink>,
+    kind: &str,
+    evt: &MouseEvent,
+) {
+    let at = evt.element_coordinates();
+    let button = match evt.trigger_button() {
+        Some(dioxus::html::input_data::MouseButton::Auxiliary) => 1,
+        Some(dioxus::html::input_data::MouseButton::Secondary) => 2,
+        _ => 0,
+    };
+    let emits = {
+        let mut host = host.lock().expect("scene host poisoned");
+        host.input(kind, at.x as f32, at.y as f32, button, None);
+        host.take_scene_events()
+    };
+    let Some(sink) = sink else { return };
+    for emit in emits {
+        match serde_json::from_value::<Value>(emit.delivered()) {
+            Ok(payload) => sink.call((emit.event, payload)),
+            Err(err) => tracing::warn!(target: NS, error = %err, "scene payload refused"),
         }
     }
 }
@@ -426,7 +450,11 @@ fn graph_view_frame(props: &Value, node: serde_json::Value, view: &DioxusView<'_
     use orbital_core::client::helpers::{get_number, get_string_or};
     let paints_surface = get_string_or(props, "surface", "auto") == "auto"
         && try_consume_context::<crate::components::core::atoms::card::OnSurface>().is_none();
-    let surface = if paints_surface { "surface-content" } else { "" };
+    let surface = if paints_surface {
+        "surface-content"
+    } else {
+        ""
+    };
     let root_class = merge_class_name(&format!("relative overflow-hidden {surface}"), props);
     let width = match get_number(props, "width") {
         Some(width) => format!("{width}px"),
