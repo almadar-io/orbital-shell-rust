@@ -9,6 +9,8 @@ Every open gap this repo owns lives here. This file is the source of truth; the 
 
 Next code: `G-ORBITAL-SHELL-RUST-033`
 
+- **G-ORBITAL-SHELL-RUST-006** `[mechanical]` — The dioxus `guest-view` renderer does not scope guest paints to their painters, so a click on a guest control reaches no guest: since 2026-11-06 the kernel delivers a guest click only as `<Painter>.<EVENT>` (`orbital-core` `kernel/guest_controls.rs`), and the web GuestView names the painter through its trait scopes. Reproduce: paint a `guest-view` in a dioxus host and click a guest button; the opener's `deliver` event never fires. Fix: render each guest paint (`paints[].orbital`) under its painter's scope and dispatch `<Painter>.<EVENT>` to the opener, as the web renderer does. Prevention rung: (3) the guest parity twin test run on the native host. `renderers/dioxus/src/components/core/molecules/guest_view.rs` · Root cause: one-off.
+
 - **G-ORBITAL-SHELL-RUST-032** [architectural] — Browser embeds have no native equivalent: document-viewer paints its toolbar but not the embedded page (web: an <iframe> of the document URL), and map-view paints its frame, zoom control and attribution but no tiles (web: Leaflet fetching OpenStreetMap tiles). Owner: orbital-shell-rust (a native web view or a tile fetch+paint path through orbital-canvas). Reproduce: H4 pairs ui-document-viewer, ui-map-view, std-geosearch. Rung (3): the H4 paired capture. Root cause: H4.
 
 - **G-ORBITAL-SHELL-RUST-025** [architectural] — `mask-image` / `-webkit-mask-image` and `corner-shape` are not painted by blitz-paint: masked elements paint unmasked and squircle corners paint as plain radii. Owner: orbital-shell-rust vendored blitz-paint (Vello layer masks). Rung (3): the H4 paired capture. Root cause: H4.

@@ -1,4 +1,4 @@
-//! Booting a program on the [`Host`]: register it, install its locales, configure tracing and credentials from the
+//! Booting a program on the [`Host`]: register it (it carries its own messages), configure tracing and credentials from the
 //! environment, refuse a production boot that lacks what it needs.
 
 use super::store::{DriverAdapter, PersistenceAdapter};
@@ -7,67 +7,7 @@ use orbital_core::schema::parse_schema_file;
 use std::path::Path;
 use std::sync::Arc;
 
-/// Each declared locale's merged catalog, written beside the resolved `.orb` as
-/// `<stem>.<locale>.json` by `orb resolve` / `orb dev`. JS twin: `registerFromFile`.
-pub fn read_catalogs(
-    schema_path: &Path,
-    locales: &[String],
-) -> anyhow::Result<std::collections::HashMap<String, std::collections::HashMap<String, String>>> {
-    let mut catalogs = std::collections::HashMap::new();
-    for locale in locales {
-        let file = schema_path.with_extension(format!("{locale}.json"));
-        let raw = std::fs::read_to_string(&file).map_err(|e| {
-            anyhow::anyhow!(
-                "{} declares locale \"{locale}\" but its catalog {} could not be read: {e}",
-                schema_path.display(),
-                file.display()
-            )
-        })?;
-        let catalog: std::collections::HashMap<String, String> = serde_json::from_str(&raw)
-            .map_err(|e| {
-                anyhow::anyhow!(
-                    "catalog {} is not a flat JSON object of strings: {e}",
-                    file.display()
-                )
-            })?;
-        catalogs.insert(locale.clone(), catalog);
-    }
-    Ok(catalogs)
-}
-
-#[cfg(test)]
-mod catalog_tests {
-    use super::read_catalogs;
-
-    fn dir(tag: &str) -> std::path::PathBuf {
-        let d = std::env::temp_dir().join(format!(
-            "orbital-host-catalogs-{tag}-{}",
-            std::process::id()
-        ));
-        let _ = std::fs::remove_dir_all(&d);
-        std::fs::create_dir_all(&d).unwrap();
-        std::fs::write(d.join("site.orb"), "{}").unwrap();
-        std::fs::write(d.join("site.en.json"), r#"{"site:hero.title":"Hello"}"#).unwrap();
-        d
-    }
-
-    #[test]
-    fn reads_each_declared_locales_sidecar() {
-        let d = dir("ok");
-        std::fs::write(d.join("site.ar.json"), r#"{"site:hero.title":"مرحبا"}"#).unwrap();
-        let catalogs = read_catalogs(&d.join("site.orb"), &["en".into(), "ar".into()]).unwrap();
-        assert_eq!(catalogs["ar"]["site:hero.title"], "مرحبا");
-    }
-
-    #[test]
-    fn edge_a_missing_sidecar_names_the_file() {
-        let d = dir("missing");
-        let err = read_catalogs(&d.join("site.orb"), &["en".into(), "ar".into()]).unwrap_err();
-        assert!(err.to_string().contains("site.ar.json"), "{err}");
-    }
-}
-
-/// A resolved program's lazy orbitals read from the files `orb resolve` wrote beside it (EXEC-LOAD-1), with their catalogs.
+/// A resolved program's lazy orbitals read from the files `orb resolve` wrote beside it (EXEC-LOAD-1).
 pub struct FileLazySource {
     dir: std::path::PathBuf,
 }
@@ -82,9 +22,7 @@ impl orbital_core::runtime::LazySource for FileLazySource {
     fn read(&self, file: &str) -> Result<orbital_core::runtime::LazyProgram, String> {
         let path = self.dir.join(file);
         let schema = parse_schema_file(&path).map_err(|e| format!("{}: {e}", path.display()))?;
-        let locales = schema.locales.clone().unwrap_or_default();
-        let catalogs = read_catalogs(&path, &locales).map_err(|e| e.to_string())?;
-        Ok(orbital_core::runtime::LazyProgram { schema, catalogs })
+        Ok(orbital_core::runtime::LazyProgram { schema })
     }
 }
 
@@ -132,22 +70,18 @@ pub fn boot_file_with(
     config: HostConfig,
 ) -> anyhow::Result<Arc<Host>> {
     let schema = parse_schema_file(schema_path)?;
-    boot(schema, schema_path, Arc::new(DriverAdapter::memory()), env, trace_by_default, config, None)
+    boot(schema, schema_path, Arc::new(DriverAdapter::memory()), env, trace_by_default, config)
 }
 
 /// A composed app booted with the substrate `port` installed and its ticks driven (`orb serve`, and a cli program's
-/// `orb-run: server` hand-off): the store is the kernel's in-memory store. `catalogs` must hold every locale the app declares.
+/// `orb-run: server` hand-off): the store is the kernel's in-memory store.
 pub fn boot_app(
     schema: orbital_core::OrbitalSchema,
     schema_path: &Path,
     port: SubstratePort,
-    catalogs: Catalogs,
     env: &BootEnv,
     trace_by_default: bool,
 ) -> anyhow::Result<Arc<Host>> {
-    if let Some(missing) = schema.locales.iter().flatten().find(|locale| !catalogs.contains_key(*locale)) {
-        anyhow::bail!("the composed app declares locale \"{missing}\" but no catalog was given for it");
-    }
     let runtime = boot(
         schema,
         schema_path,
@@ -155,7 +89,6 @@ pub fn boot_app(
         env,
         trace_by_default,
         HostConfig { substrate: Some(port), ..HostConfig::default() },
-        Some(catalogs),
     )?;
     release_boot_memory();
     start_tick_driver(&runtime);
@@ -163,11 +96,10 @@ pub fn boot_app(
 }
 
 /// A program a host embeds (the Node and Python kernel add-ons): parsed from `program_json`, on the kernel's in-memory
-/// store, its message catalogs given, its ticks driven.
+/// store, its ticks driven.
 pub fn boot_embedded(
     program_json: &str,
     env: &BootEnv,
-    catalogs: Catalogs,
 ) -> anyhow::Result<Arc<Host>> {
     let schema: orbital_core::OrbitalSchema =
         serde_json::from_str(program_json).map_err(|e| anyhow::anyhow!("parse the program: {e}"))?;
@@ -181,7 +113,6 @@ pub fn boot_embedded(
         env,
         false,
         HostConfig::default(),
-        Some(catalogs),
     )?;
     release_boot_memory();
     start_tick_driver(&runtime);
@@ -197,9 +128,6 @@ fn release_boot_memory() {
 /// The process environment a host boots from.
 pub type BootEnv = std::collections::HashMap<String, String>;
 
-/// Message catalogs per locale, as `i18n/t` reads them.
-pub type Catalogs = std::collections::HashMap<String, std::collections::HashMap<String, String>>;
-
 #[allow(clippy::too_many_arguments)]
 pub fn boot(
     schema: orbital_core::OrbitalSchema,
@@ -208,7 +136,6 @@ pub fn boot(
     env: &BootEnv,
     trace_by_default: bool,
     config: HostConfig,
-    catalogs: Option<Catalogs>,
 ) -> anyhow::Result<Arc<Host>> {
     tracing::info!(
         target: orbital_core::logging::ns::SERVER_DATA,
@@ -225,16 +152,9 @@ pub fn boot(
     // Register schema (materializes any authored `instances`).
     let name = schema.name.clone();
     runtime.register_schema(schema)?;
-    let schema = runtime
+    runtime
         .registered_schema(&name)
         .ok_or_else(|| anyhow::anyhow!("program '{name}' is not registered after registering it"))?;
-    if let Some(locales) = schema.locales.clone() {
-        let catalogs = match catalogs {
-            Some(given) => given,
-            None => read_catalogs(schema_path, &locales)?,
-        };
-        runtime.set_messages(locales, catalogs);
-    }
     let production = env.get("NODE_ENV").is_some_and(|v| v == "production");
     if let Some(error) = runtime.credential_store_failure() {
         if production {
@@ -436,43 +356,12 @@ mod composed_tests {
         }
     }
 
-    fn program(name: &str, orbital: &str, extra: serde_json::Value) -> orbital_core::Value {
-        let mut json = serde_json::json!({
-            "name": name,
-            "typeContractVersion": 1,
-            "orbitals": [{
-                "name": orbital,
-                "entity": { "name": format!("{orbital}Row"), "persistence": "runtime", "fields": [{ "name": "id", "type": "string" }] },
-                "pages": [{ "name": format!("{orbital}Boot"), "path": "", "protocol": "boot", "traits": [{ "ref": format!("{orbital}Trait") }] }],
-                "traits": [{ "name": format!("{orbital}Trait"), "linkedEntity": format!("{orbital}Row"),
-                    "stateMachine": { "states": [{ "name": "idle", "isInitial": true }, { "name": "ready" }],
-                        "events": [{ "key": "INIT", "name": "Init" }],
-                        "transitions": [{ "from": "idle", "to": "ready", "event": "INIT" }] } }]
-            }]
-        });
-        if let (Some(target), Some(more)) = (json.as_object_mut(), extra.as_object()) {
-            target.extend(more.clone());
-        }
-        serde_json::from_value(json).unwrap()
-    }
-
     fn schema_of(program: orbital_core::Value) -> orbital_core::OrbitalSchema {
         serde_json::from_value(orbital_core::json_value::value_to_json(&program)).unwrap()
     }
 
     fn port() -> SubstratePort {
         SubstratePort(Arc::new(Appending))
-    }
-
-    #[test]
-    fn edge_a_declared_locale_without_its_catalog_refuses_the_boot() {
-        let app = program("app", "Notes", serde_json::json!({ "locales": ["en", "ar"] }));
-        let mut catalogs = Catalogs::new();
-        catalogs.insert("en".to_string(), std::collections::HashMap::new());
-        let error = boot_app(schema_of(app), Path::new("app.orb"), port(), catalogs, &Default::default(), false)
-            .err()
-            .expect("a missing catalog refuses the boot");
-        assert!(error.to_string().contains("\"ar\""), "{error}");
     }
 
     fn persistent_program(ticks: serde_json::Value) -> orbital_core::Value {
@@ -498,7 +387,7 @@ mod composed_tests {
     #[test]
     fn the_composed_boot_drives_its_background_ticks() {
         let ticks = serde_json::json!([{ "name": "beat", "interval": 10, "runsInBackground": true, "effects": [["persist", "create", "Memo", { "n": 1 }]] }]);
-        let host = boot_app(schema_of(persistent_program(ticks)), Path::new("app.orb"), port(), Catalogs::new(), &Default::default(), true).unwrap();
+        let host = boot_app(schema_of(persistent_program(ticks)), Path::new("app.orb"), port(), &Default::default(), true).unwrap();
         let first: orbital_core::Value = serde_json::from_value(serde_json::json!({ "id": "m0", "n": 0 })).unwrap();
         host.persistence().create("Memo", &first).unwrap();
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
@@ -561,7 +450,7 @@ mod composed_tests {
         let dir = lazy_files("app", true);
         let app = dir.join("app.orb");
         let schema = orbital_core::schema::parse_schema_file(&app).unwrap();
-        let host = boot_app(schema, &app, port(), Catalogs::new(), &Default::default(), false).unwrap();
+        let host = boot_app(schema, &app, port(), &Default::default(), false).unwrap();
         host.kernel().dispatch("Hear", None, "HEARD", orbital_core::Value::Null).unwrap();
         assert_eq!(host.kernel().get_state("Hear", None).unwrap().current_state, "heard");
     }
@@ -579,7 +468,7 @@ mod composed_tests {
     fn edge_an_embedded_program_that_lists_lazy_pages_is_refused() {
         let dir = lazy_files("embedded", true);
         let json = std::fs::read_to_string(dir.join("app.orb")).unwrap();
-        let error = boot_embedded(&json, &Default::default(), Catalogs::new()).err().expect("refused");
+        let error = boot_embedded(&json, &Default::default()).err().expect("refused");
         assert!(error.to_string().contains("lazy pages"), "{error}");
     }
 }

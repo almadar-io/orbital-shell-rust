@@ -815,15 +815,6 @@ impl Host {
         self.kernel.resolve_rows(reference)
     }
 
-    /// Install the program's declared locales and merged message catalogs for `i18n/t`.
-    pub fn set_messages(
-        &self,
-        locales: Vec<String>,
-        catalogs: std::collections::HashMap<String, std::collections::HashMap<String, String>>,
-    ) {
-        self.kernel.set_messages(locales, catalogs);
-    }
-
     /// Evaluate the request's dispatches as the viewer's `locale` until the guard drops.
     pub fn enter_locale(
         &self,
@@ -2553,7 +2544,11 @@ mod tests {
         let runtime = desk();
         let (message, errors) = dispatch_request(&runtime, serde_json::json!({ "wire": true, "orbital": "Nowhere", "targetTrait": "Notes", "event": "ADD_NOTE" })).unwrap_err();
         assert_eq!((message.as_str(), errors.clone()), ("Orbital not found: Nowhere", serde_json::json!([{ "code": "ORBITAL_NOT_FOUND", "message": "Orbital not found: Nowhere", "status": 404 }])));
-        runtime.set_messages(vec!["en".to_string()], Default::default());
+        let mut declaring = dispatching_program();
+        declaring.name = "DeskLocales".to_string();
+        declaring.orbitals.clear();
+        declaring.locales = Some(vec!["en".to_string()]);
+        runtime.register_schema(declaring).unwrap();
         let (_, errors) = dispatch_request(&runtime, serde_json::json!({ "wire": true, "orbital": "Desk", "targetTrait": "Notes", "event": "ADD_NOTE", "locale": "xx" })).unwrap_err();
         assert!(dispatch_request(&runtime, serde_json::json!({ "wire": true, "orbital": "Desk", "targetTrait": "Notes", "event": "ADD_NOTE", "locale": "en" })).is_ok(), "control: a declared locale");
         assert_eq!(errors[0]["code"], "LOCALE_NOT_DECLARED", "{errors}");
@@ -2589,7 +2584,7 @@ mod tests {
                             "transitions": [{ "from": "idle", "to": "heard", "event": "HEARD" }] } }] }]
             }))
             .unwrap();
-            Ok(orbital_core::runtime::LazyProgram { schema, catalogs: Default::default() })
+            Ok(orbital_core::runtime::LazyProgram { schema })
         }
     }
 

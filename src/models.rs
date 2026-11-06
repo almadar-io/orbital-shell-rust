@@ -172,21 +172,18 @@ impl TargetTypeRenderer for RsTypes<'_> {
             .iter()
             .map(|v| {
                 let variant = split_to_pascal_case(&v.name);
-                let struct_name = format!("{name}{variant}");
-                let (lines, fns) = match &v.field_type {
-                    OirType::Struct { fields, .. } => field_lines(fields, &struct_name, self),
-                    other => {
-                        let child = self.child(format!("{struct_name}Value"));
-                        (
-                            vec![format!("    pub value: {},", render_type(&child, other, None))],
-                            Vec::new(),
-                        )
+                let arm_ctx = format!("{name}{variant}");
+                let arm_ty = match &v.field_type {
+                    OirType::Struct { fields, .. } => {
+                        let (lines, fns) = field_lines(fields, &arm_ctx, self);
+                        self.hoisted
+                            .borrow_mut()
+                            .push(struct_source(&arm_ctx, None, &lines, &fns));
+                        arm_ctx
                     }
+                    other => render_type(&self.child(arm_ctx), other, None),
                 };
-                self.hoisted
-                    .borrow_mut()
-                    .push(struct_source(&struct_name, None, &lines, &fns));
-                format!("    {variant}({struct_name}),")
+                format!("    {variant}({arm_ty}),")
             })
             .collect();
         self.hoisted.borrow_mut().push(format!(
@@ -264,9 +261,11 @@ impl TargetTypeRenderer for RsTypes<'_> {
     }
 }
 
-struct RsLiteral;
+struct RsLiteral<'a> {
+    union_name: &'a str,
+}
 
-impl TargetLiteralRenderer for RsLiteral {
+impl TargetLiteralRenderer for RsLiteral<'_> {
     type Out = String;
 
     fn null(&self) -> String {
@@ -294,6 +293,9 @@ impl TargetLiteralRenderer for RsLiteral {
     }
     fn array(&self, items: Vec<String>) -> String {
         format!("vec![{}]", items.join(", "))
+    }
+    fn union_arm(&self, arm: &str, inner: String) -> String {
+        format!("{}::{}({inner})", self.union_name, split_to_pascal_case(arm))
     }
 }
 
@@ -352,7 +354,7 @@ fn field_line(f: &OirField, class: &str, types: &RsTypes<'_>) -> (String, Option
     let mut default_fn = None;
     let mut comment = String::new();
     if let Some(value) = &f.default {
-        match render_default(&RsLiteral, value, ty, None) {
+        match render_default(&RsLiteral { union_name: &child.context }, value, ty, None) {
             Ok(Some(expr)) => {
                 let fn_name = format!("default_{class}_{ident}");
                 let body = if optional { format!("Some({expr})") } else { expr };
@@ -439,14 +441,10 @@ fn payloads(module: &OirModule) -> BTreeMap<String, Vec<OirField>> {
     let mut out = BTreeMap::new();
     for t in &module.traits {
         for event in &t.events {
-            let Some(schema) = event.payload_schema.as_ref().filter(|s| !s.is_empty()) else {
+            let fields = event.payload_fields();
+            if fields.is_empty() {
                 continue;
-            };
-            let mut fields: Vec<OirField> = schema
-                .iter()
-                .map(|(k, v)| OirField::new(k.clone(), v.clone()))
-                .collect();
-            fields.sort_by(|a, b| a.name.cmp(&b.name));
+            }
             out.insert(format!("{}{}Payload", symbol(&t.name), symbol(&event.key)), fields);
         }
     }
@@ -468,16 +466,13 @@ fn trait_configs(module: &OirModule) -> BTreeMap<String, Vec<OirField>> {
 }
 
 /// `impl Default` building each field from its default fn, or `None` for an optional knob without one.
-fn default_impl(name: &str, fields: &[OirField], types: &RsTypes<'_>) -> String {
+fn default_impl(name: &str, fields: &[OirField], has_default_fn: &[bool]) -> String {
     let inits: Vec<String> = fields
         .iter()
-        .map(|f| {
+        .zip(has_default_fn)
+        .map(|(f, has_fn)| {
             let ident = rs_identifier(&f.name);
-            let value = if field_line(f, name, types).1.is_some() {
-                format!("default_{name}_{ident}()")
-            } else {
-                "None".to_string()
-            };
+            let value = if *has_fn { format!("default_{name}_{ident}()") } else { "None".to_string() };
             format!("            {ident}: {value},")
         })
         .collect();
@@ -502,7 +497,10 @@ pub fn events_file(module: &OirModule) -> GeneratedFile {
             hoisted: &hoisted,
             local: &local,
         };
-        let (lines, fns) = field_lines(&fields, &name, &types);
+        let rendered: Vec<(String, Option<String>)> = fields.iter().map(|f| field_line(f, &name, &types)).collect();
+        let has_default_fn: Vec<bool> = rendered.iter().map(|(_, default_fn)| default_fn.is_some()).collect();
+        let (lines, fns): (Vec<String>, Vec<Option<String>>) = rendered.into_iter().unzip();
+        let fns: Vec<String> = fns.into_iter().flatten().collect();
         for decl in hoisted.take() {
             body.push_str(&decl);
             body.push_str("\n\n");
@@ -510,7 +508,7 @@ pub fn events_file(module: &OirModule) -> GeneratedFile {
         body.push_str(&struct_source(&name, None, &lines, &fns));
         body.push_str("\n\n");
         if is_config {
-            body.push_str(&default_impl(&name, &fields, &types));
+            body.push_str(&default_impl(&name, &fields, &has_default_fn));
             body.push_str("\n\n");
         }
     }
@@ -560,10 +558,12 @@ mod tests {
             schema.insert("text".into(), OirType::String);
             schema.insert("size".into(), OirType::Number);
             listened.payload_schema = Some(schema);
+            listened.payload_required_fields = ["text", "size"].into_iter().map(String::from).collect();
             let mut emitted = OirEvent::new("CHUNKED");
             let mut schema = OirTypeMap::new();
             schema.insert("count".into(), OirType::Integer);
             emitted.payload_schema = Some(schema);
+            emitted.payload_required_fields = ["count"].into_iter().map(String::from).collect();
             t.events = vec![listened, emitted, OirEvent::new("RESET")];
             m.traits.push(t);
         }
@@ -659,6 +659,25 @@ mod tests {
     }
 
     #[test]
+    fn a_config_enum_knob_hoists_its_enum_once() {
+        let mut m = OirModule::new("app", "1.0.0");
+        let mut t = OirTrait::new("Game");
+        let mut schema = orbital_core::ir::OirConfigSchema::new();
+        schema.insert(
+            "mode".into(),
+            OirConfigFieldType { field_type: OirType::String, values: Some(vec!["fast".into(), "slow".into()]) },
+        );
+        t.declared_config_schema = Some(schema);
+        let mut defaults = orbital_core::ir::OirObject::new();
+        defaults.insert("mode".into(), OirValue::String("fast".into()));
+        t.declared_config_defaults = Some(defaults);
+        m.traits.push(t);
+        let content = events_file(&m).content;
+        assert_eq!(content.matches("pub enum GameConfigMode {").count(), 1, "{content}");
+        assert!(content.contains("mode: default_GameConfig_mode(),"), "control: the default is still called: {content}");
+    }
+
+    #[test]
     fn control_a_trait_without_config_declares_no_config() {
         assert!(!events_file(&module(true)).content.contains("ChunkConfig"));
     }
@@ -677,6 +696,7 @@ mod tests {
         schema.insert("reason".into(), ty);
         schema.insert("plain".into(), OirType::String);
         m.traits[0].events[1].payload_schema = Some(schema);
+        m.traits[0].events[1].payload_required_fields = ["reason", "plain"].into_iter().map(String::from).collect();
         m
     }
 
@@ -714,5 +734,37 @@ mod tests {
         let content = entities_file(&m).content;
         assert!(content.contains("pub enum DocKind {"), "{content}");
         assert!(content.contains("pub kind: DocKind,"), "{content}");
+    }
+
+    #[test]
+    fn a_union_renders_bare_primitive_arms_a_hoisted_struct_arm_and_a_constructed_default() {
+        let mut m = OirModule::new("app", "1.0.0");
+        let mut holder = OirEntity::new("Holder");
+        let env = OirType::Struct { additional: None, fields: vec![OirField::new("anchor", OirType::String)].into() };
+        let mut host = OirField::new(
+            "host",
+            OirType::Union { variants: vec![OirField::new("string", OirType::String), OirField::new("Env", env)].into() },
+        );
+        host.default = Some(OirValue::String("api.example.test".into()));
+        holder.fields.push(host);
+        m.entities.push(holder);
+        let content = entities_file(&m).content;
+        let env_struct = "#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]\npub struct HolderHostEnv {\n    pub anchor: String,\n}";
+        let union = "#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]\n#[serde(untagged)]\npub enum HolderHost {\n    String(String),\n    Env(HolderHostEnv),\n}";
+        let default_fn = "fn default_Holder_host() -> HolderHost {\n    HolderHost::String(\"api.example.test\".to_string())\n}";
+        assert!(content.contains(env_struct), "{content}");
+        assert!(content.contains(union), "{content}");
+        assert!(content.contains(default_fn), "{content}");
+        assert!(content.contains("#[serde(default = \"default_Holder_host\")]\n    pub host: HolderHost,"), "{content}");
+        assert!(!content.contains("HolderHostString"), "{content}");
+    }
+
+    #[test]
+    fn a_payload_key_not_marked_required_renders_an_option() {
+        let mut m = module(true);
+        m.traits[0].events[0].payload_required_fields.remove("size");
+        let content = events_file(&m).content;
+        assert!(content.contains("    pub size: Option<f64>,"), "{content}");
+        assert!(content.contains("    pub text: String,"), "control: a `!` key stays required: {content}");
     }
 }
