@@ -9,8 +9,6 @@ Every open gap this repo owns lives here. This file is the source of truth; the 
 
 Next code: `G-ORBITAL-SHELL-RUST-032`
 
-- **G-ORBITAL-SHELL-RUST-024** [architectural] — Container queries are not applied natively: the vendored Stylo servo build parses `@container` rules only under its gecko engine, so `@container` blocks and Tailwind `@sm/x:`-style variants never match and every container-responsive body paints its narrow form (web paints the wide form at 1280 px). Owner: orbital-shell-rust vendored Stylo/Blitz (container size evaluation against Taffy layout). Reproduce: any std atom whose web body uses `@container`, paired capture on the H4 gate. Rung (3): the H4 paired capture. Root cause: H4.
-
 - **G-ORBITAL-SHELL-RUST-025** [architectural] — `mask-image` / `-webkit-mask-image` and `corner-shape` are not painted by blitz-paint: masked elements paint unmasked and squircle corners paint as plain radii. Owner: orbital-shell-rust vendored blitz-paint (Vello layer masks). Rung (3): the H4 paired capture. Root cause: H4.
 
 - **G-ORBITAL-SHELL-RUST-026** [mechanical] — Compromise named 2026-11-06: native web fonts and `@import` stylesheets are fetched by an ORBITAL PATCH that uses blocking `ureq` HTTP in the vendored blitz net provider instead of upstream blitz-net (async reqwest), because the offscreen capture has no async runtime to drive blitz-net. Converge on blitz-net once the capture runs one. Owner: orbital-shell-rust vendored blitz-dom/blitz-net + hosts/desktop offscreen. Rung: none (implementation choice). Root cause: H4.
