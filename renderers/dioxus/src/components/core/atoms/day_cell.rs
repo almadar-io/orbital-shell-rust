@@ -60,7 +60,7 @@ impl DioxusPatternRenderer for DayCellRenderer {
                     span { class: "{weekday_class}", "{weekday}" }
                     span {
                         class: "{number_class}",
-                        span { class: "font-semibold", "{number}" }
+                        span { class: "text-base font-semibold text-foreground", "{number}" }
                     }
                 }
             }
@@ -71,7 +71,7 @@ impl DioxusPatternRenderer for DayCellRenderer {
                     span { class: "{weekday_class}", "{weekday}" }
                     span {
                         class: "{number_class}",
-                        span { class: "font-semibold", "{number}" }
+                        span { class: "text-base font-semibold text-foreground", "{number}" }
                     }
                 }
             }

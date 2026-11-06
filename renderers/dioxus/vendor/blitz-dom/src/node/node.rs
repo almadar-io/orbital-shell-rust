@@ -113,6 +113,9 @@ pub struct Node {
     pub unrounded_layout: Layout,
     pub final_layout: Layout,
     pub scroll_offset: crate::Point<f64>,
+    // ORBITAL PATCH (blitz-dom 0.2.4, parity): the content-box size (px) this node reported to
+    // the last style pass as a query container; `resolve` compares it with the laid-out size.
+    pub container_size_used: Cell<Option<[f32; 2]>>,
 }
 
 unsafe impl Send for Node {}
@@ -154,7 +157,20 @@ impl Node {
             unrounded_layout: Layout::new(),
             final_layout: Layout::new(),
             scroll_offset: crate::Point::ZERO,
+            container_size_used: Cell::new(None),
         }
+    }
+
+    // ORBITAL PATCH (blitz-dom 0.2.4, parity): content-box size of the last laid-out box, the
+    // size container queries resolve against.
+    pub fn content_box_size(&self) -> [f32; 2] {
+        let l = &self.final_layout;
+        [
+            (l.size.width - l.padding.left - l.padding.right - l.border.left - l.border.right)
+                .max(0.0),
+            (l.size.height - l.padding.top - l.padding.bottom - l.border.top - l.border.bottom)
+                .max(0.0),
+        ]
     }
 
     pub fn pe_by_index(&self, index: usize) -> Option<usize> {

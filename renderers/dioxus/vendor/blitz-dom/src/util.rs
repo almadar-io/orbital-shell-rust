@@ -111,6 +111,24 @@ pub(crate) fn parse_svg(source: &[u8]) -> Result<usvg::Tree, usvg::Error> {
     Ok(tree)
 }
 
+// ORBITAL PATCH (blitz-dom 0.2, parity): parse an inline svg that has no viewBox/width/height
+// against its laid-out box instead of usvg's 100x100 default size.
+#[cfg(feature = "svg")]
+pub(crate) fn parse_svg_with_default_size(
+    source: &[u8],
+    width: f32,
+    height: f32,
+) -> Result<usvg::Tree, usvg::Error> {
+    let mut options = usvg::Options {
+        fontdb: Arc::clone(&*FONT_DB),
+        ..Default::default()
+    };
+    if let Some(size) = usvg::Size::from_wh(width, height) {
+        options.default_size = size;
+    }
+    usvg::Tree::from_data(source, &options)
+}
+
 pub trait ToColorColor {
     /// Converts a color into the `AlphaColor<Srgb>` type from the `color` crate
     fn as_color_color(&self) -> Color;

@@ -226,6 +226,8 @@ impl BaseDocument {
         style_config::set_bool("layout.legacy_layout", true);
         style_config::set_bool("layout.unimplemented", true);
         style_config::set_bool("layout.columns.enabled", true);
+        // ORBITAL PATCH (blitz-dom 0.2.4, parity): enable container-type/container-name and @container.
+        style_config::set_bool("layout.container-queries.enabled", true);
 
         let base_url = config
             .base_url
@@ -846,33 +848,55 @@ impl BaseDocument {
         let root_node_id = self.root_element().id;
         debug_timer!(timer, feature = "log_phase_times");
 
-        // we need to resolve stylist first since it will need to drive our layout bits
-        self.resolve_stylist(current_time_for_animations);
-        timer.record_time("style");
+        // ORBITAL PATCH (blitz-dom 0.2.4, parity): style runs before layout, so container
+        // queries see the previous layout's container sizes. Re-run style + layout until the
+        // sizes a container reported to style match its laid-out size, capped at
+        // MAX_CONTAINER_QUERY_RESTYLES extra passes to avoid oscillation.
+        const MAX_CONTAINER_QUERY_RESTYLES: usize = 3;
+        let mut restyles = 0;
+        loop {
+            // we need to resolve stylist first since it will need to drive our layout bits
+            self.resolve_stylist(current_time_for_animations);
+            timer.record_time("style");
 
-        // Propagate damage flags (from mutation and restyles) up and down the tree
-        #[cfg(feature = "incremental")]
-        self.propagate_damage_flags(root_node_id, RestyleDamage::empty());
-        #[cfg(feature = "incremental")]
-        timer.record_time("damage");
+            // Propagate damage flags (from mutation and restyles) up and down the tree
+            #[cfg(feature = "incremental")]
+            self.propagate_damage_flags(root_node_id, RestyleDamage::empty());
+            #[cfg(feature = "incremental")]
+            timer.record_time("damage");
 
-        // Fix up tree for layout (insert anonymous blocks as necessary, etc)
-        self.resolve_layout_children();
-        self.hoist_fixed_layout_children();
-        timer.record_time("construct");
+            // Fix up tree for layout (insert anonymous blocks as necessary, etc)
+            self.resolve_layout_children();
+            self.hoist_fixed_layout_children();
+            timer.record_time("construct");
 
-        self.resolve_deferred_tasks();
-        timer.record_time("pconstruct");
+            self.resolve_deferred_tasks();
+            timer.record_time("pconstruct");
 
-        // Merge stylo into taffy
-        self.flush_styles_to_layout(root_node_id);
-        self.resolve_fixed_viewport_sizes();
-        self.neutralize_indefinite_percent_heights();
-        timer.record_time("flush");
+            // Merge stylo into taffy
+            self.flush_styles_to_layout(root_node_id);
+            self.resolve_fixed_viewport_sizes();
+            self.neutralize_indefinite_percent_heights();
+            timer.record_time("flush");
 
-        // Next we resolve layout with the data resolved by stlist
-        self.resolve_layout();
-        timer.record_time("layout");
+            // Next we resolve layout with the data resolved by stlist
+            self.resolve_layout();
+            #[cfg(feature = "svg")]
+            self.reparse_unsized_svgs();
+            timer.record_time("layout");
+
+            if !self.restyle_changed_containers() {
+                break;
+            }
+            if restyles >= MAX_CONTAINER_QUERY_RESTYLES {
+                #[cfg(feature = "tracing")]
+                tracing::warn!(
+                    "container query sizes still changing after {MAX_CONTAINER_QUERY_RESTYLES} restyle passes; keeping the last layout"
+                );
+                break;
+            }
+            restyles += 1;
+        }
 
         // Clear all damage
         #[cfg(feature = "incremental")]
@@ -884,6 +908,53 @@ impl BaseDocument {
         }
 
         timer.print_times("Resolve: ");
+    }
+
+    // ORBITAL PATCH (blitz-dom 0.2.4, parity): flag the descendants of every size container whose
+    // laid-out content box differs (on the axes its `container-type` exposes) from the size it
+    // reported to the last style pass. Returns whether any restyle was requested.
+    fn restyle_changed_containers(&mut self) -> bool {
+        use style::values::computed::ContainerType;
+
+        let mut changed = Vec::new();
+        for (id, node) in self.nodes.iter() {
+            let Some(used) = node.container_size_used.get() else {
+                continue;
+            };
+            let Some((container_type, vertical)) = node.primary_styles().map(|style| {
+                (
+                    style.clone_container_type(),
+                    style.writing_mode.is_vertical(),
+                )
+            }) else {
+                node.container_size_used.set(None);
+                continue;
+            };
+            if !container_type.is_size_container_type() {
+                node.container_size_used.set(None);
+                continue;
+            }
+            let now = node.content_box_size();
+            let differs = if container_type.intersects(ContainerType::SIZE) {
+                now != used
+            } else if vertical {
+                now[1] != used[1]
+            } else {
+                now[0] != used[0]
+            };
+            if differs {
+                changed.push((id, now));
+            }
+        }
+
+        let any = !changed.is_empty();
+        for (id, now) in changed {
+            self.nodes[id].container_size_used.set(Some(now));
+            self.nodes[id].set_restyle_hint(
+                style::invalidation::element::restyle_hints::RestyleHint::restyle_subtree(),
+            );
+        }
+        any
     }
 
     // Takes (x, y) co-ordinates (relative to the )
@@ -1412,6 +1483,62 @@ impl BaseDocument {
                 {
                     layout.location.x =
                         viewport_width - right - layout.margin.right - layout.size.width;
+                }
+            }
+        }
+    }
+
+    // ORBITAL PATCH (blitz-dom 0.2, parity): an inline `<svg>` with no viewBox/width/height is
+    // parsed by usvg against a 100x100 default; re-parse it against its laid-out content box so
+    // percentage geometry and patterns cover the box. Runs only when the box differs from the
+    // parsed size, so it is stable after one pass (inherent size then equals the box size).
+    #[cfg(feature = "svg")]
+    fn reparse_unsized_svgs(&mut self) {
+        let mut todo: Vec<(usize, f32, f32)> = Vec::new();
+        for (id, node) in self.nodes.iter() {
+            let Some(el) = node.element_data() else {
+                continue;
+            };
+            if el.name.local != local_name!("svg") {
+                continue;
+            }
+            let SpecialElementData::Image(img) = &el.special_data else {
+                continue;
+            };
+            let ImageData::Svg(tree) = &**img else {
+                continue;
+            };
+            let sized = el.attrs().iter().any(|a| {
+                let n: &str = &a.name.local;
+                n.eq_ignore_ascii_case("viewBox")
+                    || n.eq_ignore_ascii_case("width")
+                    || n.eq_ignore_ascii_case("height")
+            });
+            if sized {
+                continue;
+            }
+            let l = &node.final_layout;
+            let w =
+                l.size.width - l.padding.left - l.padding.right - l.border.left - l.border.right;
+            let h =
+                l.size.height - l.padding.top - l.padding.bottom - l.border.top - l.border.bottom;
+            if w <= 0.0 || h <= 0.0 {
+                continue;
+            }
+            let ts = tree.size();
+            if (ts.width() - w).abs() < 0.5 && (ts.height() - h).abs() < 0.5 {
+                continue;
+            }
+            todo.push((id, w, h));
+        }
+        for (id, w, h) in todo {
+            let mut html = self.nodes[id].outer_html();
+            if !html.contains("xmlns") {
+                html = html.replace("<svg", "<svg xmlns=\"http://www.w3.org/2000/svg\"");
+            }
+            if let Ok(tree) = crate::util::parse_svg_with_default_size(html.as_bytes(), w, h) {
+                if let Some(el) = self.nodes[id].element_data_mut() {
+                    el.special_data = SpecialElementData::Image(Box::new(tree.into()));
                 }
             }
         }

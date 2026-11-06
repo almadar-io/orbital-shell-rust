@@ -962,10 +962,20 @@ impl<'a> TElement for BlitzNode<'a> {
 
     fn query_container_size(
         &self,
-        _display: &style::values::specified::Display,
+        display: &style::values::specified::Display,
     ) -> euclid::default::Size2D<Option<app_units::Au>> {
-        // FIXME: Implement container queries. For now this effectively disables them without panicking.
-        Default::default()
+        // ORBITAL PATCH (blitz-dom 0.2.4, parity): report the content-box size from the last
+        // layout. Stylo picks the axes allowed by `container-type`; `resolve` re-runs style
+        // when the laid-out size differs from the size recorded here.
+        if display.is_none() || display.is_contents() || display.is_inline_flow() {
+            return Default::default();
+        }
+        let size = self.content_box_size();
+        self.container_size_used.set(Some(size));
+        euclid::default::Size2D::new(
+            Some(app_units::Au::from_f32_px(size[0])),
+            Some(app_units::Au::from_f32_px(size[1])),
+        )
     }
 
     fn each_custom_state<F>(&self, _callback: F)

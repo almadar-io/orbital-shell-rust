@@ -52,7 +52,7 @@
 .almadar-slot { display: block; }
 .almadar-drawer-overlay-contained.almadar-drawer-overlay-contained { position: absolute; z-index: 50; }
 .almadar-drawer-overlay-viewport.almadar-drawer-overlay-viewport { position: fixed; z-index: 60; }
-.almadar-orbital-dioxus .line-clamp-2 { height: calc(var(--leading-base, 24px) * 2); overflow: hidden; }
+.almadar-orbital-dioxus .line-clamp-2 { overflow: hidden; max-height: calc(1lh * 2); }
 .almadar-fallback {
   font-family: var(--almadar-mono);
   font-size: 12px;

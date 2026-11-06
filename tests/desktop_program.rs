@@ -95,3 +95,40 @@ fn a_route_screenshot_captures_the_page_that_route_mount_opens() {
     assert!(home.contains("Hello frames") && !home.contains("Other page"), "{home}");
     std::fs::remove_dir_all(&out).unwrap();
 }
+
+fn boot_only_program() -> OrbitalSchema {
+    serde_json::from_value(serde_json::json!({
+        "name": "b",
+        "typeContractVersion": 1,
+        "orbitals": [{
+            "name": "Boot",
+            "entity": { "name": "Run", "persistence": "runtime", "fields": [{ "name": "id", "type": "string" }] },
+            "traits": [{ "name": "Work", "linkedEntity": "Run", "stateMachine": {
+                "states": [{ "name": "idle", "isInitial": true }],
+                "transitions": [{ "from": "idle", "to": "idle", "event": "INIT", "effects": [] }]
+            } }],
+            "pages": [{ "name": "Start", "path": "", "protocol": "boot", "traits": [{ "ref": "Work" }] }]
+        }]
+    }))
+    .unwrap()
+}
+
+fn served_shot(schema: OrbitalSchema, server: Option<&str>, out: &Path) -> Result<String, String> {
+    let shot = DesktopRequest::Screenshot { renderer: "tui".into(), item: "s".into(), schema: Box::new(schema), out_dir: out.to_path_buf(), route: Some("/".into()), server: server.map(str::to_string), program_path: None };
+    request(Path::new(BINARY), shot).map(|reply| std::fs::read_to_string(&files(reply)[0]).unwrap()).map_err(|e| e.message)
+}
+
+#[test]
+fn a_route_capture_of_a_boot_only_program_against_a_server_paints_the_empty_client_page() {
+    let out = std::env::temp_dir().join(format!("orb-desktop-boot-{}", std::process::id()));
+    served_shot(boot_only_program(), Some("http://127.0.0.1:9"), &out).unwrap();
+    std::fs::remove_dir_all(&out).unwrap();
+}
+
+#[test]
+fn control_a_program_with_a_route_page_still_paints_it_against_a_server() {
+    let out = std::env::temp_dir().join(format!("orb-desktop-boot-control-{}", std::process::id()));
+    let painted = served_shot(program(), Some("http://127.0.0.1:9"), &out).unwrap();
+    assert!(painted.contains("Hello frames"), "{painted}");
+    std::fs::remove_dir_all(&out).unwrap();
+}

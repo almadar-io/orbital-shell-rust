@@ -40,40 +40,11 @@ fn node(name: &str, mut fields: Vec<(&str, Value)>, children: Vec<Value>) -> Val
 }
 
 fn parse_moment(raw: &Value) -> Option<Moment> {
-    let text = match raw {
-        Value::String(text) => text.to_string(),
-        _ => return None,
-    };
-    let date = text.get(..10)?;
-    let bytes = date.as_bytes();
-    let well_formed = bytes.iter().enumerate().all(|(i, b)| {
-        if i == 4 || i == 7 {
-            *b == b'-'
-        } else {
-            b.is_ascii_digit()
-        }
-    });
-    if !well_formed {
+    let Value::String(text) = raw else {
         return None;
-    }
-    let mut seconds = 0;
-    if text.len() > 10 {
-        if !text[10..].starts_with('T') {
-            return None;
-        }
-        let mut parts = text[11..]
-            .split(|c: char| !c.is_ascii_digit())
-            .filter(|p| !p.is_empty());
-        for factor in [3600, 60, 1] {
-            if let Some(part) = parts.next().and_then(|p| p.parse::<u32>().ok()) {
-                seconds += part * factor;
-            }
-        }
-    }
-    Some(Moment {
-        date: date.to_string(),
-        seconds,
-    })
+    };
+    let (date, seconds) = calendar_local_moment(text)?;
+    Some(Moment { date, seconds })
 }
 
 fn field<'a>(row: &'a Value, name: &str) -> Option<&'a Value> {
