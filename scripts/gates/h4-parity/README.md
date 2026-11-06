@@ -36,3 +36,10 @@ prints the worst delta per behavior.
 - Monorepo root found from the script location, or `$ALMADAR_ROOT`. Ports start at `$H4_PORT_BASE` (4911) and
   `$H4_CDP_BASE` (9300), one pair per worker.
 - Not part of `scripts/gates/run.sh all`: it needs Chrome and a GPU path for the desktop host. Run `run.sh h4`.
+
+## Running from a worktree
+
+orb resolves behavior packages and the language data (`@almadar/core`) by walking up from its working directory, and a
+root without its own `node_modules/@almadar/core` falls back to the main checkout's. In a worktree, link the worktree's
+core at its root (`node_modules/@almadar/core -> orbital-rust/crates/orbital-shell-typescript/core`) and set
+`ALMADAR_ROOT` to the worktree, or both legs silently read the main checkout's std and pattern tables.

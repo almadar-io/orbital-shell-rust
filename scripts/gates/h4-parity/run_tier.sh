@@ -9,7 +9,7 @@ PORT_BASE=${H4_PORT_BASE:-4911}; CDP_BASE=${H4_CDP_BASE:-9300}
 mkdir -p $OUT/shards
 touch $OUT/run.log
 i=0
-rm -f $OUT/shards/*
+rm -f $OUT/shards/*(N)
 for b in ${(f)"$(cat $LIST)"}; do
   for t in ${(f)"$(cat $THEMES)"}; do
     echo "$b $t" >> $OUT/shards/$(( i % WORKERS ))
