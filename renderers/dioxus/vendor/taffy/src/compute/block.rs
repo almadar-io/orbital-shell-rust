@@ -25,6 +25,9 @@ struct BlockItem {
 
     /// Items that are tables don't have stretch sizing applied to them
     is_table: bool,
+    /// ORBITAL PATCH (taffy 0.9.2, parity): a block-level replaced element with `width: auto` takes its
+    /// natural width (CSS 2.2 §10.3.4), so it is not stretch-fitted either.
+    is_replaced: bool,
 
     /// The base size of this item
     size: Size<Option<f32>>,
@@ -318,6 +321,7 @@ fn generate_item_list(
                 node_id: child_node_id,
                 order: order as u32,
                 is_table: child_style.is_table(),
+                is_replaced: child_style.is_compressible_replaced(),
                 size: child_style
                     .size()
                     .maybe_resolve(node_inner_size, |val, basis| tree.calc(val, basis))
@@ -423,6 +427,8 @@ fn perform_final_layout_on_in_flow_children(
             let item_non_auto_x_margin_sum = item_non_auto_margin.horizontal_axis_sum();
             let known_dimensions = if item.is_table {
                 Size::NONE
+            } else if item.is_replaced {
+                item.size.maybe_clamp(item.min_size, item.max_size)
             } else {
                 item.size
                     .map_width(|width| {

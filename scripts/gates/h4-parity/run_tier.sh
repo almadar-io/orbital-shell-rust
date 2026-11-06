@@ -22,7 +22,7 @@ for w in {0..$(( WORKERS - 1 ))}; do
   (
     port=$(( PORT_BASE + w * 3 ))
     cdp=$(( CDP_BASE + w ))
-    "$CHROME" --headless=new --hide-scrollbars --remote-debugging-port=$cdp --user-data-dir=$OUT/chrome-$w \
+    "$CHROME" --headless=new --hide-scrollbars --remote-debugging-port=$cdp --user-data-dir=$OUT/chrome-$w --disable-site-isolation-trials \
       --window-size=1280,900 --no-first-run --no-default-browser-check about:blank > /dev/null 2>&1 &
     cpid=$!
     while read -r b t; do

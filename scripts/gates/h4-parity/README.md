@@ -8,8 +8,12 @@ or a path to a list file of behavior paths relative to `packages/almadar-std/beh
 1. `themed.py` writes a copy of the behavior whose app header declares `theme: "<key>"` (a `.lolo` line, nothing
    implicit), composes std's mock page seed as `orb serve` does, and copies the locale catalogs beside it. `orb resolve`
    lowers it.
-2. `orb serve` runs it. The web client is captured with headless Chrome over the DevTools protocol once its DOM has
-   been still for 1.5 s (`cdp_shot.mjs`; writes `.web.png` and `.web.html`). Each worker reuses one Chrome.
+2. `orb serve` runs it. The web client is captured with headless Chrome over the DevTools protocol once no request
+   is in flight (the server's open-ended `EventSource` stream and in-memory `blob:`/`data:` loads excepted) and its DOM has been still for 1.5 s since the
+   last change or request completion (`cdp_shot.mjs`; writes `.web.png` and `.web.html`, and logs `WEB_OK`, or
+   `WEB_TIMEOUT` with the requests still in flight). Anything but `WEB_OK` is a `WEB_FAIL`: a page that never settled
+   is not scored. Each worker reuses one Chrome, run without site isolation so a cross-site iframe's requests
+   report to the page's own DevTools session.
 3. `orb-desktop request` captures the same route against the same server (`Screenshot { route, server }`, the client
    projection of the program, host frames run until quiet), writing `.desktop.png` and `.desktop.tree.json`.
    A program with no non-protocol route page has nothing a user can open: `pair.sh` prints `NO_ROUTE <name> <theme>`
@@ -17,7 +21,7 @@ or a path to a list file of behavior paths relative to `packages/almadar-std/beh
 4. `composite.py` writes a side-by-side `.pair.png` and the mean pixel delta.
 
 Then `compare.py` checks the run against `baseline/<tier>.tsv` (`behavior<TAB>theme<TAB>delta`). It exits 1 on:
-- a capture failure (`RESOLVE_FAIL`, `SERVE_FAIL`, `DESKTOP_FAIL`) for a behavior not listed in `baseline/<tier>.skip`
+- a capture failure (`RESOLVE_FAIL`, `SERVE_FAIL`, `DESKTOP_FAIL`, `WEB_FAIL`) for a behavior not listed in `baseline/<tier>.skip`
   (one behavior per line, then a reason: behaviors with no client UI);
 - a pair with no baseline row, or a delta above its baseline row + 0.5 (`H4_SLACK` overrides);
 - an incomplete run.

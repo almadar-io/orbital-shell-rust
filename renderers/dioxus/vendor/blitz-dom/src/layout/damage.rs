@@ -2,6 +2,7 @@ use crate::node::NodeFlags;
 use crate::NON_INCREMENTAL;
 use crate::{net::ImageHandler, node::BackgroundImageData, util::ImageType, BaseDocument};
 use blitz_traits::net::Request;
+use markup5ever::local_name;
 use style::properties::generated::longhands::position::computed_value::T as Position;
 use style::properties::ComputedValues;
 use style::selector_parser::RestyleDamage;
@@ -276,6 +277,15 @@ impl BaseDocument {
 
             // if damage.intersects(RestyleDamage::RELAYOUT | CONSTRUCT_BOX) {
             node.style = stylo_taffy::to_taffy_style(style);
+            // ORBITAL PATCH (blitz-dom 0.2, parity): stylo_taffy never marks replaced elements, so a
+            // block-level img/canvas/svg was stretch-fitted to its container instead of keeping its
+            // natural width (CSS 2.2 §10.3.4). Same element set the layout measures as replaced.
+            node.style.item_is_replaced = node.data.downcast_element().is_some_and(|el| {
+                let tag = &el.name.local;
+                *tag == local_name!("img")
+                    || *tag == local_name!("canvas")
+                    || (cfg!(feature = "svg") && *tag == local_name!("svg"))
+            });
             resolve_auto_repeat_calc_tracks(&mut node.style, viewport_width);
             node.display_constructed_as = style.clone_display();
             // }
