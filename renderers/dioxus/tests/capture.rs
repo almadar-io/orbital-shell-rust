@@ -1366,6 +1366,56 @@ fn look() {
 }
 
 #[test]
+fn items_center_flex_column_behind_a_contents_wrapper_centres_its_children() {
+    use blitz_dom::DocumentConfig;
+    use blitz_traits::shell::{ColorScheme, Viewport};
+    use dioxus::prelude::*;
+    use dioxus_native::DioxusDocument;
+
+    fn app() -> Element {
+        rsx! {
+            div { class: "flex min-h-full flex-col",
+                div { class: "contents",
+                    div { class: "flex flex-col gap-4 items-center justify-center py-12 text-center",
+                        div { id: "wrapped", class: "mb-4 rounded-full p-3", div { class: "w-8 h-8" } }
+                    }
+                }
+                div { class: "flex flex-col gap-4 items-center justify-center py-12 text-center",
+                    div { id: "direct", class: "mb-4 rounded-full p-3", div { class: "w-8 h-8" } }
+                }
+            }
+        }
+    }
+
+    let mut doc = DioxusDocument::new(
+        dioxus_core::VirtualDom::new(app),
+        DocumentConfig {
+            viewport: Some(Viewport::new(600, 900, 1.0, ColorScheme::Light)),
+            font_ctx: Some(orbital_client_dioxus::offscreen::embedded_font_context()),
+            ..Default::default()
+        },
+    );
+    doc.initial_build();
+    doc.create_head_element(
+        "style",
+        &[],
+        &Some(include_str!("../assets/css/web-client.css").into()),
+    );
+    doc.resolve(0.0);
+    let width = |selector| {
+        let id = doc.query_selector(selector).unwrap().unwrap();
+        doc.get_node(id).unwrap().final_layout.size.width
+    };
+    let direct = width("#direct");
+    let wrapped = width("#wrapped");
+    assert!(direct < 100.0, "control: centred pill shrinks to its content, got {direct}");
+    assert!(
+        (wrapped - direct).abs() < 1.0,
+        "display:contents wrapper stretched the centred pill: wrapped={wrapped} direct={direct}"
+    );
+}
+
+#[test]
 fn aspect_square_overflow_hidden_grid_items_give_their_rows_height_in_a_flex_column() {
     use blitz_dom::DocumentConfig;
     use blitz_traits::shell::{ColorScheme, Viewport};

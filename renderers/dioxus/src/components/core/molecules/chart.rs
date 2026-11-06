@@ -1,7 +1,7 @@
 //! Native Dioxus body for the `chart` pattern, ported from web `Chart.tsx`.
 
-use crate::renderer::merge_class_name;
 use crate::registry::DioxusPatternRegistry;
+use crate::renderer::merge_class_name;
 use crate::renderer::{object_value, pattern_spec, DioxusPatternRenderer, DioxusView};
 use dioxus::prelude::*;
 use orbital_core::client::helpers::*;
@@ -1257,7 +1257,14 @@ impl DioxusPatternRenderer for ChartRenderer {
             registry.render_spec(&spec, None, view)
         });
         let aria = get_string(props, "aria-label").unwrap_or_else(|| "Chart".to_string());
-        let root_class = merge_class_name("p-6 rounded-container", props);
+        let paints_surface = get_string_or(props, "surface", "auto") == "auto"
+            && try_consume_context::<crate::components::core::atoms::card::OnSurface>().is_none();
+        let surface = if paints_surface {
+            "surface-content"
+        } else {
+            ""
+        };
+        let root_class = merge_class_name(&format!("{surface} p-6 rounded-container"), props);
         rsx! {
             div { class: "{root_class}", role: "group", "aria-label": "{aria}",
                 div { class: "flex flex-col gap-4 items-stretch justify-start",

@@ -181,15 +181,56 @@ pub(crate) fn collect_layout_children(
         DisplayInside::Contents => {
             doc.nodes[container_node_id]
                 .remove_damage(CONSTRUCT_BOX | CONSTRUCT_DESCENDENT | CONSTRUCT_FC);
-            // Take children array from node to avoid borrow checker issues.
-            let children = std::mem::take(&mut doc.nodes[container_node_id].children);
-
-            for child_id in children.iter().copied() {
-                collect_layout_children(doc, child_id, layout_children, anonymous_block_id)
+            // ORBITAL PATCH (blitz-dom 0.2.4, parity): upstream re-ran collect_layout_children on
+            // each child of the contents node, which treats the child as a *container* and splices
+            // its children into the parent's layout children, dropping the child's own box (a
+            // flex column behind a contents wrapper lost its centring). Each child is an item of
+            // the nearest non-contents ancestor, so classify it exactly as that ancestor would.
+            let mut ancestor = doc.nodes[container_node_id].parent;
+            let mut parent_inside = DisplayInside::Flow;
+            while let Some(id) = ancestor {
+                match doc.nodes[id].display_style() {
+                    Some(d) if d.inside() == DisplayInside::Contents => {
+                        ancestor = doc.nodes[id].parent;
+                    }
+                    Some(d) => {
+                        parent_inside = d.inside();
+                        break;
+                    }
+                    None => break,
+                }
             }
-
-            // Put children array back
-            doc.nodes[container_node_id].children = children;
+            if matches!(parent_inside, DisplayInside::Flex | DisplayInside::Grid) {
+                fn flex_or_grid_item_needs_wrap(
+                    child_node_kind: NodeKind,
+                    _display_outside: DisplayOutside,
+                ) -> bool {
+                    child_node_kind == NodeKind::Text
+                }
+                collect_complex_layout_children(
+                    doc,
+                    container_node_id,
+                    layout_children,
+                    anonymous_block_id,
+                    true,
+                    flex_or_grid_item_needs_wrap,
+                );
+            } else {
+                fn block_item_needs_wrap(
+                    child_node_kind: NodeKind,
+                    display_outside: DisplayOutside,
+                ) -> bool {
+                    child_node_kind == NodeKind::Text || display_outside == DisplayOutside::Inline
+                }
+                collect_complex_layout_children(
+                    doc,
+                    container_node_id,
+                    layout_children,
+                    anonymous_block_id,
+                    false,
+                    block_item_needs_wrap,
+                );
+            }
         }
         DisplayInside::Flow | DisplayInside::FlowRoot | DisplayInside::TableCell => {
             // TODO: make "all_inline" detection work in the presence of display:contents nodes
