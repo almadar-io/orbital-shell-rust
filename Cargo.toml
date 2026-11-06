@@ -27,7 +27,11 @@ orbital-client-dioxus = { path = "renderers/dioxus", features = ["native"], opti
 orbital-client-tui = { path = "renderers/tui", optional = true }
 tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "env-filter"], optional = true }
 
+# The `gpu/*` floor: every program instance answers `gpu/*` asks through orbital-canvas over its shared wgpu device.
+orbital-canvas = { git = "https://github.com/almadar-io/orbital-canvas", branch = "main", optional = true }
+
 [features]
+gpu = ["dep:orbital-canvas"]
 desktop = ["dep:orbital-client-dioxus", "dep:orbital-client-tui", "dep:tracing-subscriber", "orbital-core/client-http"]
 
 [[bin]]

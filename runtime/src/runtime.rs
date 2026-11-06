@@ -647,6 +647,8 @@ impl Host {
         if let Some(anchors) = config.anchors.clone() {
             os_handles.anchors = anchors;
         }
+        #[cfg(feature = "gpu")]
+        os_handles.install_gpu(Arc::new(orbital_canvas::GpuHost::new()));
         let handles = Arc::new(os_handles);
         let host = Arc::new(RwLock::new(Arc::new(host_of(
             &kernel,

@@ -84,9 +84,14 @@ impl GamePaintSource {
 
 impl CustomPaintSource for GamePaintSource {
     fn resume(&mut self, device_handle: &DeviceHandle) {
+        let device = Arc::new(device_handle.device.clone());
+        let queue = Arc::new(device_handle.queue.clone());
+        if let Err(error) = orbital_canvas::register_device(device.clone(), queue.clone()) {
+            tracing::debug!(target: NS, %error, "window device not registered; the slot keeps its device");
+        }
         self.renderer = Some(SharedDeviceRenderer::new(
-            Arc::new(device_handle.device.clone()),
-            Arc::new(device_handle.queue.clone()),
+            device,
+            queue,
             wgpu::TextureFormat::Rgba8Unorm,
         ));
         tracing::info!(target: NS, "game paint source resumed (shared wgpu device)");
