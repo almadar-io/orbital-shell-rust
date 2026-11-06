@@ -7,7 +7,9 @@ Every open gap this repo owns lives here. This file is the source of truth; the 
 - **Codes:** new gaps use this repo's prefix `G-ORBITAL-SHELL-RUST-`. Take the "Next code" below, then bump it in the same edit. Codes are never reused or renamed.
 - **Close by deleting.** Remove the entry in the same commit as the fix.
 
-Next code: `G-ORBITAL-SHELL-RUST-032`
+Next code: `G-ORBITAL-SHELL-RUST-033`
+
+- **G-ORBITAL-SHELL-RUST-032** [architectural] — Browser embeds have no native equivalent: document-viewer paints its toolbar but not the embedded page (web: an <iframe> of the document URL), and map-view paints its frame, zoom control and attribution but no tiles (web: Leaflet fetching OpenStreetMap tiles). Owner: orbital-shell-rust (a native web view or a tile fetch+paint path through orbital-canvas). Reproduce: H4 pairs ui-document-viewer, ui-map-view, std-geosearch. Rung (3): the H4 paired capture. Root cause: H4.
 
 - **G-ORBITAL-SHELL-RUST-025** [architectural] — `mask-image` / `-webkit-mask-image` and `corner-shape` are not painted by blitz-paint: masked elements paint unmasked and squircle corners paint as plain radii. Owner: orbital-shell-rust vendored blitz-paint (Vello layer masks). Rung (3): the H4 paired capture. Root cause: H4.
 
