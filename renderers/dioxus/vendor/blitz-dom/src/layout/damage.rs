@@ -318,6 +318,30 @@ impl BaseDocument {
                     // Element will always exist due to resize_with above
                     elem_bgs[idx] = new_bg_image;
                 }
+
+                // ORBITAL PATCH (blitz-dom 0.2.4, parity): load `mask-image: url(...)` layers
+                // the same way as background images.
+                let style_masks = &style.get_svg().mask_image.0;
+                let elem_masks = &mut elem.mask_images;
+                elem_masks.resize_with(style_masks.len(), || None);
+                for (idx, mask_image) in style_masks.iter().enumerate() {
+                    let StyloImage::Url(ComputedUrl::Valid(new_url)) = mask_image else {
+                        elem_masks[idx] = None;
+                        continue;
+                    };
+                    if elem_masks[idx]
+                        .as_ref()
+                        .is_some_and(|old| *old.url == **new_url)
+                    {
+                        continue;
+                    }
+                    self.net_provider.fetch(
+                        doc_id,
+                        Request::get((**new_url).clone()),
+                        Box::new(ImageHandler::new(node_id, ImageType::Mask(idx), None)),
+                    );
+                    elem_masks[idx] = Some(BackgroundImageData::new(new_url.clone()));
+                }
             }
 
             // In non-incremental mode we unconditionally clear the Taffy cache.

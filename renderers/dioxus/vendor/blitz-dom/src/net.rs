@@ -316,7 +316,7 @@ impl NetHandler<Resource> for ImageHandler {
     fn error_resource(&self) -> Option<Resource> {
         match &self.1 {
             ImageType::Image => self.2.clone().map(|src| Resource::ImageError(self.0, src)),
-            ImageType::Background(_) => None,
+            ImageType::Background(_) | ImageType::Mask(_) => None,
         }
     }
 

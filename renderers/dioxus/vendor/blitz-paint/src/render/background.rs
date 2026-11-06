@@ -12,10 +12,10 @@ use style::{
             background_clip::single_value::computed_value::T as StyloBackgroundClip,
             background_origin::single_value::computed_value::T as StyloBackgroundOrigin,
         },
-        style_structs::Background,
+        style_structs::{Background, SVG},
     },
     values::{
-        computed::{BackgroundRepeat, Gradient as StyloGradient},
+        computed::{BackgroundRepeat, BackgroundSize, Gradient as StyloGradient, LengthPercentage},
         generics::image::GenericImage,
         specified::background::BackgroundRepeatKeyword,
     },
@@ -23,6 +23,35 @@ use style::{
 
 #[cfg(feature = "tracing")]
 use tracing::warn;
+
+// ORBITAL PATCH (blitz-paint 0.2, parity): the per-layer tiling inputs, so `mask-image` layers reuse
+// the background tiling code below instead of copying it.
+pub(super) struct TileLayers<'a> {
+    position_x: &'a [LengthPercentage],
+    position_y: &'a [LengthPercentage],
+    size: &'a [BackgroundSize],
+    repeat: &'a [BackgroundRepeat],
+}
+
+impl<'a> TileLayers<'a> {
+    fn background(bg: &'a Background) -> Self {
+        Self {
+            position_x: &bg.background_position_x.0,
+            position_y: &bg.background_position_y.0,
+            size: &bg.background_size.0,
+            repeat: &bg.background_repeat.0,
+        }
+    }
+
+    pub(super) fn mask(svg: &'a SVG) -> Self {
+        Self {
+            position_x: &svg.mask_position_x.0,
+            position_y: &svg.mask_position_y.0,
+            size: &svg.mask_size.0,
+            repeat: &svg.mask_repeat.0,
+        }
+    }
+}
 
 impl ElementCx<'_> {
     pub(super) fn draw_background(&self, scene: &mut impl PaintScene) {
@@ -117,14 +146,25 @@ impl ElementCx<'_> {
             return;
         };
 
-        let bg_styles = &self.style.get_background();
+        let layers = TileLayers::background(self.style.get_background());
+        self.draw_svg_layer(scene, idx, svg, &layers);
+    }
+
+    #[cfg(feature = "svg")]
+    pub(super) fn draw_svg_layer(
+        &self,
+        scene: &mut impl PaintScene,
+        idx: usize,
+        svg: &usvg::Tree,
+        layers: &TileLayers,
+    ) {
 
         let frame_w = self.frame.padding_box.width() as f32;
         let frame_h = self.frame.padding_box.height() as f32;
 
         let svg_size = svg.size();
         let bg_size = compute_background_size(
-            bg_styles,
+            layers,
             frame_w,
             frame_h,
             idx,
@@ -140,7 +180,7 @@ impl ElementCx<'_> {
         let y_ratio = bg_size.height as f64 / svg_size.height() as f64;
 
         let bg_pos = compute_background_position(
-            bg_styles,
+            layers,
             idx,
             frame_w - bg_size.width as f32,
             frame_h - bg_size.height as f32,
@@ -156,8 +196,6 @@ impl ElementCx<'_> {
     }
 
     fn draw_raster_bg_image(&self, scene: &mut impl PaintScene, idx: usize) {
-        use BackgroundRepeatKeyword::*;
-
         let bg_image = self.element.background_images.get(idx);
 
         let Some(Some(bg_image)) = bg_image.as_ref() else {
@@ -167,12 +205,25 @@ impl ElementCx<'_> {
             return;
         };
 
+        let bg_styles = self.style.get_background();
+        let background_origin = *get_cyclic(&bg_styles.background_origin.0, idx);
+        let layers = TileLayers::background(bg_styles);
+        self.draw_raster_layer(scene, idx, image_data, background_origin, &layers);
+    }
+
+    pub(super) fn draw_raster_layer(
+        &self,
+        scene: &mut impl PaintScene,
+        idx: usize,
+        image_data: &blitz_dom::node::RasterImageData,
+        background_origin: StyloBackgroundOrigin,
+        layers: &TileLayers,
+    ) {
+        use BackgroundRepeatKeyword::*;
+
         let image_rendering = self.style.clone_image_rendering();
         let quality = to_image_quality(image_rendering);
 
-        let bg_styles = &self.style.get_background();
-
-        let background_origin = get_cyclic(&bg_styles.background_origin.0, idx);
         let origin_rect = match background_origin {
             StyloBackgroundOrigin::BorderBox => self.frame.border_box,
             StyloBackgroundOrigin::PaddingBox => self.frame.padding_box,
@@ -183,7 +234,7 @@ impl ElementCx<'_> {
         let image_height = image_data.height as f64;
 
         let (bg_pos, bg_size) = compute_background_position_and_background_size(
-            bg_styles,
+            layers,
             origin_rect.width() / self.scale,
             origin_rect.height() / self.scale,
             idx,
@@ -197,7 +248,7 @@ impl ElementCx<'_> {
         let x_ratio = bg_size.width / image_width;
         let y_ratio = bg_size.height / image_height;
 
-        let BackgroundRepeat(repeat_x, repeat_y) = get_cyclic(&bg_styles.background_repeat.0, idx);
+        let BackgroundRepeat(repeat_x, repeat_y) = get_cyclic(layers.repeat, idx);
 
         let transform = self.transform.pre_scale_non_uniform(x_ratio, y_ratio);
         let (origin_rect, transform) = match repeat_x {
@@ -346,11 +397,30 @@ impl ElementCx<'_> {
         idx: usize,
         background_clip: StyloBackgroundClip,
     ) {
+        let bg_styles = self.style.get_background();
+        let background_origin = *get_cyclic(&bg_styles.background_origin.0, idx);
+        let layers = TileLayers::background(bg_styles);
+        self.draw_gradient_layer(
+            scene,
+            gradient,
+            idx,
+            background_clip,
+            background_origin,
+            &layers,
+        );
+    }
+
+    pub(super) fn draw_gradient_layer(
+        &self,
+        scene: &mut impl PaintScene,
+        gradient: &StyloGradient,
+        idx: usize,
+        background_clip: StyloBackgroundClip,
+        background_origin: StyloBackgroundOrigin,
+        layers: &TileLayers,
+    ) {
         use BackgroundRepeatKeyword::*;
 
-        let bg_styles = &self.style.get_background();
-
-        let background_origin = *get_cyclic(&bg_styles.background_origin.0, idx);
         let origin_rect = match background_origin {
             StyloBackgroundOrigin::BorderBox => self.frame.border_box,
             StyloBackgroundOrigin::PaddingBox => self.frame.padding_box,
@@ -358,7 +428,7 @@ impl ElementCx<'_> {
         };
 
         let (bg_pos, bg_size) = compute_background_position_and_background_size(
-            bg_styles,
+            layers,
             origin_rect.width() / self.scale,
             origin_rect.height() / self.scale,
             idx,
@@ -369,7 +439,7 @@ impl ElementCx<'_> {
         let bg_pos_y = bg_pos.y * self.scale;
         let bg_size = bg_size * self.scale;
 
-        let BackgroundRepeat(repeat_x, repeat_y) = get_cyclic(&bg_styles.background_repeat.0, idx);
+        let BackgroundRepeat(repeat_x, repeat_y) = get_cyclic(layers.repeat, idx);
 
         let transform = self.transform;
         let (origin_rect, transform, width_count, width_gap) = match repeat_x {
@@ -627,7 +697,7 @@ impl ElementCx<'_> {
 }
 
 fn compute_background_position_and_background_size(
-    background: &Background,
+    layers: &TileLayers,
     container_w: f64,
     container_h: f64,
     bg_idx: usize,
@@ -636,7 +706,7 @@ fn compute_background_position_and_background_size(
     use BackgroundRepeatKeyword::*;
 
     let bg_size = compute_background_size(
-        background,
+        layers,
         container_w as f32,
         container_h as f32,
         bg_idx,
@@ -645,13 +715,13 @@ fn compute_background_position_and_background_size(
     );
 
     let bg_pos = compute_background_position(
-        background,
+        layers,
         bg_idx,
         (container_w - bg_size.width) as f32,
         (container_h - bg_size.height) as f32,
     );
 
-    let BackgroundRepeat(repeat_x, repeat_y) = get_cyclic(&background.background_repeat.0, bg_idx);
+    let BackgroundRepeat(repeat_x, repeat_y) = get_cyclic(layers.repeat, bg_idx);
 
     let bg_size = if matches!(repeat_x, Round) && matches!(repeat_y, Round) {
         let count = (container_w / bg_size.width).round();
@@ -678,17 +748,17 @@ fn compute_background_position_and_background_size(
 
 #[inline]
 fn compute_background_position(
-    background: &Background,
+    layers: &TileLayers,
     bg_idx: usize,
     width: f32,
     height: f32,
 ) -> Point {
     use style::values::computed::Length;
 
-    let bg_pos_x = get_cyclic(&background.background_position_x.0, bg_idx)
+    let bg_pos_x = get_cyclic(layers.position_x, bg_idx)
         .resolve(Length::new(width))
         .px() as f64;
-    let bg_pos_y = get_cyclic(&background.background_position_y.0, bg_idx)
+    let bg_pos_y = get_cyclic(layers.position_y, bg_idx)
         .resolve(Length::new(height))
         .px() as f64;
 
@@ -696,17 +766,17 @@ fn compute_background_position(
 }
 
 fn compute_background_size(
-    background: &Background,
+    layers: &TileLayers,
     container_w: f32,
     container_h: f32,
     bg_idx: usize,
     mode: BackgroundSizeComputeMode,
     scale: f32,
 ) -> kurbo::Size {
-    use style::values::computed::{BackgroundSize, Length};
+    use style::values::computed::Length;
     use style::values::generics::length::GenericLengthPercentageOrAuto as Lpa;
 
-    let bg_size = get_cyclic(&background.background_size.0, bg_idx);
+    let bg_size = get_cyclic(layers.size, bg_idx);
 
     let (width, height): (f32, f32) = match bg_size {
         BackgroundSize::ExplicitSize { width, height } => {

@@ -1598,3 +1598,124 @@ fn card_title_beside_an_action_group_keeps_one_line_when_it_fits() {
         "control: a title that cannot fit must wrap and grow its box: lines={wrapped_lines} box={wrapped_box:?}"
     );
 }
+
+#[test]
+fn mask_image_linear_gradient_fades_a_solid_fill_on_gpu() {
+    use anyrender::ImageRenderer;
+    use blitz_dom::DocumentConfig;
+    use blitz_paint::paint_scene;
+    use blitz_traits::shell::{ColorScheme, Viewport};
+    use dioxus::prelude::*;
+    use dioxus_native::DioxusDocument;
+
+    fn app() -> Element {
+        rsx! {
+            div { class: "page",
+                div { class: "swatch masked" }
+                div { class: "swatch" }
+            }
+        }
+    }
+
+    let mut doc = DioxusDocument::new(
+        dioxus_core::VirtualDom::new(app),
+        DocumentConfig {
+            viewport: Some(Viewport::new(100, 200, 1.0, ColorScheme::Light)),
+            ..Default::default()
+        },
+    );
+    doc.add_user_agent_stylesheet(
+        "html, body { margin: 0; padding: 0; background-color: white; } \
+         .page { display: block; width: 100px; height: 200px; background-color: white; } \
+         .swatch { display: block; width: 100px; height: 100px; background-color: rgb(255,0,0); } \
+         .masked { -webkit-mask-image: linear-gradient(to right, black, transparent); \
+         mask-image: linear-gradient(to right, black, transparent); }",
+    );
+    doc.initial_build();
+    doc.resolve(0.0);
+    let mut renderer = anyrender_vello::VelloImageRenderer::new(100, 200);
+    let mut pixels = vec![0u8; 100 * 200 * 4];
+    renderer.render(
+        |painter| paint_scene(painter, &doc, 1.0, 100, 200),
+        &mut pixels,
+    );
+    let px = |x: usize, y: usize| {
+        let i = (y * 100 + x) * 4;
+        (pixels[i], pixels[i + 1], pixels[i + 2])
+    };
+    let (left_r, left_g, _) = px(2, 50);
+    assert!(
+        left_r > 220 && left_g < 60,
+        "masked left edge must stay red: {:?}",
+        px(2, 50)
+    );
+    let (_, right_g, right_b) = px(97, 50);
+    assert!(
+        right_g > 200 && right_b > 200,
+        "masked right edge must fade to the page background: {:?}",
+        px(97, 50)
+    );
+    let (control_r, control_g, _) = px(97, 150);
+    assert!(
+        control_r > 220 && control_g < 60,
+        "control: the unmasked swatch stays red at its right edge: {:?}",
+        px(97, 150)
+    );
+}
+
+#[test]
+fn grid_item_percent_height_resolves_against_the_sized_row_not_the_grid() {
+    use blitz_dom::DocumentConfig;
+    use blitz_traits::shell::{ColorScheme, Viewport};
+    use dioxus::prelude::*;
+    use dioxus_native::DioxusDocument;
+
+    fn app() -> Element {
+        rsx! {
+            div {
+                div { id: "auto-grid", style: "display: grid; grid-template-columns: 1fr 1fr; width: 400px",
+                    div { id: "auto-a", style: "height: 100%", div { style: "height: 40px" } }
+                    div { id: "auto-b", style: "height: 100%", div { style: "height: 80px" } }
+                }
+                div { id: "tall-grid", style: "display: grid; grid-template-columns: 1fr 1fr; width: 400px; height: 300px; align-content: start",
+                    div { id: "tall-a", style: "height: 100%", div { style: "height: 40px" } }
+                    div { id: "tall-b", style: "height: 100%", div { style: "height: 80px" } }
+                }
+                div { id: "plain-grid", style: "display: grid; grid-template-columns: 1fr 1fr; width: 400px; height: 300px; align-content: start; align-items: start",
+                    div { id: "plain-a", div { style: "height: 40px" } }
+                    div { id: "plain-b", div { style: "height: 80px" } }
+                }
+            }
+        }
+    }
+
+    let mut doc = DioxusDocument::new(
+        dioxus_core::VirtualDom::new(app),
+        DocumentConfig {
+            viewport: Some(Viewport::new(800, 900, 1.0, ColorScheme::Light)),
+            ..Default::default()
+        },
+    );
+    doc.initial_build();
+    doc.resolve(0.0);
+    let height = |selector: &str| {
+        let id = doc.query_selector(selector).unwrap().unwrap();
+        doc.get_node(id).unwrap().final_layout.size.height
+    };
+    for id in ["#auto-a", "#auto-b"] {
+        let h = height(id);
+        assert!((h - 80.0).abs() < 0.5, "{id} in an auto-height grid must be the 80px row, got {h}");
+    }
+    for id in ["#tall-a", "#tall-b"] {
+        let h = height(id);
+        assert!(
+            (h - 80.0).abs() < 0.5,
+            "{id} h-full must resolve against the 80px auto row, not the 300px grid, got {h}"
+        );
+    }
+    let (plain_a, plain_b) = (height("#plain-a"), height("#plain-b"));
+    assert!(
+        (plain_a - 40.0).abs() < 0.5 && (plain_b - 80.0).abs() < 0.5,
+        "control: items without a percent height keep their content height: {plain_a}/{plain_b}"
+    );
+}

@@ -19,6 +19,8 @@ pub(crate) static FONT_DB: LazyLock<Arc<fontdb::Database>> = LazyLock::new(|| {
 pub enum ImageType {
     Image,
     Background(usize),
+    // ORBITAL PATCH (blitz-dom 0.2.4, parity): `mask-image: url(...)` layers load like background images.
+    Mask(usize),
 }
 
 /// A point

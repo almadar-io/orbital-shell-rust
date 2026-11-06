@@ -371,6 +371,9 @@ impl GridItem {
     }
 
     /// Compute the item's min content contribution from the provided parameters
+    // ORBITAL PATCH (taffy 0.9.2, parity): a grid item's percentage height resolves against its grid area, which is
+    // unknown while the tracks are being sized, so intrinsic contributions treat it as auto instead of resolving it
+    // against the grid container's own height (css-grid 6.2, css-sizing cyclic percentages).
     pub fn min_content_contribution(
         &self,
         axis: AbstractAxis,
@@ -382,7 +385,7 @@ impl GridItem {
         tree.measure_child_size(
             self.node,
             known_dimensions,
-            inner_node_size,
+            Size { width: inner_node_size.width, height: None },
             available_space.map(|opt| match opt {
                 Some(size) => AvailableSpace::Definite(size),
                 None => AvailableSpace::MinContent,
@@ -421,7 +424,7 @@ impl GridItem {
         tree.measure_child_size(
             self.node,
             known_dimensions,
-            inner_node_size,
+            Size { width: inner_node_size.width, height: None },
             available_space.map(|opt| match opt {
                 Some(size) => AvailableSpace::Definite(size),
                 None => AvailableSpace::MaxContent,
@@ -469,15 +472,16 @@ impl GridItem {
         let padding_border_size = (padding + border).sum_axes();
         let box_sizing_adjustment =
             if self.box_sizing == BoxSizing::ContentBox { padding_border_size } else { Size::ZERO };
+        let percentage_basis = Size { width: inner_node_size.width, height: None };
         let size = self
             .size
-            .maybe_resolve(inner_node_size, |val, basis| tree.calc(val, basis))
+            .maybe_resolve(percentage_basis, |val, basis| tree.calc(val, basis))
             .maybe_apply_aspect_ratio(self.aspect_ratio)
             .maybe_add(box_sizing_adjustment)
             .get(axis)
             .or_else(|| {
                 self.min_size
-                    .maybe_resolve(inner_node_size, |val, basis| tree.calc(val, basis))
+                    .maybe_resolve(percentage_basis, |val, basis| tree.calc(val, basis))
                     .maybe_apply_aspect_ratio(self.aspect_ratio)
                     .maybe_add(box_sizing_adjustment)
                     .get(axis)

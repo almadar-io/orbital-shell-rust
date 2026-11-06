@@ -690,6 +690,16 @@ impl BaseDocument {
                                 ImageData::Raster(RasterImageData::new(width, height, image_data))
                         }
                     }
+                    ImageType::Mask(idx) => {
+                        if let Some(Some(mask_image)) = node
+                            .element_data_mut()
+                            .and_then(|el| el.mask_images.get_mut(idx))
+                        {
+                            mask_image.status = Status::Ok;
+                            mask_image.image =
+                                ImageData::Raster(RasterImageData::new(width, height, image_data))
+                        }
+                    }
                 }
             }
             Resource::ImageError(_, _) => {}
@@ -713,6 +723,15 @@ impl BaseDocument {
                         {
                             bg_image.status = Status::Ok;
                             bg_image.image = ImageData::Svg(tree);
+                        }
+                    }
+                    ImageType::Mask(idx) => {
+                        if let Some(Some(mask_image)) = node
+                            .element_data_mut()
+                            .and_then(|el| el.mask_images.get_mut(idx))
+                        {
+                            mask_image.status = Status::Ok;
+                            mask_image.image = ImageData::Svg(tree);
                         }
                     }
                 }

@@ -1,6 +1,7 @@
 mod background;
 mod box_shadow;
 mod form_controls;
+mod mask;
 
 use std::any::Any;
 
@@ -239,6 +240,12 @@ impl BlitzDomPainter<'_> {
                     cx.transform,
                     &opacity_clip,
                     |scene| {
+                        // ORBITAL PATCH (blitz-paint 0.2, parity): `mask-image` wraps the whole element.
+                        let masked = cx.has_mask();
+                        if masked {
+                            cx.begin_mask(scene);
+                        }
+                        let pre_scroll = (cx.pos, cx.transform);
                         cx.draw_background(scene);
                         cx.draw_border(scene);
 
@@ -271,6 +278,10 @@ impl BlitzDomPainter<'_> {
                             cx.draw_marker(scene, content_position);
                             cx.draw_children(scene);
                         });
+                        if masked {
+                            (cx.pos, cx.transform) = pre_scroll;
+                            cx.end_mask(scene);
+                        }
                     },
                 );
             },

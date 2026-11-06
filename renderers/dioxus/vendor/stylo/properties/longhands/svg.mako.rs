@@ -63,6 +63,7 @@ ${helpers.predefined_type(
     affects="paint",
 )}
 
+// ORBITAL PATCH (stylo 0.8.0, parity): mask-image/-mode/-repeat/-position/-size are enabled under servo (behind layout.unimplemented, which blitz sets) so blitz-paint can paint masks.
 // CSS Masking Module Level 1
 // https://drafts.fxtf.org/css-masking-1
 ${helpers.single_keyword(
@@ -89,11 +90,13 @@ ${helpers.predefined_type(
 ${helpers.single_keyword(
     "mask-mode",
     "match-source alpha luminance",
-    engines="gecko",
+    engines="gecko servo",
+    servo_pref="layout.unimplemented",
     gecko_enum_prefix="StyleMaskMode",
     vector=True,
     animation_type="discrete",
     spec="https://drafts.fxtf.org/css-masking-1/#propdef-mask-mode",
+    servo_restyle_damage="repaint",
     affects="paint",
 )}
 
@@ -101,12 +104,14 @@ ${helpers.predefined_type(
     "mask-repeat",
     "BackgroundRepeat",
     "computed::BackgroundRepeat::repeat()",
-    engines="gecko",
+    engines="gecko servo",
+    servo_pref="layout.unimplemented",
     initial_specified_value="specified::BackgroundRepeat::repeat()",
     extra_prefixes="webkit",
     animation_type="discrete",
     spec="https://drafts.fxtf.org/css-masking-1/#propdef-mask-repeat",
     vector=True,
+    servo_restyle_damage="repaint",
     affects="paint",
 )}
 
@@ -115,12 +120,14 @@ ${helpers.predefined_type(
         "mask-position-" + axis,
         "position::" + direction + "Position",
         "computed::LengthPercentage::zero_percent()",
-        engines="gecko",
+        engines="gecko servo",
+        servo_pref="layout.unimplemented",
         extra_prefixes="webkit",
         initial_specified_value="specified::PositionComponent::Center",
         spec="https://drafts.fxtf.org/css-masking-1/#propdef-mask-position",
         vector_animation_type="repeatable_list",
         vector=True,
+        servo_restyle_damage="repaint",
         affects="paint",
     )}
 % endfor
@@ -157,12 +164,14 @@ ${helpers.predefined_type(
     "mask-size",
     "background::BackgroundSize",
     "computed::BackgroundSize::auto()",
-    engines="gecko",
+    engines="gecko servo",
+    servo_pref="layout.unimplemented",
     initial_specified_value="specified::BackgroundSize::auto()",
     extra_prefixes="webkit",
     spec="https://drafts.fxtf.org/css-masking-1/#propdef-mask-size",
     vector=True,
     vector_animation_type="repeatable_list",
+    servo_restyle_damage="repaint",
     affects="paint",
 )}
 
@@ -190,6 +199,7 @@ ${helpers.predefined_type(
     vector=True,
     extra_prefixes="webkit",
     animation_type="discrete",
+    servo_restyle_damage="repaint",
     affects="paint",
 )}
 
