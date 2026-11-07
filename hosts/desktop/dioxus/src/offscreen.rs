@@ -83,12 +83,18 @@ pub fn embedded_font_context() -> parley::FontContext {
 /// it to `path` as a PNG.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn capture_png(path: &std::path::Path, width: u32, height: u32) -> Result<(), String> {
-    capture_with::<anyrender_vello_cpu::VelloCpuImageRenderer>(path, width, height)
+    capture_with::<anyrender_vello_cpu::VelloCpuImageRenderer>(path, width, height, 1.0)
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 pub fn capture_gpu_png(path: &std::path::Path, width: u32, height: u32) -> Result<(), String> {
-    capture_with::<anyrender_vello::VelloImageRenderer>(path, width, height)
+    capture_gpu_png_scaled(path, width, height, 1.0)
+}
+
+/// `width`×`height` physical pixels at device pixel ratio `scale` (CSS size = physical / `scale`).
+#[cfg(not(target_arch = "wasm32"))]
+pub fn capture_gpu_png_scaled(path: &std::path::Path, width: u32, height: u32, scale: f32) -> Result<(), String> {
+    capture_with::<anyrender_vello::VelloImageRenderer>(path, width, height, scale)
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -151,6 +157,7 @@ fn capture_with<R: OffscreenPaintRegistry>(
     path: &std::path::Path,
     width: u32,
     height: u32,
+    scale: f32,
 ) -> Result<(), String> {
     use blitz_dom::{Document as _, DocumentConfig};
     use blitz_paint::paint_scene;
@@ -176,7 +183,7 @@ fn capture_with<R: OffscreenPaintRegistry>(
     let mut doc = DioxusDocument::new(
         vdom,
         DocumentConfig {
-            viewport: Some(Viewport::new(width, height, 1.0, ColorScheme::Light)),
+            viewport: Some(Viewport::new(width, height, scale, ColorScheme::Light)),
             font_ctx: Some(embedded_font_context()),
             net_provider: Some(std::sync::Arc::new(net)),
             ..Default::default()
@@ -226,7 +233,7 @@ fn capture_with<R: OffscreenPaintRegistry>(
     doc.resolve(ANIMATION_SETTLE_SECS);
     let mut buffer = vec![255u8; width as usize * height as usize * 4];
     renderer.render(
-        |painter| paint_scene(painter, &doc, 1.0, width, height),
+        |painter| paint_scene(painter, &doc, scale as f64, width, height),
         &mut buffer,
     );
     // The rasterizer leaves unpainted pixels transparent (premultiplied); composite onto white.

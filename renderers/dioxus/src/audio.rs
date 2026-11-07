@@ -29,7 +29,9 @@ impl AudioPlay {
     pub fn from_value(value: Option<&Value>) -> Result<Option<Self>, serde_json::Error> {
         match value {
             None | Some(Value::Null) => Ok(None),
-            Some(value) => serde_json::from_value(orbital_core::client::helpers::to_json(value)).map(Some),
+            Some(value) => {
+                serde_json::from_value(orbital_core::client::helpers::to_json(value)).map(Some)
+            }
         }
     }
 
@@ -78,18 +80,24 @@ impl AudioProps {
     fn port_play(&self, key: &str, music: bool) -> Result<AudioPlay, AudioFailure> {
         let manifest: BTreeMap<String, PortEntry> =
             serde_json::from_value(orbital_core::client::helpers::to_json(&self.manifest))
-                .map_err(|error| AudioFailure::invalid(format!("audio manifest is invalid: {error}")))?;
+                .map_err(|error| {
+                    AudioFailure::invalid(format!("audio manifest is invalid: {error}"))
+                })?;
         let entry = manifest
             .get(key)
             .ok_or_else(|| AudioFailure::invalid(format!("audio manifest has no entry `{key}`")))?;
         let path = match &entry.path {
             PortPaths::One(path) => path.clone(),
             PortPaths::Many(paths) if music => paths.first().cloned().unwrap_or_default(),
-            PortPaths::Many(paths) if !paths.is_empty() => paths[fastrand::usize(..paths.len())].clone(),
+            PortPaths::Many(paths) if !paths.is_empty() => {
+                paths[fastrand::usize(..paths.len())].clone()
+            }
             PortPaths::Many(_) => String::new(),
         };
         if path.is_empty() {
-            return Err(AudioFailure::invalid(format!("audio entry `{key}` has no source")));
+            return Err(AudioFailure::invalid(format!(
+                "audio entry `{key}` has no source"
+            )));
         }
         Ok(AudioPlay {
             key: key.to_string(),
@@ -310,13 +318,20 @@ impl Session {
         self.apply_levels();
     }
 
-    fn change_music(&mut self, stream: &OutputStream, plan: &AudioPlay) -> Result<(), AudioFailure> {
+    fn change_music(
+        &mut self,
+        stream: &OutputStream,
+        plan: &AudioPlay,
+    ) -> Result<(), AudioFailure> {
         let incoming = if plan.key.is_empty() {
             None
         } else {
             let bytes = load_audio("", &plan.source).map_err(AudioFailure::unavailable)?;
             let decoder = Decoder::try_from(Cursor::new(bytes)).map_err(|error| {
-                AudioFailure::invalid(format!("audio decoder rejected music `{}`: {error}", plan.key))
+                AudioFailure::invalid(format!(
+                    "audio decoder rejected music `{}`: {error}",
+                    plan.key
+                ))
             })?;
             let sink = Sink::connect_new(stream.mixer());
             sink.append(decoder.repeat_infinite());
@@ -350,7 +365,10 @@ impl Session {
         }
         let bytes = load_audio("", &plan.source).map_err(AudioFailure::unavailable)?;
         let decoder = Decoder::try_from(Cursor::new(bytes)).map_err(|error| {
-            AudioFailure::invalid(format!("audio decoder rejected cue `{}`: {error}", plan.key))
+            AudioFailure::invalid(format!(
+                "audio decoder rejected cue `{}`: {error}",
+                plan.key
+            ))
         })?;
         let volume = self.effective_volume(plan.volume);
         let voices = self.effects.entry(plan.key.clone()).or_insert(Voices {
@@ -690,7 +708,10 @@ mod tests {
 
     #[test]
     fn a_cue_plays_only_when_cue_seq_moves_after_mount_and_music_only_when_its_plan_changes() {
-        let stop = AudioPlay { fade_ms: 1000, ..plan("", "") };
+        let stop = AudioPlay {
+            fade_ms: 1000,
+            ..plan("", "")
+        };
         let mounted = props(0.0, stop.clone());
         assert_eq!(changes(None, &mounted), vec![Played::Music(stop.clone())]);
         assert!(changes(Some(&mounted), &mounted).is_empty());
@@ -714,7 +735,10 @@ mod tests {
         )
         .unwrap();
         let jump = port.port_play("jump", false).unwrap();
-        assert_eq!((jump.source.as_str(), jump.pool_size), ("/assets/jump-1.wav", 3));
+        assert_eq!(
+            (jump.source.as_str(), jump.pool_size),
+            ("/assets/jump-1.wav", 3)
+        );
         assert_eq!(port.port_play("theme", true).unwrap().fade_ms, 0);
         assert!(port.port_play("missing", false).is_err());
     }

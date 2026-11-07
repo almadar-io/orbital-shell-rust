@@ -28,7 +28,10 @@ fn Cue(props: CueProps) -> Element {
         let (cue_play, music_play, autostart) = match plans {
             (Ok(cue), Ok(music), Ok(autostart)) => (cue, music, autostart),
             (cue, music, autostart) => {
-                for error in [cue.err(), music.err(), autostart.err()].into_iter().flatten() {
+                for error in [cue.err(), music.err(), autostart.err()]
+                    .into_iter()
+                    .flatten()
+                {
                     tracing::error!(%error, "invalid game-audio-cue plan");
                 }
                 return;

@@ -9,17 +9,17 @@ use orbital_core::client::client_core::ClientCore;
 use orbital_core::client::client_kernel::ClientKernel;
 use orbital_core::client::http::SyncServerBridge;
 use orbital_core::client::render_probe::{GameCanvasOutcome, RenderTarget};
-use orbital_core::desktop_protocol::{DesktopProgram, DesktopReply, DesktopRequest, RENDERERS};
+use orbital_core::desktop_protocol::{CaptureViewport, DesktopProgram, DesktopReply, DesktopRequest, RENDERERS};
 use orbital_core::shell_protocol::{ShellFailure, CODE_BAD_REQUEST, CODE_GENERATE_FAILED};
 use orbital_core::OrbitalSchema;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+
 pub struct Desktop;
 
 /// Screenshot size, the egui client's default window.
-const WIDTH: u32 = 1280;
-const HEIGHT: u32 = 900;
+const DEFAULT_VIEWPORT: CaptureViewport = CaptureViewport { width: 1280, height: 900, scale: 1.0 };
 const TEXT_COLUMNS: u16 = 160;
 const TEXT_ROWS: u16 = 50;
 /// A route capture runs at most this many host frames, `FRAME_MS` apart, before painting.
@@ -100,11 +100,11 @@ impl Surface {
     }
 
     /// Capture to `stem` + the renderer's extension (`.png` / `.txt`).
-    fn capture(&mut self, stem: &Path) -> Result<PathBuf, String> {
+    fn capture(&mut self, stem: &Path, viewport: CaptureViewport) -> Result<PathBuf, String> {
         match self {
             Surface::Dioxus => {
                 let path = PathBuf::from(format!("{}.png", stem.display()));
-                offscreen::capture_gpu_png(&path, WIDTH, HEIGHT)?;
+                offscreen::capture_gpu_png_scaled(&path, viewport.width, viewport.height, viewport.scale)?;
                 Ok(path)
             }
             Surface::Tui(app) => {
@@ -128,7 +128,7 @@ fn screenshot(renderer: Renderer, item: &str, schema: &OrbitalSchema, out_dir: &
             core.init_all_traits_blocking();
             core.settle(8);
         })?;
-        written.push(surface.capture(&out_dir.join(format!("{item}.orbital{idx}")))?);
+        written.push(surface.capture(&out_dir.join(format!("{item}.orbital{idx}")), DEFAULT_VIEWPORT)?);
     }
     Ok(written)
 }
@@ -141,6 +141,7 @@ fn screenshot_route(
     out_dir: &Path,
     route: &str,
     server: Option<&str>,
+    viewport: CaptureViewport,
 ) -> Result<PathBuf, String> {
     std::fs::create_dir_all(out_dir).map_err(|e| format!("{}: {e}", out_dir.display()))?;
     let (schema, bridge): (OrbitalSchema, Arc<dyn ServerBridge>) = match server {
@@ -169,7 +170,7 @@ fn screenshot_route(
     let tree = out_dir.join(format!("{item}.tree.json"));
     let text = serde_json::to_string_pretty(&painted).map_err(|e| e.to_string())?;
     std::fs::write(&tree, text).map_err(|e| format!("{}: {e}", tree.display()))?;
-    surface.capture(&out_dir.join(item))
+    surface.capture(&out_dir.join(item), viewport)
 }
 
 /// What the capture painted, beside the image: each slot's render tree (as the kernel handed it), the active trait's
@@ -223,8 +224,16 @@ impl DesktopProgram for Desktop {
                 Renderer::Dioxus => orbital_client_dioxus::probe_target::DioxusTarget::new().probe_game_canvas(&pattern, &props),
                 Renderer::Tui => GameCanvasOutcome::Skip(format!("`{pattern}`: the terminal renderer paints no canvases")),
             })),
-            DesktopRequest::Screenshot { renderer, item, schema, out_dir, route, server } => match route {
-                Some(route) => screenshot_route(Renderer::parse(&renderer)?, &item, &schema, &out_dir, &route, server.as_deref())
+            DesktopRequest::Screenshot { renderer, item, schema, out_dir, route, server, viewport } => match route {
+                Some(route) => screenshot_route(
+                    Renderer::parse(&renderer)?,
+                    &item,
+                    &schema,
+                    &out_dir,
+                    &route,
+                    server.as_deref(),
+                    viewport.unwrap_or(DEFAULT_VIEWPORT),
+                )
                     .map(|file| DesktopReply::Files(vec![file]))
                     .map_err(failed),
                 None => screenshot(Renderer::parse(&renderer)?, &item, &schema, &out_dir).map(DesktopReply::Files).map_err(failed),
