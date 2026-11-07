@@ -2314,7 +2314,7 @@ mod tests {
             "typeContractVersion": 1,
             "orbitals": [{
                 "name": "Hooked",
-                "entity": { "name": "Run", "persistence": "runtime", "fields": [{ "name": "id", "type": "string" }, { "name": "got", "type": "string" }] },
+                "entity": { "name": "Run", "persistence": "runtime", "fields": [{ "name": "id", "type": "string" }, { "name": "status", "type": "number" }, { "name": "body", "type": "string" }, { "name": "got", "type": "string" }] },
                 "traits": [{
                     "name": "Caller", "linkedEntity": "Run",
                     "stateMachine": {
@@ -2322,7 +2322,7 @@ mod tests {
                         "events": [{ "key": "GO", "name": "Go" }, { "key": "DONE", "name": "Done" }, { "key": "FAILED", "name": "Failed" }],
                         "transitions": [
                             { "from": "idle", "to": "idle", "event": "GO", "effects": [["program/dispatch", { "inbound": "@payload.hook", "body": "{}", "headers": {} }, { "emit": { "success": "DONE", "failure": "FAILED" } }]] },
-                            { "from": "idle", "to": "done", "event": "DONE", "effects": [["set", "@entity.got", "@payload.text"]] },
+                            { "from": "idle", "to": "done", "event": "DONE", "effects": [["set", "@entity.status", "@payload.result.status"], ["set", "@entity.body", "@payload.result.body"]] },
                             { "from": "idle", "to": "failed", "event": "FAILED", "effects": [["set", "@entity.got", "@payload.error"]] }]
                     }
                 }, {
@@ -2339,6 +2339,16 @@ mod tests {
         .expect("the program parses")
     }
 
+    /// What `Caller` recorded: the delivery's `{ status, body }` (the completion's `result`) once done, else the failure.
+    fn answered(snapshot: &orbital_core::TraitSnapshot) -> serde_json::Value {
+        let row = serde_json::to_value(&snapshot.entity).unwrap();
+        if snapshot.state == "done" {
+            serde_json::json!({ "status": row["status"], "body": row["body"] })
+        } else {
+            row["got"].clone()
+        }
+    }
+
     fn go_hook(hook: &str) -> (String, serde_json::Value) {
         let runtime = Host::new(Arc::new(DriverAdapter::memory())).shared();
         runtime.register_schema(hooked_program()).unwrap();
@@ -2350,8 +2360,7 @@ mod tests {
         });
         rx.recv_timeout(std::time::Duration::from_secs(20)).expect("the nested delivery returns").unwrap();
         let snapshot = runtime.kernel.snapshot_trait("Caller", Some("default"));
-        let got = serde_json::to_value(&snapshot.entity).unwrap()["got"].as_str().unwrap_or_default().to_string();
-        (snapshot.state, serde_json::from_str(&got).unwrap_or(serde_json::Value::String(got)))
+        (snapshot.state.clone(), answered(&snapshot))
     }
 
     #[test]
@@ -2393,8 +2402,7 @@ mod tests {
         loop {
             let snapshot = runtime.kernel.snapshot_trait("Caller", Some("default"));
             if snapshot.state != "idle" {
-                let got = serde_json::to_value(&snapshot.entity).unwrap()["got"].as_str().unwrap_or_default().to_string();
-                return (snapshot.state, serde_json::from_str(&got).unwrap_or(serde_json::Value::String(got)));
+                return (snapshot.state.clone(), answered(&snapshot));
             }
             assert!(std::time::Instant::now() < deadline, "the keyed delivery never completed");
             std::thread::sleep(std::time::Duration::from_millis(20));
