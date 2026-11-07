@@ -251,10 +251,10 @@ impl orbital_core::runtime::kernel::guest_hosting::GuestHost for GuestOf {
         self.0.register_schema(schema).map_err(|e| e.to_string())
     }
 
-    fn mount(&self, route: Option<&str>, seeds: &[orbital_core::effects::MountSeed]) -> Result<DispatchOutcomes, String> {
+    fn mount(&self, route: Option<&str>, seeds: &[orbital_core::effects::MountSeed], payload: Value) -> Result<DispatchOutcomes, String> {
         let host = &self.0;
         host.kernel
-            .run_route_mount(route, seeds, None, Value::Null, |started| host.finish(started))
+            .run_route_mount(route, seeds, None, payload, |started| host.finish(started))
             .map_err(|e| e.to_string())
     }
 
