@@ -297,6 +297,13 @@ impl TargetLiteralRenderer for RsLiteral<'_> {
     fn array(&self, items: Vec<String>) -> String {
         format!("vec![{}]", items.join(", "))
     }
+    fn map(&self, entries: Vec<(String, String)>) -> Option<String> {
+        if entries.is_empty() {
+            return Some("std::collections::BTreeMap::new()".to_string());
+        }
+        let pairs: Vec<String> = entries.into_iter().map(|(k, v)| format!("({}, {v})", self.string(&k))).collect();
+        Some(format!("std::collections::BTreeMap::from([{}])", pairs.join(", ")))
+    }
     fn union_arm(&self, arm: &str, inner: String) -> String {
         format!("{}::{}({inner})", self.union_name, split_to_pascal_case(arm))
     }
@@ -785,5 +792,18 @@ mod tests {
             "control: a string field keeps its plain string literal"
         );
         assert!(render_default(&RsLiteral { union_name: "Ctx" }, &OirValue::Number(1.0), &OirType::Node, None).is_err(), "control: a number is not a text node");
+    }
+
+    #[test]
+    fn a_map_default_renders_as_a_btree_map() {
+        use orbital_core::ir::{render_default, OirType};
+        let lit = RsLiteral { union_name: "Ctx" };
+        let ty = OirType::Map { key: Box::new(OirType::String), value: Box::new(OirType::Number) };
+        assert_eq!(render_default(&lit, &OirValue::Object(Default::default()), &ty, None), Ok(Some("std::collections::BTreeMap::new()".to_string())));
+        let mut fields = orbital_core::ir::types::OirObject::default();
+        fields.insert("open".to_string(), OirValue::Number(2.0));
+        assert_eq!(render_default(&lit, &OirValue::Object(fields), &ty, None), Ok(Some("std::collections::BTreeMap::from([(\"open\".to_string(), 2.0)])".to_string())));
+        let st = OirType::Struct { additional: None, fields: vec![OirField::new("id", OirType::String)].into() };
+        assert_eq!(render_default(&lit, &OirValue::Object(Default::default()), &st, None), Ok(None), "control: a struct default still declines");
     }
 }

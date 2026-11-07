@@ -1,4 +1,4 @@
-use crate::audio::{AudioProps, AudioSessionHandle};
+use crate::audio::{AudioPlay, AudioProps, AudioSessionHandle};
 use crate::registry::DioxusPatternRegistry;
 use crate::renderer::{DioxusPatternRenderer, DioxusView};
 use dioxus::prelude::*;
@@ -19,18 +19,30 @@ fn Cue(props: CueProps) -> Element {
     let handle = use_hook(|| Rc::new(AudioSessionHandle::new()));
     let value = props.value;
     let mut effect = use_effect(move || {
+        let field = |name: &str| value.as_object().and_then(|object| object.get(name));
+        let plans = (
+            AudioPlay::from_value(field("cuePlay")),
+            AudioPlay::from_value(field("musicPlay")),
+            AudioPlay::list_from_value(field("autostart")),
+        );
+        let (cue_play, music_play, autostart) = match plans {
+            (Ok(cue), Ok(music), Ok(autostart)) => (cue, music, autostart),
+            (cue, music, autostart) => {
+                for error in [cue.err(), music.err(), autostart.err()].into_iter().flatten() {
+                    tracing::error!(%error, "invalid game-audio-cue plan");
+                }
+                return;
+            }
+        };
         let audio = AudioProps {
             source_trait: props.source_trait.clone(),
-            cue: get_string_or(&value, "cue", ""),
             cue_seq: get_number(&value, "cueSeq"),
-            music: get_string_or(&value, "music", ""),
+            cue_play,
+            music_play,
+            autostart,
             muted: get_bool_or(&value, "muted", false),
             volume: get_number_or(&value, "volume", 1.0).clamp(0.0, 1.0) as f32,
-            manifest: value
-                .as_object()
-                .and_then(|object| object.get("manifest"))
-                .cloned()
-                .unwrap_or(Value::Null),
+            manifest: field("manifest").cloned().unwrap_or(Value::Null),
             base_url: get_string_or(&value, "baseUrl", ""),
         };
         handle.sync(audio);

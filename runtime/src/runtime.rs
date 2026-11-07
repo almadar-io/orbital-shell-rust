@@ -529,6 +529,8 @@ pub struct Host {
     live_tx: broadcast::Sender<LiveBroadcastItem>,
     /// Hook deliveries waiting for an answer a later completion dispatch carries ([`Self::deliver_inbound_awaiting`]).
     inbound_waiters: InboundWaiters,
+    /// Background ticks between their dispatch and the hand-off of their outcomes to `inbound_waiters`: a delivery waiting on a tick is not unanswered while its answer is in flight.
+    ticks_in_flight: std::sync::atomic::AtomicUsize,
     substrate: Arc<SelfSubstrate>,
     /// Why the encrypted credential store a master key asks for could not be opened (the environment answers instead).
     credential_store_failure: Option<String>,
@@ -538,6 +540,21 @@ pub struct Host {
     started: std::time::Instant,
     /// The completions delivered since [`Self::tap_completions`], for a host that reports them (`program/step` live).
     completion_tap: Arc<Mutex<Option<Vec<orbital_core::step_replay::StepCompletion>>>>,
+}
+
+/// Hand a later dispatch's outcomes to the hook deliveries waiting for an answer: a delivery the outcomes answer
+/// is answered and leaves, the others collect the cascade's failures.
+fn feed_inbound_waiters(waiters: &InboundWaiters, outcomes: &DispatchOutcomes) {
+    waiters.lock().retain(|(route, answer, failures)| match RuntimeKernel::inbound_late_answer(route, outcomes) {
+        Some(late) => {
+            let _ = answer.send(late);
+            false
+        }
+        None => {
+            failures.lock().extend(RuntimeKernel::cascade_failures(outcomes));
+            true
+        }
+    });
 }
 
 type InboundWaiters = Arc<
@@ -585,7 +602,8 @@ fn host_error(e: KernelError) -> HostError {
         KernelError::PayloadInvalid(msg) => HostError::Validation(msg),
         e @ (KernelError::LaneHeldByParkedDispatch { .. }
         | KernelError::UnresolvedProgram { .. }
-        | KernelError::LazyLoad { .. }) => {
+        | KernelError::LazyLoad { .. }
+        | KernelError::LanguageData(_)) => {
             HostError::Internal(e.to_string())
         }
     }
@@ -709,18 +727,7 @@ impl Host {
                     match result
                 {
                     Ok(outcomes) => {
-                        waiters.lock().retain(|(route, answer, failures)| {
-                            match RuntimeKernel::inbound_late_answer(route, &outcomes) {
-                                Some(late) => {
-                                    let _ = answer.send(late);
-                                    false
-                                }
-                                None => {
-                                    failures.lock().extend(RuntimeKernel::cascade_failures(&outcomes));
-                                    true
-                                }
-                            }
-                        });
+                        feed_inbound_waiters(&waiters, &outcomes);
                         let mut response = orbital_core::EventResponse::from_process_results(
                             &outcomes,
                             &site.trait_name,
@@ -782,6 +789,7 @@ impl Host {
             entity_source,
             live_tx,
             inbound_waiters,
+            ticks_in_flight: std::sync::atomic::AtomicUsize::new(0),
             substrate,
             credential_store_failure,
             ticks: Mutex::new(orbital_core::TickClock::from_orbitals(&[])),
@@ -881,8 +889,14 @@ impl Host {
             if !self.kernel.tick_of(&trait_name, &tick).is_some_and(|t| t.background) {
                 continue;
             }
+            self.ticks_in_flight.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             let started = self.kernel.start_dispatch_tick(&trait_name, None, &tick);
-            match self.finish(started) {
+            let finished = self.finish(started);
+            if let Ok(outcomes) = &finished {
+                feed_inbound_waiters(&self.inbound_waiters, outcomes);
+            }
+            self.ticks_in_flight.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+            match finished {
                 Ok(outcomes) => {
                     let response = orbital_core::EventResponse::from_process_results(&outcomes, "", &orbital_core::tick_event_key(&tick));
                     self.broadcast_persisted(&response, None);
@@ -1243,7 +1257,7 @@ impl Host {
     /// [`Self::deliver_inbound`] for a host that serves one caller at a time (the `orb` command runner): a delivery
     /// whose handler asked for keyed I/O and did not answer in the delivering dispatch waits for the answer a later
     /// dispatch of the handler carries, as its completions arrive, up to `timeout` (`None` waits as long as a call is open;
-    /// with none left the delivery is `inbound-unanswered`, `RuntimeKernel::await_inbound_answer`).
+    /// the host runs tick passes itself while it waits (the command runner starts no tick driver); with none left, and no `[background]` tick waiting in a state it names, the delivery is `inbound-unanswered`, `RuntimeKernel::await_inbound_answer`).
     pub fn deliver_inbound_awaiting<'a>(
         &self,
         name: &str,
@@ -1281,14 +1295,25 @@ impl Host {
                 .retain(|(waiting, _, _)| waiting != &route);
             return RuntimeKernel::inbound_answer(&route, &outcomes);
         }
-        let answer = RuntimeKernel::await_inbound_answer(
-            &route,
-            &outcomes,
-            &receiver,
-            || !self.open_calls().is_empty(),
-            &|| failures.lock().clone(),
-            timeout,
-        );
+        let stop = std::sync::atomic::AtomicBool::new(false);
+        let answer = std::thread::scope(|scope| {
+            scope.spawn(|| {
+                while !stop.load(std::sync::atomic::Ordering::SeqCst) {
+                    self.tick_pass(self.monotonic_ms(), orbital_core::Calendar::local_now());
+                    std::thread::sleep(std::time::Duration::from_millis(16));
+                }
+            });
+            let answer = RuntimeKernel::await_inbound_answer(
+                &route,
+                &outcomes,
+                &receiver,
+                || !self.open_calls().is_empty() || self.ticks_wanted(),
+                &|| failures.lock().clone(),
+                timeout,
+            );
+            stop.store(true, std::sync::atomic::Ordering::SeqCst);
+            answer
+        });
         self.inbound_waiters
             .lock()
             .retain(|(waiting, _, _)| waiting != &route);
@@ -1417,6 +1442,11 @@ impl Host {
     ) -> Result<Vec<(String, ProcessEventResult)>, HostError> {
         self.kernel
             .run_route_mount(route, seeds, Some(entity_id), payload, |started| self.finish(started))
+    }
+
+    /// A `[background]` tick still wants to run (its trait waits in a state it names) or is mid-dispatch.
+    fn ticks_wanted(&self) -> bool {
+        self.ticks_in_flight.load(std::sync::atomic::Ordering::SeqCst) > 0 || !self.kernel.pending_background_ticks().is_empty()
     }
 
     /// The keyed calls whose completion is still wanted: open streams (a listener, a watch) and deferred answers.
