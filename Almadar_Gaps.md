@@ -19,7 +19,6 @@ Next code: `G-ORBITAL-SHELL-RUST-034`
 
 - **G-ORBITAL-SHELL-RUST-027** [architectural] — Compromise named 2026-11-06: `repeat(auto-fit|auto-fill, minmax(min(X, 100%), 1fr))` grid tracks are resolved by an ORBITAL PATCH stop-gap that evaluates the `calc`/`min()` track size against the viewport width, not the grid container, because Taffy receives calc tracks it cannot resolve. A grid narrower than the viewport gets too few columns. Owner: orbital-shell-rust vendored blitz-dom stylo→taffy conversion (resolve calc tracks against the container in Taffy). Rung (3): the H4 paired capture of a narrow auto-fit grid. Root cause: H4.
 
-- **G-ORBITAL-SHELL-RUST-028** [mechanical] — An inline `<svg>` with no `viewBox` and no `width`/`height` gets usvg's 100x100 default tree size, so `<pattern>` tile sizes (svg_pattern.rs) and aspect ratio are off after scaling into the layout box. Owner: orbital-shell-rust vendored blitz-paint SVG path (parse at the laid-out size or re-parse after layout). Rung (3): the H4 paired capture of std page background grids. Root cause: H4.
 
 - **G-ORBITAL-SHELL-RUST-029** [mechanical] — Table row-group (`thead`/`tbody`/`tfoot`) backgrounds and borders are not painted natively: row groups get no layout box in blitz-dom table layout (rows are painted since 2026-11-06), and `border-collapse` is not modelled. Owner: orbital-shell-rust vendored blitz-dom layout/table.rs + blitz-paint. Rung (3): the H4 paired capture of data tables. Root cause: H4.
 
