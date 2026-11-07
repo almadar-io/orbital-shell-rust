@@ -285,6 +285,9 @@ impl TargetLiteralRenderer for RsLiteral<'_> {
             format!("{s}.0")
         }
     }
+    fn node_text(&self, s: &str) -> Option<String> {
+        Some(format!("serde_json::Value::String(\"{}\".to_string())", escape_double_quoted(s)))
+    }
     fn string(&self, s: &str) -> String {
         format!("\"{}\".to_string()", escape_double_quoted(s))
     }
@@ -766,5 +769,21 @@ mod tests {
         let content = events_file(&m).content;
         assert!(content.contains("    pub size: Option<f64>,"), "{content}");
         assert!(content.contains("    pub text: String,"), "control: a `!` key stays required: {content}");
+    }
+
+    #[test]
+    fn a_text_default_of_a_node_field_is_a_json_string_value() {
+        use orbital_core::ir::{render_default, OirType};
+        let text = OirValue::String("Ticket details".to_string());
+        assert_eq!(
+            render_default(&RsLiteral { union_name: "Ctx" }, &text, &OirType::Node, None),
+            Ok(Some("serde_json::Value::String(\"Ticket details\".to_string())".to_string()))
+        );
+        assert_eq!(
+            render_default(&RsLiteral { union_name: "Ctx" }, &text, &OirType::String, None),
+            Ok(Some("\"Ticket details\".to_string()".to_string())),
+            "control: a string field keeps its plain string literal"
+        );
+        assert!(render_default(&RsLiteral { union_name: "Ctx" }, &OirValue::Number(1.0), &OirType::Node, None).is_err(), "control: a number is not a text node");
     }
 }
