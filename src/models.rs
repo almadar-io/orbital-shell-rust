@@ -398,7 +398,7 @@ fn entity_source(entity: &OirEntity, local: &BTreeSet<String>) -> String {
         .cloned()
         .collect();
     let (mut lines, fns) = field_lines(&rest, &class, &types);
-    lines.insert(0, "    pub id: String,".to_string());
+    lines.insert(0, "    #[serde(default)]\n    pub id: Option<String>,".to_string());
     let mut out = String::new();
     for decl in hoisted.into_inner() {
         out.push_str(&decl);
@@ -583,7 +583,7 @@ mod tests {
     #[test]
     fn entities_render_required_defaulted_enum_and_optional_fields() {
         let file = entities_file(&module(false));
-        let expected = "#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]\npub struct Doc {\n    pub id: String,\n    #[serde(default = \"default_Doc_chunks\")]\n    pub chunks: Option<Vec<String>>,\n    pub status: DocStatus,\n    pub note: Option<String>,\n}\n\nfn default_Doc_chunks() -> Option<Vec<String>> {\n    Some(vec![])\n}";
+        let expected = "#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]\npub struct Doc {\n    #[serde(default)]\n    pub id: Option<String>,\n    #[serde(default = \"default_Doc_chunks\")]\n    pub chunks: Option<Vec<String>>,\n    pub status: DocStatus,\n    pub note: Option<String>,\n}\n\nfn default_Doc_chunks() -> Option<Vec<String>> {\n    Some(vec![])\n}";
         assert!(file.content.contains(expected), "{}", file.content);
         assert!(file.content.contains("pub enum DocStatus {\n    #[serde(rename = \"open\")]\n    Open,\n    #[serde(rename = \"closed\")]\n    Closed,\n}"));
     }
