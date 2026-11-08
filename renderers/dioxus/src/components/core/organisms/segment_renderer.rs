@@ -35,10 +35,6 @@ impl DioxusPatternRenderer for SegmentRendererRenderer {
         view: &DioxusView<'_>,
         registry: &DioxusPatternRegistry,
     ) -> Element {
-        if props.get("lesson").is_some_and(|lesson| !lesson.is_null()) {
-            tracing::error!("segment-renderer: `lesson` text needs the lesson parser, which the native host does not carry; pass `segments`");
-            return rsx! {};
-        }
         let segments = get_array(props, "segments");
         if segments.is_empty() {
             return rsx! {};
