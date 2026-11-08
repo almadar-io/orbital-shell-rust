@@ -2775,11 +2775,28 @@ mod tests {
         program
     }
 
+    /// `chained_shelf_program(false)` whose `Seeder` is a page trait with an `INIT` of its own, as the catalog composes
+    /// std-mock-page-seed: it is a seed of the mount and its `$MOUNT` listener at once.
+    fn page_seeder_shelf_program() -> serde_json::Value {
+        let mut program = chained_shelf_program(false);
+        let seeder = &mut program["orbitals"][0]["traits"][0]["stateMachine"];
+        seeder["events"].as_array_mut().unwrap().push(serde_json::json!({ "key": "INIT", "name": "Init" }));
+        seeder["transitions"].as_array_mut().unwrap().push(serde_json::json!({ "from": "idle", "to": "idle", "event": "INIT", "effects": [] }));
+        program["orbitals"][0]["pages"][0]["traits"] = serde_json::json!([{ "ref": "Seeder" }, { "ref": "Shelf" }]);
+        program
+    }
+
+    #[test]
+    fn a_hosted_guest_runs_the_mount_listener_it_also_seeds_before_any_seed_lifecycle() {
+        let answer = guest_open_answer(page_seeder_shelf_program());
+        assert!(answer.contains("SEEN") && answer.contains("c1"), "the Seeder's $MOUNT work is not held for its own INIT (EXEC-SEED-7 precedes EXEC-SEED-2): {answer}");
+    }
+
     #[test]
     fn a_hosted_guest_mounts_its_page_after_a_chain_whose_step_waits_on_a_keyed_os_ask() {
         let answer = guest_open_answer_with(
             env_chained_shelf_program(),
-            serde_json::json!({ "env": ["HOME"], "kernel": { "guest": ["spawn"] } }),
+            serde_json::json!({ "env": ["HOME"], "kernel": [{ "target": "guest", "kinds": ["spawn"] }] }),
             serde_json::json!({ "route": "/shelf", "declared": true, "grants": { "env": ["HOME"] } }),
         );
         assert!(answer.contains("SEEN") && answer.contains("c1"), "the sign-in step's keyed os/getenv is part of the listener's lineage (EXEC-SEED-7): {answer}");
@@ -3071,6 +3088,9 @@ mod tests {
             { "name": "items", "type": "array", "default": items }
         ]);
         orbital["traits"][0]["stateMachine"]["transitions"][1]["effects"] = serde_json::Value::Array(done);
+        // The page shows both fields, so a frame carries them (EXEC-DIST-7: a frame ships only what the browser reads).
+        orbital["traits"][0]["stateMachine"]["transitions"][0]["effects"].as_array_mut().unwrap().insert(0, serde_json::json!(["render-ui", "main", { "type": "stack", "children": [
+            { "type": "typography", "content": "@entity.count" }, { "type": "data-list", "items": "@entity.items" }] }]));
         serde_json::from_value(program).expect("the program parses")
     }
 
