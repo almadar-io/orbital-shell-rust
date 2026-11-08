@@ -150,6 +150,7 @@ pub fn launch_cfg_with_props<P: Clone + 'static, M: 'static>(
             net_provider,
             html_parser_provider,
             navigation_provider,
+            font_ctx: config.font_ctx.take(),
             ..Default::default()
         },
     );

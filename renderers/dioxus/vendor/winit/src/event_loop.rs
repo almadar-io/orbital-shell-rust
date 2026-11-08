@@ -228,7 +228,11 @@ impl<T> EventLoop<T> {
     {
         let _span = tracing::debug_span!("winit::EventLoop::run").entered();
 
-        self.event_loop.run(event_handler)
+        let result = self.event_loop.run(event_handler);
+        // An Android activity re-created in the same process builds a new loop once this one has run.
+        #[cfg(android_platform)]
+        EVENT_LOOP_CREATED.store(false, Ordering::Relaxed);
+        result
     }
 
     /// Run the application with the event loop on the calling thread.
@@ -262,7 +266,10 @@ impl<T> EventLoop<T> {
     #[inline]
     #[cfg(not(all(web_platform, target_feature = "exception-handling")))]
     pub fn run_app<A: ApplicationHandler<T>>(self, app: &mut A) -> Result<(), EventLoopError> {
-        self.event_loop.run(|event, event_loop| dispatch_event_for_app(app, event_loop, event))
+        let result = self.event_loop.run(|event, event_loop| dispatch_event_for_app(app, event_loop, event));
+        #[cfg(android_platform)]
+        EVENT_LOOP_CREATED.store(false, Ordering::Relaxed);
+        result
     }
 
     /// Creates an [`EventLoopProxy`] that can be used to dispatch user events

@@ -82,7 +82,9 @@ pub fn open_window(css_texts: Vec<String>, title: &str) {
     set_reduced_motion(system_reduced_motion());
 
     let attrs = dioxus_native::WindowAttributes::default().with_title(title.to_string());
-    let cfg = dioxus_native::Config::new().with_window_attributes(attrs);
+    let cfg = dioxus_native::Config::new()
+        .with_window_attributes(attrs)
+        .with_font_context(crate::offscreen::embedded_font_context());
     dioxus_native::set_layout_hook(Some(crate::video_overlay::sync_layout));
     dioxus_native::set_visibility_hook(Some(crate::visibility::sync_layout));
     // Game tick driver: the frame hook (vendored dioxus-native patch,

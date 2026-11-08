@@ -68,14 +68,15 @@ pub fn create_default_event_loop<Event>() -> EventLoop<Event> {
     event_loop
 }
 
+// A re-created activity runs `android_main` again in the same process, so the app is replaced, not set once.
 #[cfg(target_os = "android")]
-static ANDROID_APP: std::sync::OnceLock<android_activity::AndroidApp> = std::sync::OnceLock::new();
+static ANDROID_APP: std::sync::RwLock<Option<android_activity::AndroidApp>> = std::sync::RwLock::new(None);
 
 #[cfg(target_os = "android")]
 #[cfg_attr(docsrs, doc(cfg(target_os = "android")))]
 /// Set the current [`AndroidApp`](android_activity::AndroidApp).
 pub fn set_android_app(app: android_activity::AndroidApp) {
-    ANDROID_APP.set(app).unwrap()
+    *ANDROID_APP.write().unwrap_or_else(|poison| poison.into_inner()) = Some(app);
 }
 
 #[cfg(target_os = "android")]
@@ -83,7 +84,11 @@ pub fn set_android_app(app: android_activity::AndroidApp) {
 /// Get the current [`AndroidApp`](android_activity::AndroidApp).
 /// This will panic if the android activity has not been setup with [`set_android_app`].
 pub fn current_android_app() -> android_activity::AndroidApp {
-    ANDROID_APP.get().unwrap().clone()
+    ANDROID_APP
+        .read()
+        .unwrap_or_else(|poison| poison.into_inner())
+        .clone()
+        .expect("set_android_app before current_android_app")
 }
 
 pub struct BlitzShellProvider {

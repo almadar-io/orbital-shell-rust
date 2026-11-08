@@ -1012,6 +1012,7 @@ impl Host {
                 Some(frames) => EventResponse { success: true, frames: Some(frames), ..Default::default() },
                 None => EventResponse::error("this host keeps no frames for the session: mount again"),
             };
+            let answer = if flag("wire") { self.kernel.client_view(answer) } else { answer };
             return serde_json::to_value(&answer)
                 .and_then(serde_json::from_value)
                 .map_err(|e| (e.to_string(), "EVENT_PROCESSING_ERROR", 500));
