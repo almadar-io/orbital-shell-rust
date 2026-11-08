@@ -3,13 +3,16 @@
 //! no Rust highlighter is a dependency, so code paints as the web does before its highlighter loads.
 
 use crate::registry::{shared_root_attrs, DioxusPatternRegistry};
+use crate::renderer::number_value;
 use crate::renderer::{
     compute_line_diff, object_value, pattern_spec, typography_spec, DioxusPatternRenderer,
     DioxusView, EventSink, LineDiffKind, OwnedDioxusView, BOX_ATOM_BASE,
 };
+use dioxus::html::ScrollBehavior;
 use dioxus::prelude::*;
 use orbital_core::client::helpers::*;
 use orbital_core::Value;
+use std::rc::Rc;
 
 /// Dioxus renderer for the `code-block` pattern.
 pub struct CodeBlockRenderer;
@@ -146,6 +149,412 @@ fn numbered_lines(code: &str, style: &str, wrap: bool) -> Element {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum CaretShape {
+    Block,
+    Bar,
+    Underline,
+}
+
+#[derive(Clone, PartialEq, Debug)]
+struct BufferCell {
+    col: usize,
+    ch: char,
+    caret: Option<CaretShape>,
+    selected: bool,
+    syntax: Option<&'static str>,
+    annotation: Option<&'static str>,
+}
+
+const SYNTAX_TONES: [(&str, &str); 9] = [
+    ("keyword", "--color-primary"),
+    ("string", "--color-success"),
+    ("comment", "--color-muted-foreground"),
+    ("number", "--color-warning"),
+    ("type", "--color-info"),
+    ("function", "--color-accent"),
+    ("operator", "--color-secondary"),
+    ("punctuation", "--color-text-muted"),
+    ("variable", "--color-foreground"),
+];
+
+const ANNOTATION_TONES: [(&str, &str); 6] = [
+    ("search", "--color-primary"),
+    ("review", "--color-secondary"),
+    ("review-recent", "--color-accent"),
+    ("error", "--color-error"),
+    ("warning", "--color-warning"),
+    ("info", "--color-info"),
+];
+
+fn syntax_tone(tone: &str) -> Option<&'static str> {
+    SYNTAX_TONES
+        .iter()
+        .find(|(name, _)| *name == tone)
+        .map(|(name, _)| *name)
+}
+
+fn annotation_tone(tone: &str) -> Option<&'static str> {
+    ANNOTATION_TONES
+        .iter()
+        .find(|(name, _)| *name == tone)
+        .map(|(name, _)| *name)
+}
+
+fn tone_token(table: &[(&'static str, &'static str)], tone: &str) -> Option<&'static str> {
+    table
+        .iter()
+        .find(|(name, _)| *name == tone)
+        .map(|(_, token)| *token)
+}
+
+fn mix(token: &str, percent: u8) -> String {
+    format!("color-mix(in srgb, var({token}) {percent}%, transparent)")
+}
+
+fn position(props: &Value, row: &str, col: &str) -> Option<(usize, usize)> {
+    Some((
+        get_number(props, row).filter(|n| *n >= 0.0)? as usize,
+        get_number(props, col).filter(|n| *n >= 0.0)? as usize,
+    ))
+}
+
+fn caret_shape(props: &Value) -> CaretShape {
+    match get_string(props, "caret").as_deref() {
+        Some("bar") => CaretShape::Bar,
+        Some("underline") => CaretShape::Underline,
+        _ => CaretShape::Block,
+    }
+}
+
+fn buffer_lines(props: &Value) -> Vec<Vec<BufferCell>> {
+    let code = get_string_or(props, "code", "");
+    let cursor = props.get("cursor").and_then(|c| position(c, "row", "col"));
+    let shape = caret_shape(props);
+    let selection = props
+        .get("selection")
+        .filter(|s| s.as_object().is_some())
+        .and_then(|s| {
+            let from = position(s, "fromRow", "fromCol")?;
+            let to = position(s, "toRow", "toCol")?;
+            Some((
+                from.min(to),
+                from.max(to),
+                get_bool_or(s, "linewise", false),
+            ))
+        });
+    let decorations: Vec<((usize, usize), (usize, usize), &'static str, bool)> =
+        get_array(props, "decorations")
+            .iter()
+            .filter_map(|d| {
+                let from = position(d, "fromRow", "fromCol")?;
+                let to = position(d, "toRow", "toCol")?;
+                let tone = get_string(d, "tone")?;
+                match syntax_tone(&tone) {
+                    Some(known) => Some((from, to, known, true)),
+                    None => annotation_tone(&tone).map(|known| (from, to, known, false)),
+                }
+            })
+            .collect();
+    code.split('\n')
+        .enumerate()
+        .map(|(row, line)| {
+            let chars: Vec<char> = line.chars().collect();
+            chars
+                .into_iter()
+                .chain(std::iter::once(' '))
+                .enumerate()
+                .map(|(col, ch)| {
+                    let at = (row, col);
+                    let mut cell = BufferCell {
+                        col,
+                        ch,
+                        caret: (cursor == Some(at)).then_some(shape),
+                        selected: selection.is_some_and(|(min, max, linewise)| {
+                            if linewise {
+                                row >= min.0 && row <= max.0
+                            } else {
+                                at >= min && at <= max
+                            }
+                        }),
+                        syntax: None,
+                        annotation: None,
+                    };
+                    for (from, to, tone, is_syntax) in &decorations {
+                        if at >= *from && at < *to {
+                            if *is_syntax {
+                                cell.syntax = Some(*tone);
+                            } else {
+                                cell.annotation = Some(*tone);
+                            }
+                        }
+                    }
+                    cell
+                })
+                .collect()
+        })
+        .collect()
+}
+
+fn cell_style(cell: &BufferCell) -> String {
+    let mut style = String::new();
+    if let Some(token) = cell.syntax.and_then(|tone| tone_token(&SYNTAX_TONES, tone)) {
+        style.push_str(&format!("color:var({token});"));
+    }
+    if let Some(token) = cell
+        .annotation
+        .and_then(|tone| tone_token(&ANNOTATION_TONES, tone))
+    {
+        style.push_str(&format!("background-color:{};", mix(token, 35)));
+    }
+    if cell.selected {
+        style.push_str(&format!("background-color:{};", mix("--color-primary", 40)));
+    }
+    match cell.caret {
+        Some(CaretShape::Block) => style
+            .push_str("background-color:var(--color-foreground);color:var(--color-background);"),
+        Some(CaretShape::Bar) => {
+            style.push_str("border-left:2px solid var(--color-foreground);margin-left:-2px;")
+        }
+        Some(CaretShape::Underline) => {
+            style.push_str("border-bottom:2px solid var(--color-foreground);")
+        }
+        None => {}
+    }
+    style
+}
+
+fn caret_name(shape: CaretShape) -> &'static str {
+    match shape {
+        CaretShape::Block => "block",
+        CaretShape::Bar => "bar",
+        CaretShape::Underline => "underline",
+    }
+}
+
+fn gutter_labels(count: usize, cursor_row: Option<usize>, relative: bool) -> Vec<String> {
+    (0..count)
+        .map(|row| match (relative, cursor_row) {
+            (true, Some(at)) if row != at => row.abs_diff(at).to_string(),
+            _ => (row + 1).to_string(),
+        })
+        .collect()
+}
+
+struct PopoverModel {
+    from: (usize, usize),
+    title: String,
+    sections: Vec<(String, Vec<String>)>,
+    busy: bool,
+}
+
+fn popover_model(props: &Value) -> Option<PopoverModel> {
+    let popover = props.get("popover").filter(|p| p.as_object().is_some())?;
+    Some(PopoverModel {
+        from: position(popover, "fromRow", "fromCol")?,
+        title: get_string_or(popover, "title", ""),
+        sections: get_array(popover, "sections")
+            .iter()
+            .map(|section| {
+                (
+                    get_string_or(section, "heading", ""),
+                    get_string_array(section, "lines"),
+                )
+            })
+            .collect(),
+        busy: get_bool_or(popover, "busy", false),
+    })
+}
+
+fn emit_to(sink: Option<EventSink>, event: &Option<String>, payload: Value) {
+    if let (Some(sink), Some(event)) = (sink, event) {
+        sink.call((event.clone(), payload));
+    }
+}
+
+fn cell_payload(editor_id: &str, row: usize, col: usize) -> Value {
+    object_value([
+        ("editorId", Value::string(editor_id)),
+        ("row", number_value(row as f64)),
+        ("col", number_value(col as f64)),
+    ])
+}
+
+fn buffer_surface(
+    props: &Value,
+    sink: Option<EventSink>,
+    mut surface: Signal<Option<Rc<MountedData>>>,
+    mut hovered: Signal<Option<(usize, usize)>>,
+) -> Element {
+    let lines = buffer_lines(props);
+    let cursor_row = props
+        .get("cursor")
+        .and_then(|c| position(c, "row", "col"))
+        .map(|(row, _)| row);
+    let editor_id = get_string_or(props, "editorId", "");
+    let on_key = get_string(props, "onKey");
+    let on_down = get_string(props, "onPointerDown");
+    let on_hover = get_string(props, "onHover");
+    let on_focus = get_string_or(props, "onEditorFocus", "EDITOR_FOCUS");
+    let on_blur = get_string_or(props, "onEditorBlur", "EDITOR_BLUR");
+    let relative = get_bool_or(props, "relativeLineNumbers", false);
+    let gutter = (get_bool_or(props, "lineNumbers", false) || relative)
+        .then(|| gutter_labels(lines.len(), cursor_row, relative));
+    let popover = popover_model(props);
+    let last_row = lines.len().saturating_sub(1);
+    let last_len = lines
+        .last()
+        .map(|line| line.len().saturating_sub(1))
+        .unwrap_or(0);
+    let class_name = get_string_or(props, "className", "");
+    let height = max_height(props);
+    let label = get_string_or(props, "title", "Code");
+
+    let popover_top = popover.as_ref().map(|note| (note.from.0 + 1) as f64 * 1.6);
+    let popover_left = popover.as_ref().map(|note| note.from.1);
+    let focus_surface = Callback::new(move |_: ()| {
+        if let Some(handle) = surface.peek().clone() {
+            spawn(async move {
+                if let Err(error) = handle.set_focus(true).await {
+                    tracing::error!(%error, "code buffer focus");
+                }
+            });
+        }
+    });
+    let press = {
+        let editor_id = editor_id.clone();
+        let on_down = on_down.clone();
+        Callback::new(move |(row, col): (usize, usize)| {
+            focus_surface.call(());
+            emit_to(sink, &on_down, cell_payload(&editor_id, row, col));
+        })
+    };
+    let hover = {
+        let editor_id = editor_id.clone();
+        Callback::new(move |(row, col): (usize, usize)| {
+            if *hovered.peek() == Some((row, col)) {
+                return;
+            }
+            hovered.set(Some((row, col)));
+            emit_to(sink, &on_hover, cell_payload(&editor_id, row, col));
+        })
+    };
+    let key_editor = editor_id.clone();
+    let focus_editor = editor_id.clone();
+    let blur_editor = editor_id.clone();
+    let focus_event = Some(on_focus);
+    let blur_event = Some(on_blur);
+
+    let class = format!("{CARD} overflow-hidden {class_name}");
+    rsx! {
+        div { class: "{class}", style: "height:auto", ..shared_root_attrs(props),
+            div {
+                class: "{BOX_ATOM_BASE} overflow-auto flex flex-row",
+                style: "max-height:{height};font-family:{MONO_FONT};font-size:12px;line-height:1.6;direction:ltr;outline:none",
+                role: "textbox", tabindex: "0", aria_multiline: "true", aria_label: "{label}", "data-code-buffer": "true",
+                onmounted: move |event| surface.set(Some(event.data())),
+                onfocus: move |_| emit_to(sink, &focus_event, object_value([("editorId", Value::string(focus_editor.as_str()))])),
+                onblur: move |_| emit_to(sink, &blur_event, object_value([("editorId", Value::string(blur_editor.as_str()))])),
+                onkeydown: move |event| {
+                    if event.is_composing() {
+                        return;
+                    }
+                    event.prevent_default();
+                    let modifiers = event.modifiers();
+                    emit_to(sink, &on_key, object_value([
+                        ("editorId", Value::string(key_editor.as_str())),
+                        ("key", Value::string(event.key().to_string())),
+                        ("code", Value::string(event.code().to_string())),
+                        ("ctrl", Value::Bool(modifiers.ctrl())),
+                        ("alt", Value::Bool(modifiers.alt())),
+                        ("shift", Value::Bool(modifiers.shift())),
+                        ("meta", Value::Bool(modifiers.meta())),
+                        ("repeat", Value::Bool(event.is_auto_repeating())),
+                    ]));
+                },
+                onmousedown: move |_| press.call((last_row, last_len)),
+                if let Some(labels) = gutter.as_ref() {
+                    div { class: "{BOX_ATOM_BASE} flex-shrink-0 select-none text-muted-foreground", style: "text-align:right;padding:0 1rem 0 0.5rem;font-variant-numeric:tabular-nums", "data-code-gutter": "true",
+                        for (row, text) in labels.iter().enumerate() {
+                            div { key: "{row}", style: "height:1.6em", "data-gutter-row": "{row}",
+                                onmousedown: move |event| event.stop_propagation(),
+                                "{text}"
+                            }
+                        }
+                    }
+                }
+                div { style: "position:relative;flex:1;min-width:max-content;white-space:pre",
+                    for (row, cells) in lines.iter().enumerate() {
+                        div {
+                            key: "{row}-{cursor_row == Some(row)}",
+                            style: "height:1.6em;white-space:pre", "data-row": "{row}",
+                            onmounted: move |event| {
+                                if cursor_row == Some(row) {
+                                    let handle = event.data();
+                                    spawn(async move {
+                                        if let Err(error) = handle.scroll_to(ScrollBehavior::Instant).await {
+                                            tracing::error!(%error, "code buffer scroll");
+                                        }
+                                    });
+                                }
+                            },
+                            onmousedown: {
+                                let end = cells.len() - 1;
+                                move |event| {
+                                    event.stop_propagation();
+                                    press.call((row, end));
+                                }
+                            },
+                            for cell in cells.iter() {
+                                span {
+                                    key: "{cell.col}",
+                                    style: "{cell_style(cell)}",
+                                    "data-row": "{row}", "data-col": "{cell.col}",
+                                    "data-caret": cell.caret.map(caret_name),
+                                    "data-selected": cell.selected.then_some("true"),
+                                    "data-syntax": cell.syntax,
+                                    "data-annotation": cell.annotation,
+                                    onmousedown: {
+                                        let col = cell.col;
+                                        move |event| {
+                                            event.stop_propagation();
+                                            press.call((row, col));
+                                        }
+                                    },
+                                    onmousemove: {
+                                        let col = cell.col;
+                                        move |_| hover.call((row, col))
+                                    },
+                                    "{cell.ch}"
+                                }
+                            }
+                        }
+                    }
+                    if let Some(note) = popover.as_ref() {
+                        div {
+                            class: "surface-content rounded-container shadow-lg border border-border p-card-sm",
+                            style: "position:absolute;z-index:50;top:{popover_top.unwrap_or(0.0)}em;left:{popover_left.unwrap_or(0)}ch;min-width:16ch;max-width:48ch;white-space:normal;pointer-events:none",
+                            role: "note", "data-code-popover": "true",
+                            div { class: "font-bold text-foreground", "{note.title}" }
+                            for (index, (heading, body)) in note.sections.iter().enumerate() {
+                                div { key: "{index}", "data-popover-section": "{index}",
+                                    div { class: "text-muted-foreground", "{heading}" }
+                                    for (at, line) in body.iter().enumerate() {
+                                        div { key: "{at}", class: "text-foreground", "{line}" }
+                                    }
+                                }
+                            }
+                            if note.busy {
+                                div { class: "text-muted-foreground", "data-popover-busy": "true", "..." }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 #[allow(non_snake_case)]
 fn Block(input: BlockProps) -> Element {
     let view = input.view.as_view();
@@ -153,6 +562,8 @@ fn Block(input: BlockProps) -> Element {
     let registry = &input.registry;
     let mut wrap = use_signal(|| get_bool_or(props, "wordWrap", false));
     let mut active_file = use_signal(|| 0usize);
+    let surface = use_signal(|| None::<Rc<MountedData>>);
+    let hovered = use_signal(|| None::<(usize, usize)>);
     let relay: EventSink =
         Callback::new(
             move |(event, payload): (String, Value)| match event.as_str() {
@@ -199,6 +610,14 @@ fn Block(input: BlockProps) -> Element {
             ],
         );
         return render(&spec);
+    }
+
+    if props
+        .get("cursor")
+        .is_some_and(|cursor| cursor.as_object().is_some())
+    {
+        let sink = view.sink;
+        return buffer_surface(props, sink, surface, hovered);
     }
 
     let language = get_string_or(props, "language", "text");
@@ -496,5 +915,381 @@ impl DioxusPatternRenderer for CodeBlockRenderer {
         registry: &DioxusPatternRegistry,
     ) -> Element {
         rsx! { Block { props: props.clone(), view: view.to_owned(), registry: registry.clone() } }
+    }
+}
+
+#[cfg(test)]
+mod buffer_tests {
+    use super::*;
+
+    fn props(json: serde_json::Value) -> Value {
+        serde_json::from_value(json).unwrap()
+    }
+
+    fn painted(lines: &[Vec<BufferCell>], row: usize, col: usize) -> &BufferCell {
+        &lines[row][col]
+    }
+
+    #[test]
+    fn buffer_caret_block_covers_the_character_at_col() {
+        let lines = buffer_lines(&props(
+            serde_json::json!({"code": "ab\ncde", "cursor": {"row": 1, "col": 2}, "caret": "block"}),
+        ));
+        let cell = painted(&lines, 1, 2);
+        assert_eq!((cell.ch, cell.caret), ('e', Some(CaretShape::Block)));
+        assert!(cell_style(cell).contains("background-color:var(--color-foreground)"));
+        let carets = lines.iter().flatten().filter(|c| c.caret.is_some()).count();
+        assert_eq!(carets, 1);
+    }
+
+    #[test]
+    fn buffer_caret_absent_shape_is_block_and_bar_underline_follow_the_prop() {
+        let base = |caret: serde_json::Value| {
+            let mut json = serde_json::json!({"code": "ab\ncde", "cursor": {"row": 1, "col": 2}});
+            json["caret"] = caret;
+            buffer_lines(&props(json))
+        };
+        assert_eq!(
+            base(serde_json::Value::Null)[1][2].caret,
+            Some(CaretShape::Block)
+        );
+        let bar = base(serde_json::json!("bar"));
+        assert_eq!(
+            (bar[1][2].ch, bar[1][2].caret),
+            ('e', Some(CaretShape::Bar))
+        );
+        assert!(cell_style(&bar[1][2]).contains("border-left"));
+        let underline = base(serde_json::json!("underline"));
+        assert!(cell_style(&underline[1][2]).contains("border-bottom"));
+        assert!(!cell_style(&underline[1][2]).contains("border-left"));
+    }
+
+    #[test]
+    fn buffer_caret_at_line_end_is_a_space_width_block_after_the_last_char() {
+        let lines = buffer_lines(&props(
+            serde_json::json!({"code": "ab\ncde", "cursor": {"row": 0, "col": 2}, "caret": "block"}),
+        ));
+        assert_eq!(lines[0].len(), 3);
+        assert_eq!(
+            (lines[0][2].ch, lines[0][2].caret),
+            (' ', Some(CaretShape::Block))
+        );
+        assert_eq!(lines[0][1].caret, None);
+    }
+
+    #[test]
+    fn buffer_selection_linewise_paints_every_cell_of_both_rows() {
+        let lines = buffer_lines(&props(serde_json::json!({
+            "code": "ab\ncd\nef", "cursor": {"row": 1, "col": 0},
+            "selection": {"fromRow": 1, "fromCol": 1, "toRow": 0, "toCol": 0, "linewise": true}
+        })));
+        assert!(lines[0].iter().all(|c| c.selected));
+        assert!(lines[1].iter().all(|c| c.selected));
+        assert!(lines[2].iter().all(|c| !c.selected));
+    }
+
+    #[test]
+    fn buffer_selection_charwise_is_inclusive_of_the_max_end_and_null_paints_none() {
+        let lines = buffer_lines(&props(serde_json::json!({
+            "code": "abcd", "cursor": {"row": 0, "col": 2},
+            "selection": {"fromRow": 0, "fromCol": 1, "toRow": 0, "toCol": 2, "linewise": false}
+        })));
+        let selected: String = lines[0]
+            .iter()
+            .filter(|c| c.selected)
+            .map(|c| c.ch)
+            .collect();
+        assert_eq!(selected, "bc");
+        let none = buffer_lines(&props(
+            serde_json::json!({"code": "abcd", "cursor": {"row": 0, "col": 0}, "selection": null}),
+        ));
+        assert!(none[0].iter().all(|c| !c.selected));
+    }
+
+    #[test]
+    fn buffer_decorations_syntax_colors_text_annotation_paints_background() {
+        let lines = buffer_lines(&props(serde_json::json!({
+            "code": "fun x", "cursor": {"row": 0, "col": 5},
+            "decorations": [
+                {"id": "k", "fromRow": 0, "fromCol": 0, "toRow": 0, "toCol": 3, "tone": "keyword"},
+                {"id": "r", "fromRow": 0, "fromCol": 4, "toRow": 0, "toCol": 5, "tone": "review"},
+                {"id": "u", "fromRow": 0, "fromCol": 3, "toRow": 0, "toCol": 4, "tone": "no-such-tone"}
+            ]
+        })));
+        for col in 0..3 {
+            let style = cell_style(&lines[0][col]);
+            assert!(style.contains("color:var(--color-primary)"), "{style}");
+            assert!(!style.contains("background-color"), "{style}");
+        }
+        let review = cell_style(&lines[0][4]);
+        assert!(
+            review.contains("background-color:color-mix")
+                && review.contains("var(--color-secondary)"),
+            "{review}"
+        );
+        assert!(!review.contains(";color:"), "{review}");
+        assert_eq!(cell_style(&lines[0][3]), "");
+    }
+
+    #[test]
+    fn buffer_later_decoration_paints_over_earlier() {
+        let lines = buffer_lines(&props(serde_json::json!({
+            "code": "ab", "cursor": {"row": 0, "col": 0},
+            "decorations": [
+                {"id": "1", "fromRow": 0, "fromCol": 0, "toRow": 0, "toCol": 2, "tone": "keyword"},
+                {"id": "2", "fromRow": 0, "fromCol": 0, "toRow": 0, "toCol": 1, "tone": "string"}
+            ]
+        })));
+        assert_eq!(lines[0][0].syntax, Some("string"));
+        assert_eq!(lines[0][1].syntax, Some("keyword"));
+    }
+
+    #[test]
+    fn buffer_popover_model_carries_title_sections_busy_and_null_is_none() {
+        let note = popover_model(&props(serde_json::json!({
+            "popover": {"fromRow": 1, "fromCol": 2, "toRow": 1, "toCol": 4, "title": "Note",
+                "sections": [{"heading": "Why", "lines": ["a", "b"]}], "busy": true}
+        })))
+        .unwrap();
+        assert_eq!(
+            (note.from, note.title.as_str(), note.busy),
+            ((1, 2), "Note", true)
+        );
+        assert_eq!(
+            note.sections,
+            vec![("Why".to_string(), vec!["a".to_string(), "b".to_string()])]
+        );
+        assert!(popover_model(&props(serde_json::json!({"popover": null}))).is_none());
+        assert!(popover_model(&props(serde_json::json!({}))).is_none());
+    }
+
+    #[test]
+    fn buffer_relative_gutter_shows_distance_and_absolute_on_the_cursor_row() {
+        assert_eq!(gutter_labels(5, Some(2), true), ["2", "1", "3", "1", "2"]);
+        assert_eq!(gutter_labels(3, Some(1), false), ["1", "2", "3"]);
+    }
+}
+
+#[cfg(all(test, feature = "native", not(target_arch = "wasm32")))]
+mod buffer_dom_tests {
+    use super::*;
+    use crate::renderer::DioxusView;
+    use blitz_dom::{Document as _, DocumentConfig};
+    use blitz_traits::events::{BlitzKeyEvent, KeyState, MouseEventButtons, UiEvent};
+    use blitz_traits::shell::{ColorScheme, Viewport};
+    use dioxus_native::DioxusDocument;
+    use keyboard_types::{Code, Key, Location, Modifiers};
+    use orbital_core::ValueMap;
+    use std::cell::RefCell;
+    use std::collections::HashMap;
+
+    thread_local! {
+        static EVENTS: RefCell<Vec<(String, Value)>> = const { RefCell::new(Vec::new()) };
+        static PROPS: RefCell<Option<Value>> = const { RefCell::new(None) };
+    }
+
+    fn app() -> Element {
+        let props = PROPS.with(|p| p.borrow().clone().unwrap());
+        let entities = HashMap::new();
+        let trait_content = ValueMap::new();
+        let sink = Callback::new(|event| EVENTS.with(|events| events.borrow_mut().push(event)));
+        let view = DioxusView {
+            trait_name: "Code",
+            orbital_name: "Code",
+            current_state: "idle",
+            entities: &entities,
+            trait_content: &trait_content,
+            source_trait: None,
+            sink: Some(sink),
+            source_sink: Callback::new(move |_| sink),
+            navigate: None,
+            dock: None,
+            viewport_width: None,
+            canvas_theme: None,
+            theme_mode: None,
+            toggle_theme: None,
+        };
+        let mut registry = DioxusPatternRegistry::new();
+        registry.register(Box::new(CodeBlockRenderer));
+        registry.render_spec(&props, None, &view)
+    }
+
+    fn mount(json: serde_json::Value) -> DioxusDocument {
+        EVENTS.with(|events| events.borrow_mut().clear());
+        PROPS.with(|p| *p.borrow_mut() = Some(serde_json::from_value(json).unwrap()));
+        let mut doc = DioxusDocument::new(
+            dioxus_core::VirtualDom::new(app),
+            DocumentConfig {
+                viewport: Some(Viewport::new(400, 300, 1.0, ColorScheme::Light)),
+                ..Default::default()
+            },
+        );
+        doc.initial_build();
+        settle(&mut doc);
+        doc
+    }
+
+    fn settle(doc: &mut DioxusDocument) {
+        for _ in 0..4 {
+            if !doc.poll(None) {
+                break;
+            }
+        }
+        doc.resolve(0.0);
+    }
+
+    fn mouse_at(doc: &mut DioxusDocument, selector: &str, down: bool) {
+        let id = doc.query_selector(selector).unwrap().unwrap();
+        let mut mouse = doc
+            .get_node(id)
+            .unwrap()
+            .synthetic_click_event_data(Modifiers::default());
+        mouse.buttons = MouseEventButtons::None;
+        if down {
+            mouse.buttons = MouseEventButtons::Primary;
+            doc.handle_ui_event(UiEvent::MouseDown(mouse));
+        } else {
+            doc.handle_ui_event(UiEvent::MouseMove(mouse));
+        }
+        settle(doc);
+    }
+
+    fn events() -> Vec<(String, Value)> {
+        EVENTS.with(|events| events.borrow().clone())
+    }
+
+    fn buffer(extra: serde_json::Value) -> serde_json::Value {
+        let mut json = serde_json::json!({
+            "type": "code-block", "code": "ab\ncde", "editorId": "ed1",
+            "cursor": {"row": 1, "col": 2},
+            "onKey": "KEY", "onPointerDown": "DOWN", "onHover": "HOVER"
+        });
+        for (key, value) in extra.as_object().unwrap() {
+            json[key] = value.clone();
+        }
+        json
+    }
+
+    #[test]
+    fn buffer_dom_mode_is_off_without_cursor() {
+        let mut off = mount(serde_json::json!({"type": "code-block", "code": "ab\ncde"}));
+        assert!(off.query_selector("[data-code-buffer]").unwrap().is_none());
+        let mut on = mount(buffer(serde_json::json!({})));
+        assert!(on.query_selector("[data-code-buffer]").unwrap().is_some());
+        assert!(on
+            .query_selector("[data-row='1'][data-col='2'][data-caret=block]")
+            .unwrap()
+            .is_some());
+    }
+
+    #[test]
+    fn buffer_dom_popover_renders_title_sections_busy_and_null_renders_nothing() {
+        let note = serde_json::json!({"popover": {"fromRow": 0, "fromCol": 1, "toRow": 0, "toCol": 2,
+            "title": "Hint", "sections": [{"heading": "Why", "lines": ["line one"]}], "busy": true}});
+        let mut doc = mount(buffer(note));
+        assert!(doc.query_selector("[data-code-popover]").unwrap().is_some());
+        assert!(doc
+            .query_selector("[data-popover-section='0']")
+            .unwrap()
+            .is_some());
+        assert!(doc.query_selector("[data-popover-busy]").unwrap().is_some());
+        let mut idle = mount(buffer(serde_json::json!({"popover": null})));
+        assert!(idle
+            .query_selector("[data-code-popover]")
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
+    fn buffer_dom_relative_gutter_labels() {
+        let mut doc = mount(buffer(serde_json::json!({
+            "code": "a\nb\nc\nd\ne", "cursor": {"row": 2, "col": 0},
+            "lineNumbers": true, "relativeLineNumbers": true
+        })));
+        let mut labels = Vec::new();
+        for row in 0..5 {
+            let id = doc
+                .query_selector(&format!("[data-gutter-row='{row}']"))
+                .unwrap()
+                .unwrap();
+            labels.push(doc.get_node(id).unwrap().text_content());
+        }
+        assert_eq!(labels, ["2", "1", "3", "1", "2"]);
+    }
+
+    #[test]
+    fn buffer_dom_keydown_emits_on_key_with_every_field() {
+        let mut doc = mount(buffer(serde_json::json!({})));
+        let surface = doc.query_selector("[data-code-buffer]").unwrap().unwrap();
+        doc.set_focus_to(surface);
+        doc.handle_ui_event(UiEvent::KeyDown(BlitzKeyEvent {
+            key: Key::Character("x".into()),
+            code: Code::KeyX,
+            modifiers: Modifiers::CONTROL | Modifiers::SHIFT,
+            location: Location::Standard,
+            is_auto_repeating: true,
+            is_composing: false,
+            state: KeyState::Pressed,
+            text: None,
+        }));
+        settle(&mut doc);
+        let seen = events();
+        assert_eq!(seen.len(), 1);
+        assert_eq!(seen[0].0, "KEY");
+        let payload = &seen[0].1;
+        assert_eq!(get_string(payload, "editorId").as_deref(), Some("ed1"));
+        assert_eq!(get_string(payload, "key").as_deref(), Some("x"));
+        assert_eq!(get_string(payload, "code").as_deref(), Some("KeyX"));
+        for (field, expected) in [
+            ("ctrl", true),
+            ("alt", false),
+            ("shift", true),
+            ("meta", false),
+            ("repeat", true),
+        ] {
+            assert_eq!(get_bool(payload, field), Some(expected), "{field}");
+        }
+    }
+
+    #[test]
+    fn buffer_dom_composing_keydown_emits_nothing() {
+        let mut doc = mount(buffer(serde_json::json!({})));
+        let surface = doc.query_selector("[data-code-buffer]").unwrap().unwrap();
+        doc.set_focus_to(surface);
+        doc.handle_ui_event(UiEvent::KeyDown(BlitzKeyEvent {
+            key: Key::Character("x".into()),
+            code: Code::KeyX,
+            modifiers: Modifiers::default(),
+            location: Location::Standard,
+            is_auto_repeating: false,
+            is_composing: true,
+            state: KeyState::Pressed,
+            text: None,
+        }));
+        settle(&mut doc);
+        assert!(events().is_empty());
+    }
+
+    #[test]
+    fn buffer_dom_press_emits_on_pointer_down_and_hover_once_per_cell() {
+        let mut doc = mount(buffer(serde_json::json!({})));
+        mouse_at(&mut doc, "[data-row='1'][data-col='1']", true);
+        let seen = events();
+        assert_eq!(seen.len(), 1);
+        assert_eq!(seen[0].0, "DOWN");
+        assert_eq!(get_number(&seen[0].1, "row"), Some(1.0));
+        assert_eq!(get_number(&seen[0].1, "col"), Some(1.0));
+        assert_eq!(get_string(&seen[0].1, "editorId").as_deref(), Some("ed1"));
+
+        EVENTS.with(|events| events.borrow_mut().clear());
+        mouse_at(&mut doc, "[data-row='0'][data-col='1']", false);
+        mouse_at(&mut doc, "[data-row='0'][data-col='1']", false);
+        let hovers: Vec<_> = events()
+            .into_iter()
+            .filter(|(name, _)| name == "HOVER")
+            .collect();
+        assert_eq!(hovers.len(), 1);
+        assert_eq!(get_number(&hovers[0].1, "row"), Some(0.0));
+        assert_eq!(get_number(&hovers[0].1, "col"), Some(1.0));
     }
 }

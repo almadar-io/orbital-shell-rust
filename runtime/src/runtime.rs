@@ -2734,8 +2734,79 @@ mod tests {
         })
     }
 
+    /// `shelf_program(true)` whose `Seeder` first dispatches, keyed, into a `Signer` in a `seed-x` session (`input` as given)
+    /// and only on its answer dispatches the write, as std-mock-seed signs a writer in before its chunk.
+    fn chained_shelf_program(input: bool) -> serde_json::Value {
+        let mut program = shelf_program(true);
+        let traits = program["orbitals"][0]["traits"].as_array_mut().unwrap();
+        traits[0]["stateMachine"] = serde_json::json!({
+            "states": [{ "name": "idle", "isInitial": true }],
+            "events": [{ "key": "SEED_PAGE", "name": "Seed page" }, { "key": "SIGNED", "name": "Signed" }, { "key": "SEEDED", "name": "Seeded" }],
+            "transitions": [
+                { "from": "idle", "to": "idle", "event": "SEED_PAGE", "effects": [["program/dispatch", "Shelf.Signer.ACT", {},
+                    { "orbital": "Shelf", "targetTrait": "Signer", "event": "ACT", "clientId": "seed-x", "input": input, "wire": true },
+                    { "key": "seed-signin", "emit": { "success": "SIGNED", "failure": "SEEDED" } }]] },
+                { "from": "idle", "to": "idle", "event": "SIGNED", "effects": [["program/dispatch", "Shelf.Writer.WRITE", {},
+                    { "orbital": "Shelf", "targetTrait": "Writer", "event": "WRITE", "clientId": "seed-x", "wire": true },
+                    { "key": "seed-write", "emit": { "success": "SEEDED", "failure": "SEEDED" } }]] },
+                { "from": "idle", "to": "idle", "event": "SEEDED", "effects": [] }]
+        });
+        traits.push(serde_json::json!({
+            "name": "Signer", "linkedEntity": "Card",
+            "stateMachine": { "states": [{ "name": "idle", "isInitial": true }],
+                "events": [{ "key": "ACT", "name": "Act", "input": input }], "transitions": [{ "from": "idle", "to": "idle", "event": "ACT", "effects": [] }] }
+        }));
+        program
+    }
+
+    /// `chained_shelf_program(true)` whose `Signer` answers only after a keyed `os/getenv` of its own, as std-dev-personas
+    /// reads the emulator host before it signs a seed session in; the guest is granted that variable.
+    fn env_chained_shelf_program() -> serde_json::Value {
+        let mut program = chained_shelf_program(true);
+        let signer = &mut program["orbitals"][0]["traits"].as_array_mut().unwrap()[3];
+        signer["stateMachine"] = serde_json::json!({ "states": [{ "name": "idle", "isInitial": true }],
+            "events": [{ "key": "ACT", "name": "Act", "input": true }, { "key": "GOT", "name": "Got" }, { "key": "SIGNED_IN", "name": "Signed in" }],
+            "transitions": [
+                { "from": "idle", "to": "idle", "event": "ACT", "effects": [["os/getenv", "HOME", { "key": "who", "emit": { "success": "GOT", "failure": "GOT" } }]] },
+                { "from": "idle", "to": "idle", "event": "GOT", "effects": [["emit", "SIGNED_IN", {}]] },
+                { "from": "idle", "to": "idle", "event": "SIGNED_IN", "effects": [] }] });
+        signer["emits"] = serde_json::json!([{ "event": "SIGNED_IN" }]);
+        program["orbitals"][0]["osGrants"] = serde_json::json!({ "env": ["HOME"] });
+        program
+    }
+
+    #[test]
+    fn a_hosted_guest_mounts_its_page_after_a_chain_whose_step_waits_on_a_keyed_os_ask() {
+        let answer = guest_open_answer_with(
+            env_chained_shelf_program(),
+            serde_json::json!({ "env": ["HOME"], "kernel": { "guest": ["spawn"] } }),
+            serde_json::json!({ "route": "/shelf", "declared": true, "grants": { "env": ["HOME"] } }),
+        );
+        assert!(answer.contains("SEEN") && answer.contains("c1"), "the sign-in step's keyed os/getenv is part of the listener's lineage (EXEC-SEED-7): {answer}");
+    }
+
     /// The `Shelf` program opened as a guest at `/shelf` by an `Opener` program served here; the open's answer as text.
     fn guest_shelf_open_answer(listening: bool) -> String {
+        guest_open_answer(shelf_program(listening))
+    }
+
+    fn guest_open_answer(program: serde_json::Value) -> String {
+        guest_open_answer_with(program, serde_json::json!({}), serde_json::json!({ "route": "/shelf" }))
+    }
+
+    #[test]
+    fn a_hosted_guest_mounts_its_page_after_a_chain_of_deferred_dispatches_its_mount_listener_made() {
+        let answer = guest_open_answer(chained_shelf_program(false));
+        assert!(answer.contains("SEEN") && answer.contains("c1"), "the page listed the row written after the listener's keyed sign-in step settled (EXEC-SEED-7): {answer}");
+    }
+
+    #[test]
+    fn a_hosted_guest_mounts_its_page_after_a_chain_through_an_input_dispatch() {
+        let answer = guest_open_answer(chained_shelf_program(true));
+        assert!(answer.contains("SEEN") && answer.contains("c1"), "an input: true step is part of the listener's lineage too (EXEC-SEED-7): {answer}");
+    }
+
+    fn guest_open_answer_with(program: serde_json::Value, opener_grants: serde_json::Value, open: serde_json::Value) -> String {
         let runtime = Host::new(Arc::new(DriverAdapter::memory())).shared();
         let opener: orbital_core::OrbitalSchema = serde_json::from_value(serde_json::json!({
             "name": "Opener",
@@ -2743,6 +2814,7 @@ mod tests {
             "orbitals": [{
                 "name": "Opener",
                 "entity": { "name": "Box", "persistence": "runtime", "fields": [{ "name": "id", "type": "string" }, { "name": "answer", "type": "string" }] },
+                "osGrants": opener_grants,
                 "traits": [{
                     "name": "Opener", "linkedEntity": "Box",
                     "stateMachine": {
@@ -2750,7 +2822,7 @@ mod tests {
                         "events": [{ "key": "OPEN", "name": "Open", "payloadSchema": [{ "name": "program", "type": "object", "required": true }] },
                             { "key": "OPENED", "name": "Opened" }, { "key": "FAILED", "name": "Failed" }],
                         "transitions": [
-                            { "from": "idle", "to": "idle", "event": "OPEN", "effects": [["program/open", "@payload.program", { "route": "/shelf" }, { "emit": { "success": "OPENED", "failure": "FAILED" } }]] },
+                            { "from": "idle", "to": "idle", "event": "OPEN", "effects": [["program/open", "@payload.program", open, { "emit": { "success": "OPENED", "failure": "FAILED" } }]] },
                             { "from": "idle", "to": "idle", "event": "OPENED", "effects": [["set", "@entity.answer", ["json/stringify", "@payload"]]] },
                             { "from": "idle", "to": "idle", "event": "FAILED", "effects": [["set", "@entity.answer", ["str/concat", "failed: ", ["json/stringify", "@payload"]]]] }]
                     }
@@ -2764,7 +2836,7 @@ mod tests {
         std::thread::spawn(move || {
             let args: Vec<Value> = [
                 serde_json::json!("Opener.Opener.OPEN"),
-                serde_json::json!({ "program": shelf_program(listening) }),
+                serde_json::json!({ "program": program }),
                 serde_json::json!({ "wire": true, "orbital": "Opener", "targetTrait": "Opener", "event": "OPEN", "clientId": "tab-g" }),
             ]
             .iter()
