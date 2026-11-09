@@ -764,6 +764,11 @@ impl Host {
                             kernel.seal_outcomes(&mut response, &outcomes, None, false);
                         }
                         broadcast_persisted(&tx, &response, client_id);
+                        if let Some(kernel) = &kernel {
+                            for item in LiveBroadcastItem::program_wide(kernel.program_wide_emits(&response), client_id) {
+                                let _ = tx.send(item);
+                            }
+                        }
                         let orbital = site.orbital.clone().or_else(|| kernel.as_ref().and_then(|k| k.orbital_of_trait(&site.trait_name)));
                         if let (Some(client_id), Some(orbital)) = (client_id, orbital) {
                             let (response, payload) = match &kernel {
@@ -906,6 +911,9 @@ impl Host {
         client_id: Option<&str>,
     ) {
         broadcast_persisted(&self.live_tx, response, client_id);
+        for item in LiveBroadcastItem::program_wide(self.kernel.program_wide_emits(response), client_id) {
+            let _ = self.live_tx.send(item);
+        }
     }
 
     /// Why the credential store `ALMADAR_CREDENTIAL_MASTER_KEY` asks for could not be opened, when it could not.
