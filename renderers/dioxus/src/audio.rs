@@ -2,7 +2,7 @@ use futures_channel::oneshot;
 use orbital_core::Value;
 use rodio::{Decoder, OutputStream, OutputStreamBuilder, Sink, Source};
 use serde::Deserialize;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::io::{Cursor, Read};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
@@ -52,65 +52,54 @@ pub struct AudioProps {
     pub autostart: Vec<AudioPlay>,
     pub muted: bool,
     pub volume: f32,
-    pub manifest: Value,
-    pub base_url: String,
 }
 
-#[derive(Deserialize)]
-#[serde(untagged)]
-enum PortPaths {
-    One(String),
-    Many(Vec<String>),
+/// An `audio/*` host ask, decoded: what std-audio-cue resolved, the key of a playing sound, or the music fade-out length.
+#[derive(Clone, Debug, PartialEq)]
+pub enum PortAsk {
+    PlaySound(AudioPlay),
+    StopSound(Option<String>),
+    ChangeMusic(AudioPlay),
+    StopMusic(u64),
 }
 
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct PortEntry {
-    path: PortPaths,
-    volume: Option<f32>,
-    #[serde(rename = "loop")]
-    looping: Option<bool>,
-    pool_size: Option<usize>,
-    crossfade: Option<bool>,
-    crossfade_duration_ms: Option<u64>,
-}
-
-impl AudioProps {
-    /// The key-addressed audio/* host port still resolves its key against the manifest here (G-CROSS-499).
-    fn port_play(&self, key: &str, music: bool) -> Result<AudioPlay, AudioFailure> {
-        let manifest: BTreeMap<String, PortEntry> =
-            serde_json::from_value(orbital_core::client::helpers::to_json(&self.manifest))
-                .map_err(|error| {
-                    AudioFailure::invalid(format!("audio manifest is invalid: {error}"))
-                })?;
-        let entry = manifest
-            .get(key)
-            .ok_or_else(|| AudioFailure::invalid(format!("audio manifest has no entry `{key}`")))?;
-        let path = match &entry.path {
-            PortPaths::One(path) => path.clone(),
-            PortPaths::Many(paths) if music => paths.first().cloned().unwrap_or_default(),
-            PortPaths::Many(paths) if !paths.is_empty() => {
-                paths[fastrand::usize(..paths.len())].clone()
+pub fn decode_port(op: &str, args: &[Value]) -> Result<PortAsk, AudioFailure> {
+    let play = |op: &str| {
+        match args {
+        [value] => AudioPlay::from_value(Some(value))
+            .ok()
+            .flatten()
+            .ok_or_else(|| AudioFailure::invalid(format!("{op} takes one resolved AudioPlay {{ key, source, volume, loop, poolSize, fadeMs }}"))),
+        _ => Err(AudioFailure::invalid(format!("{op} takes one resolved AudioPlay {{ key, source, volume, loop, poolSize, fadeMs }}"))),
+    }
+    };
+    match op {
+        "audio/play-sound" => play(op).map(PortAsk::PlaySound),
+        "audio/change-music" => play(op).map(PortAsk::ChangeMusic),
+        "audio/stop-sound" => match args {
+            [Value::String(key)] if !key.is_empty() => {
+                Ok(PortAsk::StopSound(Some(key.to_string())))
             }
-            PortPaths::Many(_) => String::new(),
-        };
-        if path.is_empty() {
-            return Err(AudioFailure::invalid(format!(
-                "audio entry `{key}` has no source"
-            )));
-        }
-        Ok(AudioPlay {
-            key: key.to_string(),
-            source: format!("{}{path}", self.base_url),
-            volume: entry.volume.unwrap_or(1.0),
-            looping: music || entry.looping.unwrap_or(false),
-            pool_size: entry.pool_size.unwrap_or(1).max(1),
-            fade_ms: if !music || entry.crossfade == Some(false) {
-                0
-            } else {
-                entry.crossfade_duration_ms.unwrap_or(1500)
-            },
-        })
+            [] => Ok(PortAsk::StopSound(None)),
+            _ => Err(AudioFailure::invalid(
+                "audio/stop-sound takes a sound key or none",
+            )),
+        },
+        "audio/stop-music" => match args {
+            [value] => orbital_core::client::helpers::to_json(value)
+                .as_f64()
+                .filter(|ms| ms.is_finite() && *ms >= 0.0)
+                .map(|ms| PortAsk::StopMusic(ms.round() as u64))
+                .ok_or_else(|| {
+                    AudioFailure::invalid("audio/stop-music takes one fade length in milliseconds")
+                }),
+            _ => Err(AudioFailure::invalid(
+                "audio/stop-music takes one fade length in milliseconds",
+            )),
+        },
+        _ => Err(AudioFailure::unavailable(format!(
+            "unsupported native audio host ask `{op}`"
+        ))),
     }
 }
 
@@ -326,7 +315,7 @@ impl Session {
         let incoming = if plan.key.is_empty() {
             None
         } else {
-            let bytes = load_audio("", &plan.source).map_err(AudioFailure::unavailable)?;
+            let bytes = load_audio(&plan.source).map_err(AudioFailure::unavailable)?;
             let decoder = Decoder::try_from(Cursor::new(bytes)).map_err(|error| {
                 AudioFailure::invalid(format!(
                     "audio decoder rejected music `{}`: {error}",
@@ -363,7 +352,7 @@ impl Session {
         if self.props.muted {
             return Ok(());
         }
-        let bytes = load_audio("", &plan.source).map_err(AudioFailure::unavailable)?;
+        let bytes = load_audio(&plan.source).map_err(AudioFailure::unavailable)?;
         let decoder = Decoder::try_from(Cursor::new(bytes)).map_err(|error| {
             AudioFailure::invalid(format!(
                 "audio decoder rejected cue `{}`: {error}",
@@ -415,50 +404,22 @@ impl Session {
         op: &str,
         args: &[Value],
     ) -> Result<(), AudioFailure> {
-        match op {
-            "audio/play-sound" => {
-                if let [Value::String(key)] = args {
-                    let plan = self.props.port_play(key, false)?;
-                    self.play_effect(stream, &plan)
-                } else {
-                    Err(AudioFailure::invalid(
-                        "audio/play-sound expects one sound key",
-                    ))
-                }
-            }
-            "audio/stop-sound" => {
-                if let [Value::String(key)] = args {
-                    if let Some(voices) = self.effects.remove(key.as_str()) {
-                        for sink in voices.sinks {
-                            sink.stop();
-                        }
+        match decode_port(op, args)? {
+            PortAsk::PlaySound(plan) => self.play_effect(stream, &plan),
+            PortAsk::StopSound(Some(key)) => {
+                if let Some(voices) = self.effects.remove(key.as_str()) {
+                    for sink in voices.sinks {
+                        sink.stop();
                     }
-                    Ok(())
-                } else if args.is_empty() || matches!(args, [Value::Null]) {
-                    self.effects.clear();
-                    Ok(())
-                } else {
-                    Err(AudioFailure::invalid(
-                        "audio/stop-sound expects a sound key or none",
-                    ))
                 }
+                Ok(())
             }
-            "audio/change-music" => {
-                if let [Value::String(key)] = args {
-                    let plan = self.props.port_play(key, true)?;
-                    self.change_music(stream, &plan)
-                } else if args.is_empty() || matches!(args, [Value::Null]) {
-                    self.change_music(stream, &port_stop())
-                } else {
-                    Err(AudioFailure::invalid(
-                        "audio/change-music expects a music key or none",
-                    ))
-                }
+            PortAsk::StopSound(None) => {
+                self.effects.clear();
+                Ok(())
             }
-            "audio/stop-music" if args.is_empty() => self.change_music(stream, &port_stop()),
-            _ => Err(AudioFailure::unavailable(format!(
-                "unsupported native audio host ask `{op}`"
-            ))),
+            PortAsk::ChangeMusic(plan) => self.change_music(stream, &plan),
+            PortAsk::StopMusic(fade_ms) => self.change_music(stream, &music_stop(fade_ms)),
         }
     }
 
@@ -548,20 +509,19 @@ impl Session {
     }
 }
 
-/// The port's stop carries no fade length of its own; it keeps the one it always used (G-CROSS-499).
-fn port_stop() -> AudioPlay {
+fn music_stop(fade_ms: u64) -> AudioPlay {
     AudioPlay {
         key: String::new(),
         source: String::new(),
         volume: 0.0,
         looping: true,
         pool_size: 1,
-        fade_ms: 1000,
+        fade_ms,
     }
 }
 
-fn load_audio(base_url: &str, path: &str) -> Result<Vec<u8>, String> {
-    let source = format!("{base_url}{path}");
+fn load_audio(source: &str) -> Result<Vec<u8>, String> {
+    let source = source.to_string();
     if source.starts_with("http://") || source.starts_with("https://") {
         let response = ureq::get(&source)
             .call()
@@ -686,8 +646,6 @@ mod tests {
             autostart: Vec::new(),
             muted: false,
             volume: 0.7,
-            manifest: Value::Null,
-            base_url: String::new(),
         }
     }
 
@@ -727,19 +685,42 @@ mod tests {
     }
 
     #[test]
-    fn the_audio_port_resolves_its_key_against_the_manifest() {
-        let mut port = props(0.0, plan("", ""));
-        port.base_url = "/assets/".into();
-        port.manifest = serde_json::from_str(
-            r#"{"jump":{"path":["jump-1.wav"],"volume":0.4,"poolSize":3},"theme":{"path":"theme.ogg","crossfade":false}}"#,
+    fn the_audio_port_takes_the_resolved_play_the_key_or_the_fade_length() {
+        let jump: Value = serde_json::from_str(
+            r#"{"key":"jump","source":"/assets/jump.wav","volume":0.4,"loop":false,"poolSize":3,"fadeMs":0}"#,
         )
         .unwrap();
-        let jump = port.port_play("jump", false).unwrap();
         assert_eq!(
-            (jump.source.as_str(), jump.pool_size),
-            ("/assets/jump-1.wav", 3)
+            decode_port("audio/play-sound", &[jump.clone()]).unwrap(),
+            PortAsk::PlaySound(plan("jump", "/assets/jump.wav"))
         );
-        assert_eq!(port.port_play("theme", true).unwrap().fade_ms, 0);
-        assert!(port.port_play("missing", false).is_err());
+        assert_eq!(
+            decode_port("audio/change-music", &[jump]).unwrap(),
+            PortAsk::ChangeMusic(plan("jump", "/assets/jump.wav"))
+        );
+        assert_eq!(
+            decode_port("audio/stop-sound", &[Value::String("jump".into())]).unwrap(),
+            PortAsk::StopSound(Some("jump".into()))
+        );
+        assert_eq!(
+            decode_port("audio/stop-sound", &[]).unwrap(),
+            PortAsk::StopSound(None)
+        );
+        let fade: Value = serde_json::from_str("750").unwrap();
+        assert_eq!(
+            decode_port("audio/stop-music", &[fade]).unwrap(),
+            PortAsk::StopMusic(750)
+        );
+    }
+
+    #[test]
+    fn control_a_bare_key_a_partial_play_or_a_stop_without_its_fade_is_refused() {
+        assert!(decode_port("audio/play-sound", &[Value::String("jump".into())]).is_err());
+        let partial: Value = serde_json::from_str(r#"{"key":"jump","source":"/a.wav"}"#).unwrap();
+        assert!(decode_port("audio/change-music", &[partial]).is_err());
+        assert!(decode_port("audio/stop-music", &[]).is_err());
+        let negative: Value = serde_json::from_str("-5").unwrap();
+        assert!(decode_port("audio/stop-music", &[negative]).is_err());
+        assert!(decode_port("audio/unknown", &[]).is_err());
     }
 }

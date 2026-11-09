@@ -8,6 +8,7 @@ pub use orbital_core::runtime::dispatch_trace::{TraceEffect, TraceEmit, TraceTra
 
 use orbital_core::effects::{DeliveryRecord, DispatchLog};
 use orbital_core::runtime::credentials::{credentials_with_rows, Credentials};
+use orbital_core::runtime::kernel::guest_hosting::GuestIntegrations;
 use orbital_core::runtime::native_host::NativeHost;
 use orbital_core::runtime::os_host::completion::{
     CompletionAnswerer, CompletionDone, KernelCompletionSink,
@@ -127,6 +128,19 @@ impl SelfSubstrate {
         if options.get("kind").and_then(Value::as_str) == Some("trace") {
             return Some(runtime.trace.source(&options));
         }
+        if options.get("kind").and_then(Value::as_str) == Some("guest") {
+            let guest = options.get("guest").and_then(Value::as_str).unwrap_or_default().to_string();
+            let host = Arc::downgrade(&runtime);
+            return Some(Box::new(move || {
+                let Some(runtime) = host.upgrade() else { return StreamPoll::Ended };
+                match runtime.kernel.guest_tick_pass(&guest) {
+                    Ok(orbital_core::runtime::kernel::GuestTicks::Painted(answer)) => StreamPoll::Item(answer),
+                    Ok(orbital_core::runtime::kernel::GuestTicks::Idle) => StreamPoll::Idle,
+                    Ok(orbital_core::runtime::kernel::GuestTicks::Closed) => StreamPoll::Ended,
+                    Err(error) => StreamPoll::Failed(error),
+                }
+            }));
+        }
         let client_id = options.get("clientId").and_then(Value::as_str).map(str::to_string);
         let mut receiver = runtime.subscribe_live();
         let host = Arc::downgrade(&runtime);
@@ -220,7 +234,7 @@ impl orbital_core::effects::executor::SubstrateHandler for SelfSubstrate {
             return Err(failure(format!("program/dispatch: '{address}' is not a qualified address")));
         };
         let outcomes = runtime
-            .dispatch_continuing(trait_name, "default", event, payload.clone(), None, None)
+            .dispatch_continuing(trait_name, orbital_core::RUNTIME_SINGLETON, event, payload.clone(), None, None)
             .map_err(|e| failure(e.to_string()))?;
         let response = orbital_core::EventResponse::from_process_results(&outcomes, trait_name, event);
         runtime.broadcast_persisted(&response, None);
@@ -235,8 +249,13 @@ impl orbital_core::effects::executor::SubstrateHandler for SelfSubstrate {
 struct HostGuests;
 
 impl orbital_core::runtime::kernel::guest_hosting::GuestHosting for HostGuests {
-    fn open(&self) -> Arc<dyn orbital_core::runtime::kernel::guest_hosting::GuestHost> {
-        Arc::new(GuestOf(Host::new(Arc::new(super::store::DriverAdapter::memory())).shared()))
+    fn open(&self, integrations: GuestIntegrations) -> Arc<dyn orbital_core::runtime::kernel::guest_hosting::GuestHost> {
+        let host = Host::new(Arc::new(super::store::DriverAdapter::memory()));
+        let host = match integrations {
+            GuestIntegrations::Live => host,
+            GuestIntegrations::Mock => host.holding_no_credentials(),
+        };
+        Arc::new(GuestOf(host.shared()))
     }
 }
 
@@ -262,6 +281,11 @@ impl orbital_core::runtime::kernel::guest_hosting::GuestHost for GuestOf {
         let host = &self.0;
         host.finish(host.kernel.start_dispatch(trait_name, None, event, payload, None, None))
             .map_err(|e| e.to_string())
+    }
+
+    fn tick_pass(&self) -> Result<DispatchOutcomes, String> {
+        let host = &self.0;
+        Ok(host.tick_pass_moving(host.monotonic_ms(), orbital_core::Calendar::local_now()).into_iter().flat_map(|(_, moved)| moved).collect())
     }
 }
 
@@ -841,6 +865,21 @@ impl Host {
         self.kernel.registered_schema(name)
     }
 
+    /// This host answers every credential ask as not held: a guest opened with mocked integrations.
+    fn holding_no_credentials(mut self) -> Self {
+        self.secrets = Arc::new(Credentials::default());
+        *self.host.write() = Arc::new(host_of(
+            &self.kernel,
+            &self.entity_source,
+            &self.secrets,
+            &self.handles,
+            &self.live_tx,
+            &self.origin_by_thread,
+            &self.substrate,
+        ));
+        self
+    }
+
     pub fn register_schema(&self, schema: orbital_core::OrbitalSchema) -> Result<(), HostError> {
         self.declare_capabilities(&schema);
         self.kernel
@@ -881,12 +920,19 @@ impl Host {
 
     /// One tick pass at `now_ms` (a monotonic clock): every due `[background]` tick runs over its rows, selected as
     /// `EmbeddedServer::tick_pass` selects it. A tick that is not `[background]` runs only where a client mounts its trait (the client's frame
-    /// clock asks for it), so this server, which tracks no mounts, never fires one. Answers the `(trait, tick)` pairs that ran.
+    /// clock asks for it), so this server, which tracks no mounts, never fires one; a guest's host, whose kernel runs its
+    /// `[client]` traits itself (EXEC-ENDPOINT-3a), fires those of the traits its page holds. Answers the `(trait, tick)` pairs that ran.
     pub fn tick_pass(&self, now_ms: u64, calendar: orbital_core::Calendar) -> Vec<(String, String)> {
+        self.tick_pass_moving(now_ms, calendar).into_iter().map(|(ran, _)| ran).collect()
+    }
+
+    /// [`Self::tick_pass`], with what each tick that ran moved.
+    fn tick_pass_moving(&self, now_ms: u64, calendar: orbital_core::Calendar) -> Vec<((String, String), DispatchOutcomes)> {
         let due = self.ticks.lock().due(now_ms, || calendar);
         let mut ran = Vec::new();
         for (trait_name, tick) in due {
-            if !self.kernel.tick_of(&trait_name, &tick).is_some_and(|t| t.background) {
+            let background = self.kernel.tick_of(&trait_name, &tick).is_some_and(|t| t.background);
+            if !(background || (self.kernel.runs_client_traits() && self.kernel.trait_mounted(&trait_name))) {
                 continue;
             }
             self.ticks_in_flight.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
@@ -900,7 +946,7 @@ impl Host {
                 Ok(outcomes) => {
                     let response = orbital_core::EventResponse::from_process_results(&outcomes, "", &orbital_core::tick_event_key(&tick));
                     self.broadcast_persisted(&response, None);
-                    ran.push((trait_name, tick));
+                    ran.push(((trait_name, tick), outcomes));
                 }
                 Err(error) => tracing::error!(target: orbital_core::logging::ns::SERVER_DATA, trait_name = %trait_name, tick = %tick, %error, "tick failed"),
             }
@@ -990,7 +1036,7 @@ impl Host {
                 .and_then(serde_json::from_value)
                 .map_err(|e| (e.to_string(), "EVENT_PROCESSING_ERROR", 500));
         }
-        let entity_id = request.entity_id.clone().unwrap_or_else(|| "default".to_string());
+        let entity_id = request.entity_id.clone().unwrap_or_else(|| orbital_core::RUNTIME_SINGLETON.to_string());
         let payload = request.payload.clone().unwrap_or(Value::Null);
         let failed = |e: HostError| (e.to_string(), "EVENT_PROCESSING_ERROR", e.status_code());
         let _origin = self.enter_origin(request.client_id.as_deref());
@@ -2682,7 +2728,7 @@ mod tests {
         let runtime = desk_with_a_mount_listener();
         dispatch_request(&runtime, serde_json::json!({ "wire": true, "orbital": "Desk", "event": "INIT", "clientId": "tab-m", "mount": [{ "trait": "Agent", "event": "INIT" }], "route": "/desk" })).unwrap();
         let _tab = runtime.kernel.enter_session("tab-m");
-        let got = serde_json::to_value(&runtime.kernel.snapshot_trait("Seeder", Some("default")).entity).unwrap()["got"].clone();
+        let got = serde_json::to_value(&runtime.kernel.snapshot_trait("Seeder", Some(orbital_core::RUNTIME_SINGLETON)).entity).unwrap()["got"].clone();
         assert_eq!(got, "/desk", "the $MOUNT listener heard the route (EXEC-SEED-7, twin of the embedded server host)");
     }
 
@@ -2863,11 +2909,97 @@ mod tests {
                 .map_err(|f| f.message)
                 .map(|_| {
                     let _tab = host.kernel.enter_session("tab-g");
-                    serde_json::to_value(&host.kernel.snapshot_trait("Opener", Some("default")).entity).unwrap()["answer"].to_string()
+                    serde_json::to_value(&host.kernel.snapshot_trait("Opener", Some(orbital_core::RUNTIME_SINGLETON)).entity).unwrap()["answer"].to_string()
                 });
             let _ = tx.send(answered);
         });
         rx.recv_timeout(std::time::Duration::from_secs(20)).expect("the open settles").unwrap()
+    }
+
+    /// A guest whose page shows a `[client]` trait ticking every 20 ms, and a `[client]` trait on another page ticking too.
+    fn ticking_guest_program() -> serde_json::Value {
+        let ticker = |name: &str, label: &str| serde_json::json!({
+            "name": name, "linkedEntity": format!("{name}Count"), "dispatch": "client",
+            "stateMachine": {
+                "states": [{ "name": "idle", "isInitial": true }],
+                "events": [{ "key": "INIT", "name": "Init" }],
+                "transitions": [{ "from": "idle", "to": "idle", "event": "INIT", "effects": [["render-ui", "main", { "type": "typography", "content": ["str/concat", label, " ", "@entity.n"] }]] }]
+            },
+            "ticks": [{ "name": "beat", "interval": 20, "effects": [["set", "@entity.n", ["+", "@entity.n", 1]], ["render-ui", "main", { "type": "typography", "content": ["str/concat", label, " ", "@entity.n"] }]] }]
+        });
+        let silent = |name: &str| serde_json::json!({
+            "name": format!("{name}Silent"), "linkedEntity": format!("{name}Count"), "dispatch": "client",
+            "stateMachine": { "states": [{ "name": "idle", "isInitial": true }], "events": [{ "key": "INIT", "name": "Init" }], "transitions": [{ "from": "idle", "to": "idle", "event": "INIT", "effects": [] }] },
+            "ticks": [{ "name": "count", "interval": 5, "effects": [["set", "@entity.n", "@entity.n"]] }]
+        });
+        let orbital = |name: &str, label: &str, route: &str| serde_json::json!({
+            "name": format!("{name}Orbital"),
+            "entity": { "name": format!("{name}Count"), "persistence": "runtime", "fields": [{ "name": "id", "type": "string" }, { "name": "n", "type": "number", "default": 0 }] },
+            "traits": [ticker(name, label), silent(name)],
+            "pages": [{ "name": format!("{name}Page"), "path": route, "traits": [{ "ref": name }, { "ref": format!("{name}Silent") }] }]
+        });
+        serde_json::json!({ "name": "TickingGuest", "typeContractVersion": 1, "orbitals": [orbital("Shown", "shown", "/"), orbital("Hidden", "hidden", "/other")] })
+    }
+
+    /// Opens `program` as a hosted guest at `/`, subscribes to its ticks with `program/live { kind: "guest" }` and answers
+    /// the `onMessage` payloads (each stringified) that arrived within `wait`.
+    fn guest_tick_items(program: serde_json::Value, wait: std::time::Duration) -> Vec<String> {
+        let runtime = Host::new(Arc::new(DriverAdapter::memory())).shared();
+        let opener: orbital_core::OrbitalSchema = serde_json::from_value(serde_json::json!({
+            "name": "Opener",
+            "typeContractVersion": 1,
+            "orbitals": [{
+                "name": "Opener",
+                "entity": { "name": "Box", "persistence": "runtime", "fields": [{ "name": "id", "type": "string" }, { "name": "items", "type": "array", "items": { "type": "string" }, "default": [] }, { "name": "failed", "type": "string" }] },
+                "osGrants": { "kernel": [{ "target": "guest", "kinds": ["spawn"] }] },
+                "traits": [{
+                    "name": "Opener", "linkedEntity": "Box",
+                    "stateMachine": {
+                        "states": [{ "name": "idle", "isInitial": true }],
+                        "events": [{ "key": "OPEN", "name": "Open", "payloadSchema": [{ "name": "program", "type": "object", "required": true }] },
+                            { "key": "OPENED", "name": "Opened" }, { "key": "FAILED", "name": "Failed" }, { "key": "TICKED", "name": "Ticked" }],
+                        "transitions": [
+                            { "from": "idle", "to": "idle", "event": "OPEN", "effects": [["program/open", "@payload.program", { "route": "/", "declared": true }, { "emit": { "success": "OPENED", "failure": "FAILED" } }]] },
+                            { "from": "idle", "to": "idle", "event": "OPENED", "effects": [["program/live", { "kind": "guest", "guest": "@payload.result.guest" }, { "key": "guest-ticks", "emit": { "onMessage": "TICKED", "failure": "FAILED" } }]] },
+                            { "from": "idle", "to": "idle", "event": "TICKED", "effects": [["set", "@entity.items", ["array/concat", "@entity.items", [["json/stringify", "@payload.rendered"]]]]] },
+                            { "from": "idle", "to": "idle", "event": "FAILED", "effects": [["set", "@entity.failed", ["json/stringify", "@payload"]]] }]
+                    }
+                }]
+            }]
+        }))
+        .unwrap();
+        runtime.register_schema(opener).unwrap();
+        // A browser tab's session subscribes, as the catalog's does: every item must come back into that session.
+        {
+            let _tab = runtime.kernel.enter_session("tab-t");
+            runtime.dispatch("Opener", "default", "OPEN", serde_json::from_value(serde_json::json!({ "program": program })).unwrap()).unwrap();
+        }
+        std::thread::sleep(wait);
+        let _tab = runtime.kernel.enter_session("tab-t");
+        let entity = serde_json::to_value(&runtime.kernel.snapshot_trait("Opener", Some("default")).entity).unwrap();
+        assert!(entity["failed"].is_null() || entity["failed"] == "", "the open and the subscription succeed: {}", entity["failed"]);
+        entity["items"].as_array().into_iter().flatten().filter_map(|i| i.as_str().map(str::to_string)).collect()
+    }
+
+    #[test]
+    fn a_guest_host_with_mocked_integrations_holds_no_credential_the_process_environment_names() {
+        use orbital_core::runtime::secret_source::SecretSource;
+        let mocked = Host::new(Arc::new(DriverAdapter::memory())).holding_no_credentials();
+        assert_eq!(mocked.credentials().secret_of("PATH", None).ok().flatten(), None);
+        assert!(
+            Host::new(Arc::new(DriverAdapter::memory())).credentials().secret_of("PATH", None).ok().flatten().is_some(),
+            "control: a live guest host reads the opener's environment"
+        );
+    }
+
+    #[test]
+    fn a_hosted_guest_streams_the_paints_its_page_traits_client_ticks_make() {
+        let items = guest_tick_items(ticking_guest_program(), std::time::Duration::from_millis(400));
+        assert!(items.len() >= 2, "the guest's [client] tick fires on the guest's own clock and each pass that moved arrives (EXEC-ENDPOINT-3a, EXEC-DIST-14): {items:?}");
+        assert!(items.iter().any(|i| i.contains("shown 2")), "each paint carries the ticked count: {items:?}");
+        assert!(items.iter().all(|i| !i.contains("hidden")), "control: a [client] trait on a page the guest does not show never ticks (EXEC-TICK-6): {items:?}");
+        assert!(items.iter().all(|i| i != "[]"), "edge: a pass whose ticks painted nothing (ShownSilent, every 5 ms) is no item: {items:?}");
+        assert!(items.len() < 40, "edge: items come at the painting tick's pace (20 ms), not the silent one's: {}", items.len());
     }
 
     #[test]
@@ -2913,7 +3045,7 @@ mod tests {
         let runtime = desk_with_a_mount_listener();
         dispatch_request(&runtime, serde_json::json!({ "wire": true, "orbital": "Desk", "event": "INIT", "clientId": "tab-n", "mount": [{ "trait": "Agent", "event": "INIT" }] })).unwrap();
         let _tab = runtime.kernel.enter_session("tab-n");
-        let got = serde_json::to_value(&runtime.kernel.snapshot_trait("Seeder", Some("default")).entity).unwrap()["got"].clone();
+        let got = serde_json::to_value(&runtime.kernel.snapshot_trait("Seeder", Some(orbital_core::RUNTIME_SINGLETON)).entity).unwrap()["got"].clone();
         assert!(got.is_null() || got == "", "{got}");
     }
 

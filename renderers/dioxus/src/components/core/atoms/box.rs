@@ -155,12 +155,15 @@ impl DioxusPatternRenderer for BoxRenderer {
         let edge_flip = get_bool_or(props, "edgeFlip", false);
         let texture = get_bool_or(props, "texture", false);
         let is_band = texture || edge_top.is_some() || edge_bottom.is_some();
+        let marquee = props.get("marquee").filter(|value| value.is_object());
+        let marquee_clip = marquee.is_some_and(|spec| get_bool_or(spec, "clip", false));
         let clickable = get_string(props, "action").is_some();
-        let base = format!("{} {} {} {} {} {} {bg} {border} {rounded} {shadow} {display} {width} {height} {overflow} {position} {} {}",
+        let base = format!("{} {} {} {} {} {} {bg} {border} {rounded} {shadow} {display} {width} {height} {overflow} {position} {} {} {}",
             spacing("padding", "p"), spacing("paddingX", "px"), spacing("paddingY", "py"),
             spacing("margin", "m"), spacing("marginX", "mx"), spacing("marginY", "my"),
             if is_band { "band" } else { "" },
-            if clickable { "cursor-pointer" } else { "" });
+            if clickable { "cursor-pointer" } else { "" },
+            if marquee_clip { "proof-marquee" } else { "" });
         let class = merge_class_name(&base, props);
         let max_width = get_string_or(props, "maxWidth", "");
         let mut base_style = if max_width.is_empty() {
@@ -228,7 +231,59 @@ impl DioxusPatternRenderer for BoxRenderer {
             if texture { span { class: "band-texture", "data-band-layer": "", aria_hidden: "true" } }
             if let Some(edge_class) = top_edge_class { span { class: "{edge_class}", "data-band-layer": "", aria_hidden: "true" } }
             if let Some(edge_class) = bottom_edge_class { span { class: "{edge_class}", "data-band-layer": "", aria_hidden: "true" } }
-            for (child, src) in children.iter() { {view.render_child(registry, child, src.as_deref())} }
+            if let Some(spec) = marquee {
+                MarqueeTrack {
+                    direction: get_string_or(spec, "direction", "start"),
+                    speed: get_number_or(spec, "speed", 0.0),
+                    looping: get_bool_or(spec, "loop", false),
+                    strip: rsx! { for (child, src) in children.iter() { {view.render_child(registry, child, src.as_deref())} } },
+                }
+            } else {
+                for (child, src) in children.iter() { {view.render_child(registry, child, src.as_deref())} }
+            }
         } }
+    }
+}
+
+/// A box's `marquee`: the strip moves toward `direction` at `speed` px/s (one copy's width per loop); `loop` repeats it
+/// right after itself. Reduced motion stops the animation (the root's `data-reduced-motion` rule) and drops the copy.
+#[component]
+fn MarqueeTrack(direction: String, speed: f64, looping: bool, strip: Element) -> Element {
+    let mut width = use_signal(|| 0.0_f64);
+    #[cfg(all(feature = "native", not(target_arch = "wasm32")))]
+    let reduced = crate::native::reduced_motion();
+    #[cfg(not(all(feature = "native", not(target_arch = "wasm32"))))]
+    let reduced = false;
+    let style = if !reduced && speed > 0.0 && width() > 0.0 {
+        format!(
+            "animation:almadar-marquee {}s linear infinite;animation-direction:{};--marquee-distance:{}",
+            width() / speed,
+            if direction == "end" { "reverse" } else { "normal" },
+            if looping { "50%" } else { "100%" }
+        )
+    } else {
+        String::new()
+    };
+    let class = if reduced {
+        "proof-marquee-track w-full flex-wrap justify-center"
+    } else {
+        "proof-marquee-track"
+    };
+    rsx! {
+        div { "data-marquee-track": "", class: "{class}", style: "{style}",
+            div { class: "flex shrink-0 items-center",
+                onmounted: move |event| {
+                    let element = event.data();
+                    spawn(async move {
+                        match element.get_client_rect().await {
+                            Ok(rect) => width.set(rect.size.width),
+                            Err(error) => tracing::error!(%error, "marquee measure"),
+                        }
+                    });
+                },
+                {strip.clone()}
+            }
+            if looping && !reduced { div { class: "flex shrink-0 items-center", aria_hidden: "true", {strip} } }
+        }
     }
 }

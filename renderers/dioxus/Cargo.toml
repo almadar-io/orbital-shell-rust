@@ -61,7 +61,7 @@ native = [
 ]
 native-a11y = ["native", "dioxus-native/accessibility", "native-http"]
 native-http = ["orbital-core/client-http", "dep:futures-channel"]
-native-audio = ["native", "dep:rodio", "dep:ureq", "dep:fastrand", "dep:dioxus-asset-resolver", "dep:futures-channel"]
+native-audio = ["native", "dep:rodio", "dep:ureq", "dep:dioxus-asset-resolver", "dep:futures-channel"]
 
 [dependencies]
 # `Instant` that works on wasm32 (performance.now); std's panics there.
@@ -133,7 +133,6 @@ dioxus-core = { version = "0.7.9", optional = true }
 futures-channel = { version = "0.3", optional = true }
 rodio = { version = "0.21.1", default-features = false, features = ["playback", "symphonia-all"], optional = true }
 ureq = { version = "2.9", default-features = false, features = ["tls"], optional = true }
-fastrand = { version = "2.3", optional = true }
 dioxus-asset-resolver = { version = "0.7.9", features = ["native"], optional = true }
 orbital-canvas = { git = "https://github.com/almadar-io/orbital-canvas", branch = "main", features = ["http", "system-fonts"], optional = true }
 # PNG encoding for the offscreen capture (`offscreen::capture_png`).

@@ -2,7 +2,7 @@ use crate::audio::{AudioPlay, AudioProps, AudioSessionHandle};
 use crate::registry::DioxusPatternRegistry;
 use crate::renderer::{DioxusPatternRenderer, DioxusView};
 use dioxus::prelude::*;
-use orbital_core::client::helpers::{get_bool_or, get_number, get_number_or, get_string_or};
+use orbital_core::client::helpers::{get_bool_or, get_number, get_number_or};
 use orbital_core::Value;
 use std::rc::Rc;
 
@@ -45,8 +45,6 @@ fn Cue(props: CueProps) -> Element {
             autostart,
             muted: get_bool_or(&value, "muted", false),
             volume: get_number_or(&value, "volume", 1.0).clamp(0.0, 1.0) as f32,
-            manifest: field("manifest").cloned().unwrap_or(Value::Null),
-            base_url: get_string_or(&value, "baseUrl", ""),
         };
         handle.sync(audio);
     });
