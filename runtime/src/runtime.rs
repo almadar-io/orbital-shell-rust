@@ -249,7 +249,7 @@ impl orbital_core::effects::executor::SubstrateHandler for SelfSubstrate {
 struct HostGuests;
 
 impl orbital_core::runtime::kernel::guest_hosting::GuestHosting for HostGuests {
-    fn open(&self, integrations: GuestIntegrations, cwd: Option<&str>) -> Arc<dyn orbital_core::runtime::kernel::guest_hosting::GuestHost> {
+    fn open(&self, integrations: GuestIntegrations, cwd: Option<&str>, env: &[(String, Option<String>)]) -> Arc<dyn orbital_core::runtime::kernel::guest_hosting::GuestHost> {
         let mut config = HostConfig::default();
         if let Some(dir) = cwd {
             let mut anchors = orbital_core::runtime::os_host::OsAnchors::of_process();
@@ -265,6 +265,9 @@ impl orbital_core::runtime::kernel::guest_hosting::GuestHosting for HostGuests {
             GuestIntegrations::Live => host,
             GuestIntegrations::Mock => host.holding_no_credentials(),
         };
+        for (name, value) in env {
+            host.handles.set_env(name, value.clone());
+        }
         Arc::new(GuestOf(host.shared()))
     }
 }
@@ -277,7 +280,7 @@ impl orbital_core::runtime::kernel::guest_hosting::GuestHost for GuestOf {
     }
 
     fn environment_of(&self, name: &str) -> Option<String> {
-        self.0.handles.anchors.env.get(name).map(str::to_string)
+        self.0.handles.env_value(name)
     }
 
     fn credential_of(&self, name: &str) -> Option<String> {
@@ -3062,6 +3065,74 @@ mod tests {
         entity["answer"].as_str().unwrap_or_default().to_string()
     }
 
+    fn guest_reading_env(opener_env: serde_json::Value, env: serde_json::Value) -> String {
+        let guest = serde_json::json!({
+            "name": "EnvGuest", "typeContractVersion": 1,
+            "osGrants": { "env": ["ORB_GUEST_ENV_PROBE"] },
+            "orbitals": [{
+                "name": "Envs",
+                "entity": { "name": "Doc", "persistence": "runtime", "fields": [{ "name": "id", "type": "string" }] },
+                "traits": [{
+                    "name": "Reader", "linkedEntity": "Doc",
+                    "stateMachine": {
+                        "states": [{ "name": "idle", "isInitial": true }],
+                        "events": [{ "key": "INIT", "name": "Init" }, { "key": "READ_OK", "name": "Ok", "payloadSchema": [{ "name": "value", "type": "string" }] }, { "key": "READ_NO", "name": "No", "payloadSchema": [{ "name": "error", "type": "string" }] }],
+                        "transitions": [
+                            { "from": "idle", "to": "idle", "event": "INIT", "effects": [["os/getenv", "ORB_GUEST_ENV_PROBE", { "emit": { "success": "READ_OK", "failure": "READ_NO" } }]] },
+                            { "from": "idle", "to": "idle", "event": "READ_OK", "effects": [["render-ui", "main", { "type": "typography", "content": ["str/concat", "env=", ["default", "@payload.value", "unset"]] }]] },
+                            { "from": "idle", "to": "idle", "event": "READ_NO", "effects": [["render-ui", "main", { "type": "typography", "content": ["str/concat", "no ", "@payload.error"] }]] }
+                        ]
+                    }
+                }],
+                "pages": [{ "name": "Home", "path": "/", "traits": [{ "ref": "Reader" }] }]
+            }]
+        });
+        let runtime = Host::new(Arc::new(DriverAdapter::memory())).shared();
+        let opener: orbital_core::OrbitalSchema = serde_json::from_value(serde_json::json!({
+            "name": "Opener", "typeContractVersion": 1,
+            "orbitals": [{
+                "name": "Opener",
+                "entity": { "name": "Box", "persistence": "runtime", "fields": [{ "name": "id", "type": "string" }, { "name": "answer", "type": "string" }] },
+                "osGrants": { "kernel": [{ "target": "guest", "kinds": ["spawn", "declared"] }], "env": opener_env },
+                "traits": [{
+                    "name": "Opener", "linkedEntity": "Box",
+                    "stateMachine": {
+                        "states": [{ "name": "idle", "isInitial": true }],
+                        "events": [{ "key": "OPEN", "name": "Open", "payloadSchema": [{ "name": "program", "type": "object", "required": true }] }, { "key": "OPENED", "name": "Opened", "payloadSchema": [{ "name": "result", "type": "object" }] }, { "key": "FAILED", "name": "Failed", "payloadSchema": [{ "name": "error", "type": "string" }] }],
+                        "transitions": [
+                            { "from": "idle", "to": "idle", "event": "OPEN", "effects": [["program/open", "@payload.program", { "route": "/", "declared": true, "integrations": "live", "env": env }, { "emit": { "success": "OPENED", "failure": "FAILED" } }]] },
+                            { "from": "idle", "to": "idle", "event": "OPENED", "effects": [["set", "@entity.answer", ["json/stringify", "@payload.result.rendered"]]] },
+                            { "from": "idle", "to": "idle", "event": "FAILED", "effects": [["set", "@entity.answer", ["str/concat", "refused: ", "@payload.error"]]] }
+                        ]
+                    }
+                }]
+            }]
+        }))
+        .unwrap();
+        runtime.register_schema(opener).unwrap();
+        runtime.dispatch("Opener", "default", "OPEN", serde_json::from_value(serde_json::json!({ "program": guest })).unwrap()).unwrap();
+        let entity = serde_json::to_value(&runtime.kernel.snapshot_trait("Opener", Some("default")).entity).unwrap();
+        entity["answer"].as_str().unwrap_or_default().to_string()
+    }
+
+    #[test]
+    fn a_guest_reads_the_value_program_open_set_for_it() {
+        let answer = guest_reading_env(serde_json::json!(["ORB_GUEST_ENV_PROBE"]), serde_json::json!({ "ORB_GUEST_ENV_PROBE": "demo" }));
+        assert!(answer.contains("env=demo"), "{answer}");
+    }
+
+    #[test]
+    fn control_a_guest_opened_with_a_null_entry_reads_the_variable_as_unset() {
+        let answer = guest_reading_env(serde_json::json!(["ORB_GUEST_ENV_PROBE"]), serde_json::json!({ "ORB_GUEST_ENV_PROBE": null }));
+        assert!(answer.contains("env=unset"), "{answer}");
+    }
+
+    #[test]
+    fn edge_an_opener_without_the_grant_cannot_set_a_guests_variable() {
+        let answer = guest_reading_env(serde_json::json!([]), serde_json::json!({ "ORB_GUEST_ENV_PROBE": "demo" }));
+        assert!(answer.starts_with("refused:") && answer.contains("ORB_GUEST_ENV_PROBE"), "{answer}");
+    }
+
     fn guest_root_with_file(label: &str) -> String {
         let root = std::env::temp_dir().join(format!("orb-guest-root-{label}-{}", std::process::id()));
         std::fs::create_dir_all(root.join("data")).unwrap();
@@ -3184,6 +3255,70 @@ mod tests {
         let entity = serde_json::to_value(&runtime.kernel.snapshot_trait("Opener", Some("default")).entity).unwrap();
         let answer = entity["answer"].as_str().unwrap_or_default();
         serde_json::from_str(answer).unwrap_or(serde_json::Value::String(answer.to_string()))
+    }
+
+    /// A program whose `Ticket` rows a driver answers after a keyed `os/read-file` settles in a later dispatch: with `replies`
+    /// the deferred success replies, without it the driver stays silent.
+    fn deferred_store_driver(replies: bool) -> orbital_core::OrbitalSchema {
+        let settled: serde_json::Value = if replies {
+            serde_json::json!([["emit", "ROW_FOUND", { "key": "@payload.key", "row": { "id": "t1", "title": "from the driver" } }]])
+        } else {
+            serde_json::json!([])
+        };
+        serde_json::from_value(serde_json::json!({
+            "name": "deferred-store", "typeContractVersion": 1,
+            "osGrants": { "fs": [{ "glob": "/etc/hosts", "modes": ["read"] }] },
+            "orbitals": [
+                { "name": "Tickets", "pages": [],
+                  "entity": { "name": "Ticket", "persistence": "persistent", "collection": "tickets", "store": "Rows",
+                      "fields": [{ "name": "id", "type": "string" }, { "name": "title", "type": "string" }] },
+                  "traits": [{ "name": "Desk", "linkedEntity": "Ticket", "stateMachine": {
+                      "states": [{ "name": "idle", "isInitial": true }],
+                      "events": [{ "key": "LOOK", "name": "LOOK" }, { "key": "SEEN", "name": "SEEN" }, { "key": "UNSEEN", "name": "UNSEEN" }],
+                      "transitions": [
+                          { "from": "idle", "to": "idle", "event": "LOOK", "effects": [["fetch", "Ticket", { "id": "t1", "emit": { "success": "SEEN", "failure": "UNSEEN" } }]] },
+                          { "from": "idle", "to": "idle", "event": "SEEN", "effects": [["set", "@entity.title", "seen"]] },
+                          { "from": "idle", "to": "idle", "event": "UNSEEN", "effects": [["set", "@entity.title", ["str/concat", "unseen: ", "@payload.error"]]] }
+                      ] } }] },
+                { "name": "Rows", "pages": [],
+                  "entity": { "name": "Mirror", "persistence": "runtime", "fields": [{ "name": "id", "type": "string" }] },
+                  "traits": [{ "name": "RowsDriver", "linkedEntity": "Mirror", "stateMachine": {
+                      "states": [{ "name": "ready", "isInitial": true }],
+                      "events": [{ "key": "ROW_READ", "name": "ROW_READ" }, { "key": "FILE_READ", "name": "FILE_READ" }, { "key": "FILE_FAILED", "name": "FILE_FAILED" }],
+                      "emits": [{ "event": "ROW_FOUND" }],
+                      "transitions": [
+                          { "from": "ready", "to": "ready", "event": "ROW_READ", "effects": [["os/read-file", "/etc/hosts", { "key": "@payload.key", "emit": { "success": "FILE_READ", "failure": "FILE_FAILED" } }]] },
+                          { "from": "ready", "to": "ready", "event": "FILE_READ", "effects": settled },
+                          { "from": "ready", "to": "ready", "event": "FILE_FAILED", "effects": [["emit", "STORE_FAILED", { "key": "@payload.key", "message": "@payload.error" }]] }
+                      ] } }] }
+            ]
+        }))
+        .unwrap()
+    }
+
+    /// `LOOK`'s result as the asking trait recorded it, failing rather than hanging when the dispatch never ends.
+    fn look_through_a_deferred_driver(replies: bool) -> String {
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let runtime = Host::new(Arc::new(DriverAdapter::memory())).shared();
+            runtime.register_schema(deferred_store_driver(replies)).unwrap();
+            let outcome = runtime.dispatch("Desk", "default", "LOOK", serde_json::from_value(serde_json::json!({})).unwrap());
+            let entity = serde_json::to_value(&runtime.kernel.snapshot_trait("Desk", Some("default")).entity).unwrap();
+            tx.send(format!("{:?} {}", outcome.err().map(|e| e.to_string()), entity["title"])).unwrap();
+        });
+        rx.recv_timeout(std::time::Duration::from_secs(20)).expect("the dispatch parked on the driver's reply must end")
+    }
+
+    #[test]
+    fn a_store_ask_parks_until_a_driver_replies_from_deferred_work() {
+        let seen = look_through_a_deferred_driver(true);
+        assert!(seen.contains("seen") && !seen.contains("unseen"), "{seen}");
+    }
+
+    #[test]
+    fn control_a_driver_whose_deferred_work_ends_without_a_reply_fails_the_ask() {
+        let seen = look_through_a_deferred_driver(false);
+        assert!(seen.contains("sent no reply"), "{seen}");
     }
 
     #[test]
