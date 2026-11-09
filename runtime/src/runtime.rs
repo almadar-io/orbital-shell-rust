@@ -249,8 +249,18 @@ impl orbital_core::effects::executor::SubstrateHandler for SelfSubstrate {
 struct HostGuests;
 
 impl orbital_core::runtime::kernel::guest_hosting::GuestHosting for HostGuests {
-    fn open(&self, integrations: GuestIntegrations) -> Arc<dyn orbital_core::runtime::kernel::guest_hosting::GuestHost> {
-        let host = Host::new(Arc::new(super::store::DriverAdapter::memory()));
+    fn open(&self, integrations: GuestIntegrations, cwd: Option<&str>) -> Arc<dyn orbital_core::runtime::kernel::guest_hosting::GuestHost> {
+        let mut config = HostConfig::default();
+        if let Some(dir) = cwd {
+            let mut anchors = orbital_core::runtime::os_host::OsAnchors::of_process();
+            let home = anchors.home.clone();
+            anchors.start = Some(match (dir.strip_prefix("~/"), home) {
+                (Some(rest), Some(home)) => home.join(rest),
+                _ => std::path::PathBuf::from(dir),
+            });
+            config.anchors = Some(anchors);
+        }
+        let host = Host::with_config(Arc::new(super::store::DriverAdapter::memory()), config);
         let host = match integrations {
             GuestIntegrations::Live => host,
             GuestIntegrations::Mock => host.holding_no_credentials(),
@@ -264,6 +274,19 @@ struct GuestOf(Arc<Host>);
 impl orbital_core::runtime::kernel::guest_hosting::GuestHost for GuestOf {
     fn kernel(&self) -> Arc<RuntimeKernel> {
         Arc::clone(&self.0.kernel)
+    }
+
+    fn environment_of(&self, name: &str) -> Option<String> {
+        self.0.handles.anchors.env.get(name).map(str::to_string)
+    }
+
+    fn credential_of(&self, name: &str) -> Option<String> {
+        use orbital_core::runtime::secret_source::SecretSource as _;
+        self.0.secrets.secret(name).ok().flatten()
+    }
+
+    fn deferred_denials(&self) -> Vec<(String, u64)> {
+        self.0.handles.completions.denials()
     }
 
     fn register(&self, schema: orbital_core::OrbitalSchema) -> Result<(), String> {
@@ -2986,6 +3009,266 @@ mod tests {
         let entity = serde_json::to_value(&runtime.kernel.snapshot_trait("Opener", Some("default")).entity).unwrap();
         assert!(entity["failed"].is_null() || entity["failed"] == "", "the open and the subscription succeed: {}", entity["failed"]);
         entity["items"].as_array().into_iter().flatten().filter_map(|i| i.as_str().map(str::to_string)).collect()
+    }
+
+    /// Opens a guest that reads `data/x.txt` under its working directory as it mounts, and answers what it painted (or why the open was refused).
+    fn open_file_reading_guest(kernel_kinds: serde_json::Value, opener_fs: serde_json::Value, options: serde_json::Value) -> String {
+        let guest = serde_json::json!({
+            "name": "FileGuest", "typeContractVersion": 1,
+            "osGrants": { "anchored": { "fs": [{ "anchor": "cwd", "glob": "data/**", "modes": ["read"] }] } },
+            "orbitals": [{
+                "name": "Files",
+                "entity": { "name": "Doc", "persistence": "runtime", "fields": [{ "name": "id", "type": "string" }] },
+                "traits": [{
+                    "name": "Reader", "linkedEntity": "Doc",
+                    "stateMachine": {
+                        "states": [{ "name": "idle", "isInitial": true }],
+                        "events": [{ "key": "INIT", "name": "Init" }, { "key": "READ_OK", "name": "Ok" }, { "key": "READ_NO", "name": "No" }],
+                        "transitions": [
+                            { "from": "idle", "to": "idle", "event": "INIT", "effects": [["os/read-file", { "anchor": "cwd", "path": "data/x.txt" }, { "emit": { "success": "READ_OK", "failure": "READ_NO" } }]] },
+                            { "from": "idle", "to": "idle", "event": "READ_OK", "effects": [["render-ui", "main", { "type": "typography", "content": "read ok" }]] },
+                            { "from": "idle", "to": "idle", "event": "READ_NO", "effects": [["render-ui", "main", { "type": "typography", "content": ["str/concat", "read failed: ", "@payload.error"] }]] }
+                        ]
+                    }
+                }],
+                "pages": [{ "name": "Home", "path": "/", "traits": [{ "ref": "Reader" }] }]
+            }]
+        });
+        let runtime = Host::new(Arc::new(DriverAdapter::memory())).shared();
+        let opener: orbital_core::OrbitalSchema = serde_json::from_value(serde_json::json!({
+            "name": "Opener", "typeContractVersion": 1,
+            "orbitals": [{
+                "name": "Opener",
+                "entity": { "name": "Box", "persistence": "runtime", "fields": [{ "name": "id", "type": "string" }, { "name": "answer", "type": "string" }] },
+                "osGrants": { "kernel": [{ "target": "guest", "kinds": kernel_kinds }], "fs": opener_fs },
+                "traits": [{
+                    "name": "Opener", "linkedEntity": "Box",
+                    "stateMachine": {
+                        "states": [{ "name": "idle", "isInitial": true }],
+                        "events": [{ "key": "OPEN", "name": "Open", "payloadSchema": [{ "name": "program", "type": "object", "required": true }] }, { "key": "OPENED", "name": "Opened" }, { "key": "FAILED", "name": "Failed" }],
+                        "transitions": [
+                            { "from": "idle", "to": "idle", "event": "OPEN", "effects": [["program/open", "@payload.program", options, { "emit": { "success": "OPENED", "failure": "FAILED" } }]] },
+                            { "from": "idle", "to": "idle", "event": "OPENED", "effects": [["set", "@entity.answer", ["json/stringify", "@payload.result.rendered"]]] },
+                            { "from": "idle", "to": "idle", "event": "FAILED", "effects": [["set", "@entity.answer", ["str/concat", "refused: ", "@payload.error"]]] }
+                        ]
+                    }
+                }]
+            }]
+        }))
+        .unwrap();
+        runtime.register_schema(opener).unwrap();
+        runtime.dispatch("Opener", "default", "OPEN", serde_json::from_value(serde_json::json!({ "program": guest })).unwrap()).unwrap();
+        let entity = serde_json::to_value(&runtime.kernel.snapshot_trait("Opener", Some("default")).entity).unwrap();
+        entity["answer"].as_str().unwrap_or_default().to_string()
+    }
+
+    fn guest_root_with_file(label: &str) -> String {
+        let root = std::env::temp_dir().join(format!("orb-guest-root-{label}-{}", std::process::id()));
+        std::fs::create_dir_all(root.join("data")).unwrap();
+        std::fs::write(root.join("data/x.txt"), "x").unwrap();
+        std::fs::canonicalize(root).unwrap().to_string_lossy().into_owned()
+    }
+
+    #[test]
+    fn a_live_guest_of_an_opener_holding_guest_declared_keeps_its_declared_grants_in_its_own_working_directory() {
+        let root = guest_root_with_file("live");
+        let answer = open_file_reading_guest(
+            serde_json::json!(["spawn", "declared"]),
+            serde_json::json!([{ "glob": format!("{root}/**"), "modes": ["read", "write", "create", "remove"] }]),
+            serde_json::json!({ "route": "/", "declared": true, "integrations": "live", "cwd": root }),
+        );
+        assert!(answer.contains("read ok"), "the guest reads data/x.txt under its own working directory: {answer}");
+    }
+
+    #[test]
+    fn control_a_mocked_guest_stays_narrowed_even_when_the_opener_holds_guest_declared() {
+        let answer = open_file_reading_guest(serde_json::json!(["spawn", "declared"]), serde_json::json!([]), serde_json::json!({ "route": "/", "declared": true, "integrations": "mock" }));
+        assert!(answer.contains("read failed"), "mock mode narrows the declared fs grant away: {answer}");
+    }
+
+    #[test]
+    fn control_a_live_guest_without_the_guest_declared_grant_stays_narrowed() {
+        let answer = open_file_reading_guest(serde_json::json!(["spawn"]), serde_json::json!([]), serde_json::json!({ "route": "/", "declared": true, "integrations": "live" }));
+        assert!(answer.contains("read failed"), "without the explicit grant the 11-07 narrowing still applies: {answer}");
+    }
+
+    #[test]
+    fn edge_a_guest_working_directory_the_opener_cannot_reach_refuses_the_open() {
+        let root = guest_root_with_file("unreachable");
+        let answer = open_file_reading_guest(serde_json::json!(["spawn", "declared"]), serde_json::json!([]), serde_json::json!({ "route": "/", "declared": true, "integrations": "live", "cwd": root }));
+        assert!(answer.starts_with("refused:") && answer.contains("does not hold"), "{answer}");
+    }
+
+    #[test]
+    fn edge_a_mocked_guest_takes_no_working_directory() {
+        let root = guest_root_with_file("mock");
+        let answer = open_file_reading_guest(
+            serde_json::json!(["spawn", "declared"]),
+            serde_json::json!([{ "glob": format!("{root}/**"), "modes": ["read", "write", "create", "remove"] }]),
+            serde_json::json!({ "route": "/", "declared": true, "integrations": "mock", "cwd": root }),
+        );
+        assert!(answer.starts_with("refused:") && answer.contains("`cwd`"), "{answer}");
+    }
+
+    /// Opens a guest declaring env `PATH` and `ORB_SURELY_UNSET`, then answers `program/inputs { guest, environment }`.
+    fn guest_environment(kernel_kinds: serde_json::Value, environment: serde_json::Value) -> serde_json::Value {
+        let guest = serde_json::json!({
+            "name": "EnvGuest", "typeContractVersion": 1,
+            "osGrants": { "env": ["PATH", "ORB_SURELY_UNSET"], "net": [{ "target": "api.example.com:443", "kinds": ["tcp"] }] },
+            "orbitals": [{
+                "name": "Envs",
+                "entity": { "name": "Doc", "persistence": "runtime", "fields": [{ "name": "id", "type": "string" }] },
+                "traits": [{ "name": "Shown", "linkedEntity": "Doc", "stateMachine": { "states": [{ "name": "idle", "isInitial": true }], "events": [{ "key": "INIT", "name": "Init" }], "transitions": [{ "from": "idle", "to": "idle", "event": "INIT", "effects": [["render-ui", "main", { "type": "typography", "content": "up" }]] }] } }],
+                "pages": [{ "name": "Home", "path": "/", "traits": [{ "ref": "Shown" }] }]
+            }]
+        });
+        guest_read(guest, kernel_kinds, serde_json::json!({ "environment": environment }))
+    }
+
+    /// A guest whose traits name the credentials `PATH` (held in the process environment) and `ORB_SURELY_UNSET`, and whose
+    /// `INIT` asks for a file its grants do not cover.
+    fn guest_with_secrets_and_a_refused_read() -> serde_json::Value {
+        serde_json::json!({
+            "name": "SecretGuest", "typeContractVersion": 1,
+            "osGrants": { "fs": [{ "glob": "/orb-granted-elsewhere/**", "modes": ["read"] }] },
+            "orbitals": [{
+                "name": "Secrets",
+                "entity": { "name": "Doc", "persistence": "runtime", "fields": [{ "name": "id", "type": "string" }] },
+                "traits": [{ "name": "Shown", "linkedEntity": "Doc", "stateMachine": {
+                    "states": [{ "name": "idle", "isInitial": true }],
+                    "events": [{ "key": "INIT", "name": "Init" }, { "key": "A", "name": "A" }, { "key": "B", "name": "B" }, { "key": "READ_DONE", "name": "Done" }, { "key": "READ_FAILED", "name": "Failed", "payloadSchema": [{ "name": "error", "type": "string" }, { "name": "kind", "type": "string" }] }],
+                    "transitions": [
+                        { "from": "idle", "to": "idle", "event": "INIT", "effects": [["os/read-file", "/orb-never-granted/a.txt", { "emit": { "success": "READ_DONE", "failure": "READ_FAILED" } }]] },
+                        { "from": "idle", "to": "idle", "event": "A", "effects": [["credential-status", { "credential": "PATH", "scope": "app" }, { "emit": { "success": "READ_DONE", "failure": "READ_FAILED" } }]] },
+                        { "from": "idle", "to": "idle", "event": "B", "effects": [["credential-status", { "credential": "ORB_SURELY_UNSET", "scope": "app" }, { "emit": { "success": "READ_DONE", "failure": "READ_FAILED" } }]] },
+                        { "from": "idle", "to": "idle", "event": "READ_DONE" },
+                        { "from": "idle", "to": "idle", "event": "READ_FAILED" }
+                    ]
+                } }],
+                "pages": [{ "name": "Home", "path": "/", "traits": [{ "ref": "Shown" }] }]
+            }]
+        })
+    }
+
+    /// Opens `guest` live under an opener holding `kernel: { guest: kernel_kinds }`, then answers `program/inputs { guest, ..read }`.
+    fn guest_read(guest: serde_json::Value, kernel_kinds: serde_json::Value, read: serde_json::Value) -> serde_json::Value {
+        let mut ask = read;
+        ask["guest"] = serde_json::json!("@entity.guest");
+        let runtime = Host::new(Arc::new(DriverAdapter::memory())).shared();
+        let opener: orbital_core::OrbitalSchema = serde_json::from_value(serde_json::json!({
+            "name": "Opener", "typeContractVersion": 1,
+            "orbitals": [{
+                "name": "Opener",
+                "entity": { "name": "Box", "persistence": "runtime", "fields": [{ "name": "id", "type": "string" }, { "name": "guest", "type": "string" }, { "name": "answer", "type": "string" }] },
+                "osGrants": { "kernel": [{ "target": "guest", "kinds": kernel_kinds }] },
+                "traits": [{
+                    "name": "Opener", "linkedEntity": "Box",
+                    "stateMachine": {
+                        "states": [{ "name": "idle", "isInitial": true }],
+                        "events": [{ "key": "OPEN", "name": "Open", "payloadSchema": [{ "name": "program", "type": "object", "required": true }] }, { "key": "OPENED", "name": "Opened" }, { "key": "FAILED", "name": "Failed" }, { "key": "INSPECT", "name": "Inspect" }, { "key": "SEEN", "name": "Seen" }],
+                        "transitions": [
+                            { "from": "idle", "to": "idle", "event": "OPEN", "effects": [["program/open", "@payload.program", { "route": "/", "declared": true, "integrations": "live" }, { "emit": { "success": "OPENED", "failure": "FAILED" } }]] },
+                            { "from": "idle", "to": "idle", "event": "OPENED", "effects": [["set", "@entity.guest", "@payload.result.guest"]] },
+                            { "from": "idle", "to": "idle", "event": "INSPECT", "effects": [["program/inputs", ask, { "emit": { "success": "SEEN", "failure": "FAILED" } }]] },
+                            { "from": "idle", "to": "idle", "event": "SEEN", "effects": [["set", "@entity.answer", ["json/stringify", "@payload.result"]]] },
+                            { "from": "idle", "to": "idle", "event": "FAILED", "effects": [["set", "@entity.answer", ["str/concat", "refused: ", "@payload.error"]]] }
+                        ]
+                    }
+                }]
+            }]
+        }))
+        .unwrap();
+        runtime.register_schema(opener).unwrap();
+        runtime.dispatch("Opener", "default", "OPEN", serde_json::from_value(serde_json::json!({ "program": guest })).unwrap()).unwrap();
+        runtime.dispatch("Opener", "default", "INSPECT", serde_json::from_value(serde_json::json!({})).unwrap()).unwrap();
+        let entity = serde_json::to_value(&runtime.kernel.snapshot_trait("Opener", Some("default")).entity).unwrap();
+        let answer = entity["answer"].as_str().unwrap_or_default();
+        serde_json::from_str(answer).unwrap_or(serde_json::Value::String(answer.to_string()))
+    }
+
+    #[test]
+    fn a_guests_credentials_list_each_name_its_program_declares_masked_and_held_or_not() {
+        let seen = guest_read(guest_with_secrets_and_a_refused_read(), serde_json::json!(["spawn", "declared"]), serde_json::json!({ "credentials": true }));
+        let entries = seen["credentials"].as_array().unwrap_or_else(|| panic!("{seen}"));
+        let of = |name: &str| entries.iter().find(|e| e["name"] == name).unwrap_or_else(|| panic!("{name} in {seen}"));
+        assert_eq!(of("PATH")["set"], true, "{seen}");
+        assert_eq!(of("ORB_SURELY_UNSET")["set"], false, "{seen}");
+        assert_eq!(of("ORB_SURELY_UNSET")["tail"], "", "{seen}");
+        assert!(of("PATH").get("value").is_none(), "a listing carries no value: {seen}");
+    }
+
+    #[test]
+    fn a_guests_credential_value_is_revealed_only_by_name_and_only_when_declared() {
+        let guest = guest_with_secrets_and_a_refused_read;
+        let kinds = || serde_json::json!(["spawn", "declared"]);
+        let seen = guest_read(guest(), kinds(), serde_json::json!({ "credentials": "PATH" }));
+        assert_eq!(seen["credentials"]["value"], std::env::var("PATH").unwrap().as_str(), "{seen}");
+        let refused = guest_read(guest(), kinds(), serde_json::json!({ "credentials": "HOME" }));
+        assert!(refused.as_str().is_some_and(|text| text.starts_with("refused: ")), "{refused}");
+    }
+
+    #[test]
+    fn control_an_opener_without_guest_declared_reads_no_credentials_or_denials() {
+        for read in [serde_json::json!({ "credentials": true }), serde_json::json!({ "denials": true })] {
+            let seen = guest_read(guest_with_secrets_and_a_refused_read(), serde_json::json!(["spawn"]), read);
+            assert!(seen.as_str().is_some_and(|text| text.starts_with("refused: ")), "{seen}");
+        }
+    }
+
+    #[test]
+    fn a_guests_denied_operation_is_listed_even_when_its_program_handled_the_failure() {
+        let seen = guest_read(guest_with_secrets_and_a_refused_read(), serde_json::json!(["spawn", "declared"]), serde_json::json!({ "denials": true }));
+        let entries = seen["denials"].as_array().unwrap_or_else(|| panic!("{seen}"));
+        assert_eq!(entries.len(), 1, "{seen}");
+        assert!(entries[0]["message"].as_str().is_some_and(|m| m.contains("/orb-never-granted/a.txt")), "{seen}");
+        assert!(entries[0]["count"].as_f64().is_some_and(|n| n >= 1.0), "{seen}");
+    }
+
+    #[test]
+    fn control_a_guest_nothing_was_refused_lists_no_denials() {
+        let guest = serde_json::json!({
+            "name": "QuietGuest", "typeContractVersion": 1,
+            "orbitals": [{
+                "name": "Quiet",
+                "entity": { "name": "Doc", "persistence": "runtime", "fields": [{ "name": "id", "type": "string" }] },
+                "traits": [{ "name": "Shown", "linkedEntity": "Doc", "stateMachine": { "states": [{ "name": "idle", "isInitial": true }], "events": [{ "key": "INIT", "name": "Init" }], "transitions": [{ "from": "idle", "to": "idle", "event": "INIT" }] } }],
+                "pages": [{ "name": "Home", "path": "/", "traits": [{ "ref": "Shown" }] }]
+            }]
+        });
+        let seen = guest_read(guest, serde_json::json!(["spawn", "declared"]), serde_json::json!({ "denials": true }));
+        assert_eq!(seen["denials"], serde_json::json!([]), "{seen}");
+    }
+
+    #[test]
+    fn a_guests_environment_lists_each_declared_name_masked_with_its_effective_grants() {
+        let path = std::env::var("PATH").unwrap();
+        let tail: String = path.chars().rev().take(4).collect::<Vec<_>>().into_iter().rev().collect();
+        let seen = guest_environment(serde_json::json!(["spawn", "declared"]), serde_json::json!(true));
+        let entries = seen["environment"].as_array().unwrap_or_else(|| panic!("{seen}"));
+        let of = |name: &str| entries.iter().find(|e| e["name"] == name).cloned().unwrap_or_else(|| panic!("{name}: {seen}"));
+        assert_eq!(of("PATH")["set"], true);
+        assert_eq!(of("PATH")["tail"], tail.as_str());
+        assert!(of("PATH").get("value").is_none(), "the list never carries a value: {seen}");
+        assert_eq!(of("ORB_SURELY_UNSET")["set"], false, "edge: a declared variable the host does not have is listed unset");
+        assert_eq!(seen["grants"]["net"][0]["target"], "api.example.com:443", "the grants the guest really holds: {seen}");
+    }
+
+    #[test]
+    fn asking_for_one_declared_name_reveals_its_value() {
+        let seen = guest_environment(serde_json::json!(["spawn", "declared"]), serde_json::json!("PATH"));
+        assert_eq!(seen["environment"]["value"], std::env::var("PATH").unwrap().as_str(), "{seen}");
+    }
+
+    #[test]
+    fn edge_a_name_the_guest_does_not_declare_is_refused() {
+        let seen = guest_environment(serde_json::json!(["spawn", "declared"]), serde_json::json!("HOME"));
+        assert!(seen.as_str().is_some_and(|e| e.starts_with("refused:") && e.contains("does not declare")), "{seen}");
+    }
+
+    #[test]
+    fn control_an_opener_without_guest_declared_cannot_read_a_guests_environment() {
+        let seen = guest_environment(serde_json::json!(["spawn"]), serde_json::json!(true));
+        assert!(seen.as_str().is_some_and(|e| e.starts_with("refused:") && e.contains("guest") && e.contains("declared")), "{seen}");
     }
 
     #[test]
