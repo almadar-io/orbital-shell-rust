@@ -145,6 +145,10 @@ mod tests {
     /// A boot trait on a `[runtime]` entity: `INIT` stamps `due` and waits; a `[background]` tick in `waiting` sees it and
     /// emits `DUE`, whose own arm clears it and moves on (G-CROSS-538/539).
     fn ticking_host() -> Host {
+        ticking_host_with(true)
+    }
+
+    fn ticking_host_with(background: bool) -> Host {
         let program: orbital_core::OrbitalSchema = serde_json::from_value(serde_json::json!({
             "name": "Ticking", "version": "1.0.0", "typeContractVersion": 1,
             "orbitals": [{
@@ -162,7 +166,7 @@ mod tests {
                             { "from": "waiting", "to": "started", "event": "DUE", "effects": [["set", "@entity.due", null]] }
                         ]
                     },
-                    "ticks": [{ "name": "beat", "interval": 10, "runsInBackground": true, "appliesTo": ["waiting"],
+                    "ticks": [{ "name": "beat", "interval": 10, "runsInBackground": background, "appliesTo": ["waiting"],
                         "guard": ["=", "@entity.due", true], "effects": [["emit", "DUE", {}]] }],
                     "emits": [{ "event": "DUE" }]
                 }],
@@ -185,6 +189,17 @@ mod tests {
             host.tick_pass(start + step * 20, orbital_core::Calendar::local_now());
         }
         assert_eq!(state(&host, "Starter").as_deref(), Some("started"), "the tick read the frame INIT wrote");
+    }
+
+    #[test]
+    fn a_boot_trait_s_mount_scoped_tick_runs_on_the_host_clock_with_no_client() {
+        let host = ticking_host_with(false);
+        mount_init(&host, ProtocolSide::Server).unwrap();
+        let start = host.monotonic_ms();
+        for step in 0..5 {
+            host.tick_pass(start + step * 20, orbital_core::Calendar::local_now());
+        }
+        assert_eq!(state(&host, "Starter").as_deref(), Some("started"), "a boot trait is endpoint-mounted (EXEC-ENDPOINT-3)");
     }
 
     #[test]
@@ -259,6 +274,98 @@ mod tests {
         mount_init(&host, ProtocolSide::Server).unwrap();
         assert_eq!(state(&host, "Worker").as_deref(), Some("busy"));
         assert_eq!(inited(&host), serde_json::json!(true));
+    }
+
+    /// A route trait `Asker` emits `GO`; `Worker`, on a boot-only orbital, hears it only when its boot `INIT` has run on
+    /// the instance the step reaches (G-CROSS: endpoint traits are program-wide).
+    fn shared_worker_host() -> Host {
+        let program: orbital_core::OrbitalSchema = serde_json::from_value(serde_json::json!({
+            "name": "Shared", "version": "1.0.0", "typeContractVersion": 1,
+            "orbitals": [{
+                "name": "Ui",
+                "entity": { "name": "Form", "persistence": "runtime", "fields": [{ "name": "id", "type": "string" }] },
+                "traits": [{
+                    "name": "Asker", "linkedEntity": "Form",
+                    "stateMachine": {
+                        "states": [{ "name": "idle", "isInitial": true }],
+                        "events": [{ "key": "INIT", "name": "INIT" }, { "key": "ASK", "name": "ASK" }],
+                        "transitions": [
+                            { "from": "idle", "to": "idle", "event": "INIT" },
+                            { "from": "idle", "to": "idle", "event": "ASK", "effects": [["emit", "GO", {}]] }
+                        ]
+                    },
+                    "emits": [{ "event": "GO" }]
+                }],
+                "pages": [{ "name": "Home", "path": "/", "traits": [{ "ref": "Asker" }] }]
+            }, {
+                "name": "Jobs",
+                "entity": { "name": "Job", "persistence": "runtime", "fields": [{ "name": "id", "type": "string" }, { "name": "booted", "type": "boolean", "default": false }] },
+                "traits": [{
+                    "name": "Worker", "linkedEntity": "Job",
+                    "listens": [{ "event": "GO", "triggers": "GO", "source": { "kind": "orbital", "orbital": "Ui", "trait": "Asker" } }],
+                    "stateMachine": {
+                        "states": [{ "name": "idle", "isInitial": true }, { "name": "ready" }, { "name": "worked" }],
+                        "events": [{ "key": "INIT", "name": "INIT" }, { "key": "GO", "name": "GO" }],
+                        "transitions": [
+                            { "from": "idle", "to": "ready", "event": "INIT", "effects": [["set", "@entity.booted", true]] },
+                            { "from": "ready", "to": "worked", "event": "GO", "guard": ["=", "@entity.booted", true] }
+                        ]
+                    }
+                }],
+                "pages": [{ "name": "Bg", "path": "", "protocol": "boot", "traits": [{ "ref": "Worker" }] }]
+            }, {
+                "name": "Api",
+                "entity": { "name": "Call", "persistence": "runtime", "fields": [{ "name": "id", "type": "string" }] },
+                "traits": [{
+                    "name": "Binder", "linkedEntity": "Call",
+                    "listens": [{ "event": "GO", "triggers": "GO", "source": { "kind": "orbital", "orbital": "Ui", "trait": "Asker" } }],
+                    "stateMachine": {
+                        "states": [{ "name": "open", "isInitial": true }, { "name": "bound" }],
+                        "events": [{ "key": "GO", "name": "GO" }],
+                        "transitions": [{ "from": "open", "to": "bound", "event": "GO" }]
+                    }
+                }],
+                "pages": [{ "name": "Http", "path": "", "protocol": "http", "traits": [{ "ref": "Binder" }] }]
+            }]
+        }))
+        .unwrap();
+        let host = Host::new(Arc::new(DriverAdapter::memory()));
+        host.register_schema(program).unwrap();
+        host
+    }
+
+    #[test]
+    fn a_viewer_s_step_reaches_the_boot_trait_s_one_program_wide_instance() {
+        let host = shared_worker_host();
+        mount_init(&host, ProtocolSide::Server).unwrap();
+        {
+            let _tab = host.kernel().enter_session("tab-1");
+            host.dispatch("Asker", RUN_ENTITY, "ASK", orbital_core::Value::Null).unwrap();
+        }
+        assert_eq!(state(&host, "Worker").as_deref(), Some("worked"), "the boot instance heard GO");
+    }
+
+    #[test]
+    fn control_an_http_endpoint_trait_keeps_one_instance_per_viewer() {
+        let host = shared_worker_host();
+        mount_init(&host, ProtocolSide::Server).unwrap();
+        {
+            let _tab = host.kernel().enter_session("tab-1");
+            host.dispatch("Asker", RUN_ENTITY, "ASK", orbital_core::Value::Null).unwrap();
+            assert_eq!(state(&host, "Binder").as_deref(), Some("bound"), "the viewer's own instance stepped");
+        }
+        assert_ne!(state(&host, "Binder").as_deref(), Some("bound"), "the program session's instance did not step");
+    }
+
+    #[test]
+    fn control_a_route_trait_keeps_one_instance_per_viewer() {
+        let host = shared_worker_host();
+        mount_init(&host, ProtocolSide::Server).unwrap();
+        {
+            let _tab = host.kernel().enter_session("tab-1");
+            host.dispatch("Asker", RUN_ENTITY, "INIT", orbital_core::Value::Null).unwrap();
+        }
+        assert_eq!(state(&host, "Worker").as_deref(), Some("ready"), "an INIT of the route trait reaches no boot trait");
     }
 
     #[test]

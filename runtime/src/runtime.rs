@@ -931,8 +931,7 @@ impl Host {
         let due = self.ticks.lock().due(now_ms, || calendar);
         let mut ran = Vec::new();
         for (trait_name, tick) in due {
-            let background = self.kernel.tick_of(&trait_name, &tick).is_some_and(|t| t.background);
-            if !(background || (self.kernel.runs_client_traits() && self.kernel.trait_mounted(&trait_name))) {
+            if !self.kernel.tick_runs(&trait_name, &tick) {
                 continue;
             }
             self.ticks_in_flight.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
