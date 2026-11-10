@@ -268,6 +268,7 @@ impl orbital_core::runtime::kernel::guest_hosting::GuestHosting for HostGuests {
         for (name, value) in env {
             host.handles.set_env(name, value.clone());
         }
+        host.tap_completions();
         Arc::new(GuestOf(host.shared()))
     }
 }
@@ -311,7 +312,9 @@ impl orbital_core::runtime::kernel::guest_hosting::GuestHost for GuestOf {
 
     fn tick_pass(&self) -> Result<DispatchOutcomes, String> {
         let host = &self.0;
-        Ok(host.tick_pass_moving(host.monotonic_ms(), orbital_core::Calendar::local_now()).into_iter().flat_map(|(_, moved)| moved).collect())
+        let mut outcomes: DispatchOutcomes = host.tick_pass_moving(host.monotonic_ms(), orbital_core::Calendar::local_now()).into_iter().flat_map(|(_, moved)| moved).collect();
+        outcomes.extend(host.drain_completions().into_iter().filter_map(|completion| completion.outcomes.ok()).flatten());
+        Ok(outcomes)
     }
 }
 
@@ -1537,6 +1540,11 @@ impl Host {
     /// Start recording the completions this host delivers; [`Self::take_completions`] returns and stops the record.
     pub fn tap_completions(&self) {
         *self.completion_tap.lock() = Some(Vec::new());
+    }
+
+    /// The completions delivered since the last drain, in delivery order, recording on.
+    pub fn drain_completions(&self) -> Vec<orbital_core::step_replay::StepCompletion> {
+        self.completion_tap.lock().as_mut().map(std::mem::take).unwrap_or_default()
     }
 
     /// The completions delivered since [`Self::tap_completions`], in delivery order.
@@ -3189,6 +3197,94 @@ mod tests {
         entity["answer"].as_str().unwrap_or_default().to_string()
     }
 
+    fn guest_late_emits(deferred: bool) -> Vec<String> {
+        let dir = std::env::temp_dir().join(format!("orb-guest-late-{deferred}-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("token.txt");
+        std::fs::write(&file, "t").unwrap();
+        let dir = std::fs::canonicalize(&dir).unwrap();
+        let file = dir.join("token.txt");
+        let read = if deferred {
+            serde_json::json!(["os/read-file", file.to_str().unwrap(), { "key": "late", "emit": { "success": "DONE", "failure": "DONE" } }])
+        } else {
+            serde_json::json!(["emit", "DONE", {}])
+        };
+        let guest = serde_json::json!({
+            "name": "LateGuest", "typeContractVersion": 1,
+            "osGrants": { "fs": [{ "glob": format!("{}/**", dir.to_str().unwrap()), "modes": ["read"] }] },
+            "orbitals": [{
+                "name": "Lates",
+                "entity": { "name": "Doc", "persistence": "runtime", "fields": [{ "name": "id", "type": "string" }] },
+                "traits": [{
+                    "name": "Late", "linkedEntity": "Doc",
+                    "stateMachine": {
+                        "states": [{ "name": "idle", "isInitial": true }],
+                        "events": [{ "key": "INIT", "name": "Init" }, { "key": "PRESENT", "name": "Present" }, { "key": "DONE", "name": "Done" }, { "key": "BOUND", "name": "Bound" }],
+                        "transitions": [
+                            { "from": "idle", "to": "idle", "event": "INIT", "effects": [["render-ui", "main", { "type": "typography", "content": "ready" }]] },
+                            { "from": "idle", "to": "idle", "event": "PRESENT", "effects": [read] },
+                            { "from": "idle", "to": "idle", "event": "DONE", "effects": [["emit", "BOUND", {}]] }
+                        ]
+                    }
+                }],
+                "pages": [{ "name": "Home", "path": "/", "traits": [{ "ref": "Late" }] }]
+            }]
+        });
+        let runtime = Host::new(Arc::new(DriverAdapter::memory())).shared();
+        let opener: orbital_core::OrbitalSchema = serde_json::from_value(serde_json::json!({
+            "name": "Opener", "typeContractVersion": 1,
+            "orbitals": [{
+                "name": "Opener",
+                "entity": { "name": "Box", "persistence": "runtime", "fields": [{ "name": "id", "type": "string" }, { "name": "guest", "type": "string" }] },
+                "osGrants": { "kernel": [{ "target": "guest", "kinds": ["spawn", "declared"] }], "fs": [{ "glob": format!("{}/**", dir.to_str().unwrap()), "modes": ["read"] }] },
+                "traits": [{
+                    "name": "Opener", "linkedEntity": "Box",
+                    "stateMachine": {
+                        "states": [{ "name": "idle", "isInitial": true }],
+                        "events": [{ "key": "OPEN", "name": "Open", "payloadSchema": [{ "name": "program", "type": "object", "required": true }] }, { "key": "OPENED", "name": "Opened", "payloadSchema": [{ "name": "result", "type": "object" }] }, { "key": "ANSWERED", "name": "Answered", "payloadSchema": [{ "name": "result", "type": "object" }] }, { "key": "FAILED", "name": "Failed", "payloadSchema": [{ "name": "error", "type": "string" }] }],
+                        "transitions": [
+                            { "from": "idle", "to": "idle", "event": "OPEN", "effects": [["program/open", "@payload.program", { "route": "/", "declared": true, "integrations": "live" }, { "emit": { "success": "OPENED", "failure": "FAILED" } }]] },
+                            { "from": "idle", "to": "idle", "event": "OPENED", "effects": [["set", "@entity.guest", "@payload.result.guest"], ["program/dispatch", "PRESENT", {}, { "guest": "@payload.result.guest", "emit": { "success": "ANSWERED", "failure": "FAILED" } }]] },
+                            { "from": "idle", "to": "idle", "event": "ANSWERED", "effects": [] },
+                            { "from": "idle", "to": "idle", "event": "FAILED", "effects": [] }
+                        ]
+                    }
+                }]
+            }]
+        }))
+        .unwrap();
+        runtime.register_schema(opener).unwrap();
+        runtime.dispatch("Opener", "default", "OPEN", serde_json::from_value(serde_json::json!({ "program": guest })).unwrap()).unwrap();
+        let entity = serde_json::to_value(&runtime.kernel.snapshot_trait("Opener", Some("default")).entity).unwrap();
+        let handle = entity["guest"].as_str().unwrap_or_default().to_string();
+        let mut seen = Vec::new();
+        for _ in 0..100 {
+            if let Ok(orbital_core::runtime::kernel::GuestTicks::Painted(answer)) = runtime.kernel.guest_tick_pass(&handle) {
+                let answer = serde_json::to_value(&answer).unwrap();
+                for emitted in answer["emitted"].as_array().cloned().unwrap_or_default() {
+                    seen.push(emitted["event"].as_str().unwrap_or_default().to_string());
+                }
+            }
+            if seen.iter().any(|e| e == "BOUND") {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        seen
+    }
+
+    #[test]
+    fn a_guests_late_completion_emits_reach_the_opener_on_its_live_pass() {
+        let seen = guest_late_emits(true);
+        assert!(seen.iter().any(|e| e == "BOUND"), "the BOUND a deferred completion emitted arrives on the guest's live pass: {seen:?}");
+    }
+
+    #[test]
+    fn control_what_a_guest_dispatch_already_answered_is_not_relayed_again() {
+        let seen = guest_late_emits(false);
+        assert!(!seen.iter().any(|e| e == "BOUND"), "a BOUND emitted inside the dispatch was answered there, not on the live pass: {seen:?}");
+    }
+
     #[test]
     fn a_guest_dispatch_answers_what_its_keyed_completions_emit() {
         let answer = guest_dispatch_emits(true);
@@ -3362,6 +3458,104 @@ mod tests {
             ]
         }))
         .unwrap()
+    }
+
+    /// A program whose `Ticket` row a driver answers at once, read by id only after a keyed `os/read-file` completes:
+    /// the read runs in the completion's dispatch, as identity/sign-in does after a bearer's key fetch.
+    fn read_after_a_completion() -> serde_json::Value {
+        serde_json::json!({
+            "name": "late-read", "typeContractVersion": 1,
+            "osGrants": { "fs": [{ "glob": "/etc/hosts", "modes": ["read"] }] },
+            "orbitals": [
+                { "name": "Tickets",
+                  "entity": { "name": "Ticket", "persistence": "persistent", "collection": "tickets", "store": "Rows",
+                      "fields": [{ "name": "id", "type": "string" }, { "name": "title", "type": "string" }] },
+                  "traits": [{ "name": "Desk", "linkedEntity": "Ticket", "stateMachine": {
+                      "states": [{ "name": "idle", "isInitial": true }],
+                      "events": [{ "key": "INIT", "name": "INIT" }, { "key": "LOOK", "name": "LOOK" }, { "key": "READY", "name": "READY" }, { "key": "SEEN", "name": "SEEN" }, { "key": "UNSEEN", "name": "UNSEEN" }, { "key": "FOUND", "name": "FOUND" }, { "key": "MISSING", "name": "MISSING" }],
+                      "transitions": [
+                          { "from": "idle", "to": "idle", "event": "INIT", "effects": [["render-ui", "main", { "type": "typography", "content": "desk" }]] },
+                          { "from": "idle", "to": "idle", "event": "LOOK", "effects": [["os/read-file", "/etc/hosts", { "key": "late", "emit": { "success": "READY", "failure": "READY" } }]] },
+                          { "from": "idle", "to": "idle", "event": "READY", "effects": [["fetch", "Ticket", { "id": "t1", "emit": { "success": "SEEN", "failure": "UNSEEN" } }]] },
+                          { "from": "idle", "to": "idle", "event": "SEEN", "effects": [["emit", "FOUND", { "title": ["default", "@payload.data.title", "none"] }]] },
+                          { "from": "idle", "to": "idle", "event": "UNSEEN", "effects": [["emit", "MISSING", { "error": "@payload.error" }]] }
+                      ] } }],
+                  "pages": [{ "name": "Home", "path": "/", "traits": [{ "ref": "Desk" }] }] },
+                { "name": "Rows", "pages": [],
+                  "entity": { "name": "Mirror", "persistence": "runtime", "fields": [{ "name": "id", "type": "string" }] },
+                  "traits": [{ "name": "RowsDriver", "linkedEntity": "Mirror", "stateMachine": {
+                      "states": [{ "name": "ready", "isInitial": true }],
+                      "events": [{ "key": "ROW_READ", "name": "ROW_READ" }],
+                      "emits": [{ "event": "ROW_FOUND" }],
+                      "transitions": [
+                          { "from": "ready", "to": "ready", "event": "ROW_READ", "effects": [["emit", "ROW_FOUND", { "key": "@payload.key", "row": { "id": "t1", "title": "from the driver" } }]] }
+                      ] } }] }
+            ]
+        })
+    }
+
+    #[test]
+    fn a_read_in_a_completions_dispatch_reaches_the_store_driver() {
+        let runtime = Host::new(Arc::new(DriverAdapter::memory())).shared();
+        runtime.register_schema(serde_json::from_value(read_after_a_completion()).unwrap()).unwrap();
+        runtime.tap_completions();
+        runtime.dispatch("Desk", "default", "LOOK", serde_json::from_value(serde_json::json!({})).unwrap()).unwrap();
+        let mut events = Vec::new();
+        for _ in 0..100 {
+            for completion in runtime.drain_completions() {
+                let response = orbital_core::EventResponse::from_process_results(&completion.outcomes.unwrap_or_default(), "Desk", &completion.event);
+                events.extend(response.emitted_events.iter().map(|e| serde_json::json!({ "event": e.event, "payload": serde_json::to_value(&e.payload).unwrap_or_default() })));
+            }
+            if !events.is_empty() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        let text = serde_json::to_string(&events).unwrap();
+        assert!(text.contains("from the driver"), "a served host's completion read is answered by the driver: {text}");
+    }
+
+    #[test]
+    fn a_guests_read_in_a_completions_dispatch_reaches_its_store_driver() {
+        let runtime = Host::new(Arc::new(DriverAdapter::memory())).shared();
+        let opener: orbital_core::OrbitalSchema = serde_json::from_value(serde_json::json!({
+            "name": "Opener", "typeContractVersion": 1,
+            "orbitals": [{
+                "name": "Opener",
+                "entity": { "name": "Box", "persistence": "runtime", "fields": [{ "name": "id", "type": "string" }, { "name": "guest", "type": "string" }] },
+                "osGrants": { "kernel": [{ "target": "guest", "kinds": ["spawn", "declared"] }], "fs": [{ "glob": "/etc/hosts", "modes": ["read"] }] },
+                "traits": [{
+                    "name": "Opener", "linkedEntity": "Box",
+                    "stateMachine": {
+                        "states": [{ "name": "idle", "isInitial": true }],
+                        "events": [{ "key": "OPEN", "name": "Open", "payloadSchema": [{ "name": "program", "type": "object", "required": true }] }, { "key": "OPENED", "name": "Opened", "payloadSchema": [{ "name": "result", "type": "object" }] }, { "key": "ANSWERED", "name": "Answered", "payloadSchema": [{ "name": "result", "type": "object" }] }, { "key": "FAILED", "name": "Failed", "payloadSchema": [{ "name": "error", "type": "string" }] }],
+                        "transitions": [
+                            { "from": "idle", "to": "idle", "event": "OPEN", "effects": [["program/open", "@payload.program", { "route": "/", "declared": true, "integrations": "live" }, { "emit": { "success": "OPENED", "failure": "FAILED" } }]] },
+                            { "from": "idle", "to": "idle", "event": "OPENED", "effects": [["set", "@entity.guest", "@payload.result.guest"], ["program/dispatch", "LOOK", {}, { "guest": "@payload.result.guest", "emit": { "success": "ANSWERED", "failure": "FAILED" } }]] },
+                            { "from": "idle", "to": "idle", "event": "ANSWERED", "effects": [] },
+                            { "from": "idle", "to": "idle", "event": "FAILED", "effects": [] }
+                        ]
+                    }
+                }]
+            }]
+        }))
+        .unwrap();
+        runtime.register_schema(opener).unwrap();
+        runtime.dispatch("Opener", "default", "OPEN", serde_json::from_value(serde_json::json!({ "program": read_after_a_completion() })).unwrap()).unwrap();
+        let entity = serde_json::to_value(&runtime.kernel.snapshot_trait("Opener", Some("default")).entity).unwrap();
+        let handle = entity["guest"].as_str().unwrap_or_default().to_string();
+        let mut seen = Vec::new();
+        for _ in 0..100 {
+            if let Ok(orbital_core::runtime::kernel::GuestTicks::Painted(answer)) = runtime.kernel.guest_tick_pass(&handle) {
+                seen.extend(serde_json::to_value(&answer).unwrap()["emitted"].as_array().cloned().unwrap_or_default());
+            }
+            if !seen.is_empty() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        let text = serde_json::to_string(&seen).unwrap();
+        assert!(text.contains("from the driver"), "a live guest's completion read is answered by its driver: {text}");
     }
 
     /// `LOOK`'s result as the asking trait recorded it, failing rather than hanging when the dispatch never ends.
