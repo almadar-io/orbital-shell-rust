@@ -246,11 +246,17 @@ impl orbital_core::effects::executor::SubstrateHandler for SelfSubstrate {
 
 /// Hosts every guest this host's kernel opens as a host of its own over in-memory rows (EXEC-CONC-7), so a guest's self
 /// `program/dispatch`, keyed asks and route mounts are answered as a served program's are, under the grants it was passed.
-struct HostGuests;
+/// A guest opened with `program: true` is answered by `substrate`, this host's own program port.
+struct HostGuests {
+    substrate: Option<SubstratePort>,
+}
 
 impl orbital_core::runtime::kernel::guest_hosting::GuestHosting for HostGuests {
-    fn open(&self, integrations: GuestIntegrations, cwd: Option<&str>, env: &[(String, Option<String>)]) -> Arc<dyn orbital_core::runtime::kernel::guest_hosting::GuestHost> {
+    fn open(&self, integrations: GuestIntegrations, cwd: Option<&str>, env: &[(String, Option<String>)], program: bool) -> Arc<dyn orbital_core::runtime::kernel::guest_hosting::GuestHost> {
         let mut config = HostConfig::default();
+        if program {
+            config.substrate = self.substrate.clone();
+        }
         if let Some(dir) = cwd {
             let mut anchors = orbital_core::runtime::os_host::OsAnchors::of_process();
             let home = anchors.home.clone();
@@ -700,7 +706,7 @@ impl Host {
             kernel_config,
         ));
         kernel.set_stateful(true);
-        kernel.set_guest_hosting(Arc::new(HostGuests));
+        kernel.set_guest_hosting(Arc::new(HostGuests { substrate: config.substrate.clone() }));
         let (live_tx, _) = broadcast::channel(LIVE_BROADCAST_CAPACITY);
         let rows = persistence.durable().then(|| {
             Arc::new(orbital_core::runtime::credential_store::StoreCredentialRows(persistence.clone()))
@@ -3271,6 +3277,84 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(20));
         }
         seen
+    }
+
+    struct PortEcho;
+
+    impl orbital_core::effects::executor::SubstrateHandler for PortEcho {
+        fn run(&self, op: &str, _args: &[Value]) -> Result<Value, orbital_core::effects::executor::SubstrateFailure> {
+            Ok(Value::string(format!("ran {op}")))
+        }
+    }
+
+    /// What a guest's `program/read` did, as the opener's dispatch into it reports: the events the guest emitted, or
+    /// `OPEN_REFUSED` when `program/open` failed. `held` is whether the opener holds `guest: [program]`, `asked`
+    /// whether its `program/open` asks for the port.
+    fn guest_program_port(held: bool, asked: bool) -> Vec<String> {
+        let guest = serde_json::json!({
+            "name": "PortGuest", "typeContractVersion": 1,
+            "orbitals": [{
+                "name": "Ports",
+                "entity": { "name": "Doc", "persistence": "runtime", "fields": [{ "name": "id", "type": "string" }] },
+                "traits": [{
+                    "name": "Port", "linkedEntity": "Doc",
+                    "stateMachine": {
+                        "states": [{ "name": "idle", "isInitial": true }],
+                        "events": [{ "key": "INIT", "name": "Init" }, { "key": "ASK", "name": "Ask" }, { "key": "GOT", "name": "Got" }, { "key": "REFUSED", "name": "Refused" }, { "key": "HAD_PORT", "name": "Had" }, { "key": "NO_PORT", "name": "No" }],
+                        "transitions": [
+                            { "from": "idle", "to": "idle", "event": "INIT", "effects": [["render-ui", "main", { "type": "typography", "content": "ready" }]] },
+                            { "from": "idle", "to": "idle", "event": "ASK", "effects": [["program/read", "app x [ version: \"1.0.0\" ]", {}, { "emit": { "success": "GOT", "failure": "REFUSED" } }]] },
+                            { "from": "idle", "to": "idle", "event": "GOT", "effects": [["emit", "HAD_PORT", {}]] },
+                            { "from": "idle", "to": "idle", "event": "REFUSED", "effects": [["emit", "NO_PORT", {}]] }
+                        ]
+                    }
+                }],
+                "pages": [{ "name": "Home", "path": "/", "traits": [{ "ref": "Port" }] }]
+            }]
+        });
+        let config = HostConfig { substrate: Some(SubstratePort(Arc::new(PortEcho))), ..HostConfig::default() };
+        let runtime = Host::with_config(Arc::new(DriverAdapter::memory()), config).shared();
+        let kinds = if held { serde_json::json!(["spawn", "program"]) } else { serde_json::json!(["spawn"]) };
+        let opener: orbital_core::OrbitalSchema = serde_json::from_value(serde_json::json!({
+            "name": "Opener", "typeContractVersion": 1,
+            "orbitals": [{
+                "name": "Opener",
+                "entity": { "name": "Box", "persistence": "runtime", "fields": [{ "name": "id", "type": "string" }, { "name": "seen", "type": "object" }, { "name": "refused", "type": "string" }] },
+                "osGrants": { "kernel": [{ "target": "guest", "kinds": kinds }] },
+                "traits": [{
+                    "name": "Opener", "linkedEntity": "Box",
+                    "stateMachine": {
+                        "states": [{ "name": "idle", "isInitial": true }],
+                        "events": [{ "key": "OPEN", "name": "Open", "payloadSchema": [{ "name": "program", "type": "object", "required": true }] }, { "key": "OPENED", "name": "Opened", "payloadSchema": [{ "name": "result", "type": "object" }] }, { "key": "ANSWERED", "name": "Answered", "payloadSchema": [{ "name": "result", "type": "object" }] }, { "key": "FAILED", "name": "Failed", "payloadSchema": [{ "name": "error", "type": "string" }] }],
+                        "transitions": [
+                            { "from": "idle", "to": "idle", "event": "OPEN", "effects": [["program/open", "@payload.program", { "route": "/", "grants": {}, "program": asked }, { "emit": { "success": "OPENED", "failure": "FAILED" } }]] },
+                            { "from": "idle", "to": "idle", "event": "OPENED", "effects": [["program/dispatch", "ASK", {}, { "guest": "@payload.result.guest", "emit": { "success": "ANSWERED", "failure": "FAILED" } }]] },
+                            { "from": "idle", "to": "idle", "event": "ANSWERED", "effects": [["set", "@entity.seen", "@payload.result"]] },
+                            { "from": "idle", "to": "idle", "event": "FAILED", "effects": [["set", "@entity.refused", "@payload.error"]] }
+                        ]
+                    }
+                }]
+            }]
+        }))
+        .unwrap();
+        runtime.register_schema(opener).unwrap();
+        runtime.dispatch("Opener", "default", "OPEN", serde_json::from_value(serde_json::json!({ "program": guest })).unwrap()).unwrap();
+        let entity = serde_json::to_value(&runtime.kernel.snapshot_trait("Opener", Some("default")).entity).unwrap();
+        if entity["refused"].as_str().is_some_and(|text| !text.is_empty()) {
+            return vec!["OPEN_REFUSED".to_string(), entity["refused"].as_str().unwrap_or_default().to_string()];
+        }
+        entity["seen"]["emitted"].as_array().cloned().unwrap_or_default().iter().map(|e| e["event"].as_str().unwrap_or_default().to_string()).collect()
+    }
+
+    #[test]
+    fn g_orbital_shell_rust_037_a_guest_reads_a_program_only_with_the_program_grant_asked_and_held() {
+        let granted = guest_program_port(true, true);
+        assert!(granted.iter().any(|e| e == "HAD_PORT"), "held and asked: the guest's program/read is answered by the opener's port: {granted:?}");
+        let unasked = guest_program_port(true, false);
+        assert!(unasked.iter().any(|e| e == "NO_PORT"), "control: held but not asked, the guest has no program port: {unasked:?}");
+        let unheld = guest_program_port(false, true);
+        assert_eq!(unheld.first().map(String::as_str), Some("OPEN_REFUSED"), "asked without the grant: program/open refuses: {unheld:?}");
+        assert!(unheld.get(1).is_some_and(|reason| reason.contains("program")), "the refusal names the grant: {unheld:?}");
     }
 
     #[test]
