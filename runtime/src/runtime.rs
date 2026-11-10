@@ -3203,6 +3203,160 @@ mod tests {
         entity["answer"].as_str().unwrap_or_default().to_string()
     }
 
+    fn guest_signed_in_access(verify: &str) -> String {
+        let dir = std::env::temp_dir().join(format!("orb-guest-sign-{verify}-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("keys.txt"), "k").unwrap();
+        let dir = std::fs::canonicalize(&dir).unwrap();
+        let keys = dir.join("keys.txt");
+        let fs_grant = serde_json::json!([{ "glob": format!("{}/**", dir.to_str().unwrap()), "modes": ["read"] }]);
+        let header = orbital_core::codec::base64url_encode(br#"{"alg":"none","typ":"JWT"}"#);
+        let claims = serde_json::json!({ "iss": "firebase-auth-emulator@example.com", "aud": "test", "sub": "u1", "exp": 4_000_000_000u64 });
+        let token = format!("{header}.{}.", orbital_core::codec::base64url_encode(claims.to_string().as_bytes()));
+        let sign_in = serde_json::json!(["let", [["v", ["jws/verify", "@entity.token", [], { "issuer": "firebase-auth-emulator@example.com", "audience": "test", "allowUnsigned": true }]]], ["identity/sign-in", "@v"]]);
+        let presented = match verify {
+            "keyed" => serde_json::json!([["set", "@entity.token", "@payload.token"], ["os/getenv", "ORB_GUEST_ENV_PROBE", { "key": "verify", "emit": { "success": "VERIFIED", "failure": "VERIFIED" } }]]),
+            "late" | "store-late" | "deferred-store-late" => serde_json::json!([["set", "@entity.token", "@payload.token"], ["os/read-file", keys.to_str().unwrap(), { "key": "verify", "emit": { "success": "VERIFIED", "failure": "VERIFIED" } }]]),
+            _ => serde_json::json!([["set", "@entity.token", "@payload.token"], sign_in.clone()]),
+        };
+        let stored = verify.contains("store");
+        let driver = if verify.starts_with("deferred") {
+            serde_json::json!([
+                { "from": "ready", "to": "ready", "event": "ROW_READ", "effects": [["os/read-file", keys.to_str().unwrap(), { "key": "@payload.key", "emit": { "success": "FILE_READ", "failure": "FILE_READ" } }]] },
+                { "from": "ready", "to": "ready", "event": "FILE_READ", "effects": [["emit", "ROW_FOUND", { "key": "@payload.key", "row": { "id": "u1" } }]] }
+            ])
+        } else {
+            serde_json::json!([
+                { "from": "ready", "to": "ready", "event": "ROW_READ", "effects": [["emit", "ROW_FOUND", { "key": "@payload.key", "row": { "id": "u1" } }]] }
+            ])
+        };
+        let principal = if stored {
+            serde_json::json!({ "name": "Principal", "identity": true, "persistence": "persistent", "collection": "principals", "store": "Rows", "fields": [{ "name": "id", "type": "string" }] })
+        } else {
+            serde_json::json!({ "name": "Principal", "identity": true, "persistence": "runtime", "fields": [{ "name": "id", "type": "string" }] })
+        };
+        let mut guest = serde_json::json!({
+            "name": "GatedGuest", "typeContractVersion": 1,
+            "site": { "signIn": "/" },
+            "osGrants": { "env": ["ORB_GUEST_ENV_PROBE"], "fs": fs_grant.clone() },
+            "orbitals": [{
+                "name": "Gated",
+                "entity": principal,
+                "traits": [
+                    { "name": "Home", "linkedEntity": "Principal", "stateMachine": { "states": [{ "name": "idle", "isInitial": true }], "events": [{ "key": "INIT", "name": "Init" }],
+                        "transitions": [{ "from": "idle", "to": "idle", "event": "INIT", "effects": [["render-ui", "main", { "type": "typography", "content": "home" }]] }] } },
+                    { "name": "Me", "linkedEntity": "Principal", "stateMachine": { "states": [{ "name": "idle", "isInitial": true }], "events": [{ "key": "INIT", "name": "Init" }],
+                        "transitions": [{ "from": "idle", "to": "idle", "event": "INIT", "effects": [["render-ui", "main", { "type": "typography", "content": "me" }]] }] } }
+                ],
+                "pages": [
+                    { "name": "Home", "path": "/", "traits": [{ "ref": "Home" }] },
+                    { "name": "Me", "path": "/me", "access": "authenticated", "traits": [{ "ref": "Me" }] }
+                ]
+            }, {
+                "name": "Signing",
+                "entity": { "name": "SignBox", "persistence": "runtime", "fields": [{ "name": "id", "type": "string" }, { "name": "token", "type": "string" }] },
+                "traits": [{
+                    "name": "Signer", "linkedEntity": "SignBox",
+                    "stateMachine": {
+                        "states": [{ "name": "idle", "isInitial": true }],
+                        "events": [{ "key": "PRESENTED", "name": "Presented", "payloadSchema": [{ "name": "token", "type": "string", "required": true }] }, { "key": "VERIFIED", "name": "Verified", "payloadSchema": [{ "name": "value", "type": "string" }] }],
+                        "transitions": [
+                            { "from": "idle", "to": "idle", "event": "PRESENTED", "effects": presented },
+                            { "from": "idle", "to": "idle", "event": "VERIFIED", "effects": [sign_in] }
+                        ]
+                    }
+                }],
+                "pages": [{ "name": "SignerBg", "path": "", "protocol": "boot", "traits": [{ "ref": "Signer" }] }]
+            }]
+        });
+        if stored {
+            guest["orbitals"].as_array_mut().unwrap().push(serde_json::json!({ "name": "Rows", "pages": [],
+                "entity": { "name": "Mirror", "persistence": "runtime", "fields": [{ "name": "id", "type": "string" }] },
+                "traits": [{ "name": "RowsDriver", "linkedEntity": "Mirror", "stateMachine": {
+                    "states": [{ "name": "ready", "isInitial": true }],
+                    "events": [{ "key": "ROW_READ", "name": "ROW_READ" }, { "key": "FILE_READ", "name": "FILE_READ" }],
+                    "emits": [{ "event": "ROW_FOUND" }],
+                    "transitions": driver } }] }));
+        }
+        let runtime = Host::new(Arc::new(DriverAdapter::memory())).shared();
+        let opener: orbital_core::OrbitalSchema = serde_json::from_value(serde_json::json!({
+            "name": "Opener", "typeContractVersion": 1,
+            "orbitals": [{
+                "name": "Opener",
+                "entity": { "name": "Box", "persistence": "runtime", "fields": [{ "name": "id", "type": "string" }, { "name": "guest", "type": "string" }, { "name": "answer", "type": "string" }] },
+                "osGrants": { "kernel": [{ "target": "guest", "kinds": ["spawn", "declared"] }], "env": ["ORB_GUEST_ENV_PROBE"], "fs": fs_grant },
+                "traits": [{
+                    "name": "Opener", "linkedEntity": "Box",
+                    "stateMachine": {
+                        "states": [{ "name": "idle", "isInitial": true }],
+                        "events": [{ "key": "NAV", "name": "Nav" }, { "key": "OPEN", "name": "Open", "payloadSchema": [{ "name": "program", "type": "object", "required": true }, { "name": "token", "type": "string", "required": true }] }, { "key": "OPENED", "name": "Opened", "payloadSchema": [{ "name": "result", "type": "object" }] }, { "key": "ANSWERED", "name": "Answered", "payloadSchema": [{ "name": "result", "type": "object" }] }, { "key": "NAVIGATED", "name": "Navigated", "payloadSchema": [{ "name": "result", "type": "object" }] }, { "key": "FAILED", "name": "Failed", "payloadSchema": [{ "name": "error", "type": "string" }] }],
+                        "transitions": [
+                            { "from": "idle", "to": "idle", "event": "OPEN", "effects": [["set", "@entity.answer", "@payload.token"], ["program/open", "@payload.program", { "route": "/", "declared": true, "integrations": "live", "env": { "ORB_GUEST_ENV_PROBE": "demo" } }, { "emit": { "success": "OPENED", "failure": "FAILED" } }]] },
+                            { "from": "idle", "to": "idle", "event": "OPENED", "effects": [["set", "@entity.guest", "@payload.result.guest"], ["program/dispatch", "Signer.PRESENTED", { "token": "@entity.answer" }, { "guest": "@payload.result.guest", "emit": { "success": "ANSWERED", "failure": "FAILED" } }]] },
+                            { "from": "idle", "to": "idle", "event": "ANSWERED", "effects": [] },
+                            { "from": "idle", "to": "idle", "event": "NAV", "effects": [["program/navigate", { "guest": "@entity.guest", "route": "/me", "remount": true }, { "emit": { "success": "NAVIGATED", "failure": "FAILED" } }]] },
+                            { "from": "idle", "to": "idle", "event": "NAVIGATED", "effects": [["set", "@entity.answer", ["json/stringify", "@payload.result.access"]]] },
+                            { "from": "idle", "to": "idle", "event": "FAILED", "effects": [["set", "@entity.answer", ["str/concat", "refused: ", "@payload.error"]]] }
+                        ]
+                    }
+                }]
+            }]
+        }))
+        .unwrap();
+        runtime.register_schema(opener).unwrap();
+        runtime.dispatch("Opener", "default", "OPEN", serde_json::from_value(serde_json::json!({ "program": guest, "token": token })).unwrap()).unwrap();
+        let handle = serde_json::to_value(&runtime.kernel.snapshot_trait("Opener", Some("default")).entity).unwrap()["guest"].as_str().unwrap_or_default().to_string();
+        for _ in 0..25 {
+            let _ = runtime.kernel.guest_tick_pass(&handle);
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        runtime.dispatch("Opener", "default", "NAV", serde_json::from_value(serde_json::json!({})).unwrap()).unwrap();
+        let entity = serde_json::to_value(&runtime.kernel.snapshot_trait("Opener", Some("default")).entity).unwrap();
+        entity["answer"].as_str().unwrap_or_default().to_string()
+    }
+
+    #[test]
+    fn a_guest_signed_in_from_a_completion_is_admitted_to_its_authenticated_page() {
+        let answer = guest_signed_in_access("keyed");
+        assert!(answer.contains("admitted") && answer.contains("u1"), "a sign-in run after a keyed ask completes binds the guest's viewer: {answer}");
+    }
+
+    #[test]
+    fn a_guest_signed_in_from_a_completion_relayed_on_a_live_pass_is_admitted_to_its_authenticated_page() {
+        let answer = guest_signed_in_access("late");
+        assert!(answer.contains("admitted") && answer.contains("u1"), "a sign-in run on a later live pass binds the guest's viewer, not a viewerless session: {answer}");
+    }
+
+    #[test]
+    fn a_guest_signed_in_against_a_store_driven_identity_row_is_admitted_to_its_authenticated_page() {
+        let answer = guest_signed_in_access("store");
+        assert!(answer.contains("admitted") && answer.contains("u1"), "a sign-in that reads its identity row through the store driver binds the guest's viewer: {answer}");
+    }
+
+    #[test]
+    fn a_guest_signed_in_on_a_live_pass_against_a_store_driven_identity_row_is_admitted() {
+        let answer = guest_signed_in_access("store-late");
+        assert!(answer.contains("admitted") && answer.contains("u1"), "{answer}");
+    }
+
+    #[test]
+    fn a_guest_signed_in_against_an_identity_row_its_driver_answers_later_is_admitted() {
+        let answer = guest_signed_in_access("deferred-store");
+        assert!(answer.contains("admitted") && answer.contains("u1"), "a sign-in parked on the driver's deferred reply binds the guest's viewer when it resumes: {answer}");
+    }
+
+    #[test]
+    fn a_guest_signed_in_on_a_live_pass_against_an_identity_row_its_driver_answers_later_is_admitted() {
+        let answer = guest_signed_in_access("deferred-store-late");
+        assert!(answer.contains("admitted") && answer.contains("u1"), "{answer}");
+    }
+
+    #[test]
+    fn control_a_guest_signed_in_directly_is_admitted_to_its_authenticated_page() {
+        let answer = guest_signed_in_access("direct");
+        assert!(answer.contains("admitted") && answer.contains("u1"), "{answer}");
+    }
+
     fn guest_late_emits(deferred: bool) -> Vec<String> {
         let dir = std::env::temp_dir().join(format!("orb-guest-late-{deferred}-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
