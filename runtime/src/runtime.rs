@@ -3133,6 +3133,74 @@ mod tests {
         assert!(answer.starts_with("refused:") && answer.contains("ORB_GUEST_ENV_PROBE"), "{answer}");
     }
 
+    fn guest_dispatch_emits(keyed: bool) -> String {
+        let ask_options = if keyed {
+            serde_json::json!({ "key": "probe", "emit": { "success": "GOT", "failure": "GOT" } })
+        } else {
+            serde_json::json!({ "emit": { "success": "GOT", "failure": "GOT" } })
+        };
+        let guest = serde_json::json!({
+            "name": "BindGuest", "typeContractVersion": 1,
+            "osGrants": { "env": ["ORB_GUEST_ENV_PROBE"] },
+            "orbitals": [{
+                "name": "Binds",
+                "entity": { "name": "Doc", "persistence": "runtime", "fields": [{ "name": "id", "type": "string" }] },
+                "traits": [{
+                    "name": "Binder", "linkedEntity": "Doc",
+                    "stateMachine": {
+                        "states": [{ "name": "idle", "isInitial": true }],
+                        "events": [{ "key": "INIT", "name": "Init" }, { "key": "PRESENT", "name": "Present" }, { "key": "GOT", "name": "Got", "payloadSchema": [{ "name": "value", "type": "string" }] }, { "key": "BOUND", "name": "Bound" }],
+                        "transitions": [
+                            { "from": "idle", "to": "idle", "event": "INIT", "effects": [["render-ui", "main", { "type": "typography", "content": "ready" }]] },
+                            { "from": "idle", "to": "idle", "event": "PRESENT", "effects": [["os/getenv", "ORB_GUEST_ENV_PROBE", ask_options]] },
+                            { "from": "idle", "to": "idle", "event": "GOT", "effects": [["emit", "BOUND", {}]] }
+                        ]
+                    }
+                }],
+                "pages": [{ "name": "Home", "path": "/", "traits": [{ "ref": "Binder" }] }]
+            }]
+        });
+        let runtime = Host::new(Arc::new(DriverAdapter::memory())).shared();
+        let opener: orbital_core::OrbitalSchema = serde_json::from_value(serde_json::json!({
+            "name": "Opener", "typeContractVersion": 1,
+            "orbitals": [{
+                "name": "Opener",
+                "entity": { "name": "Box", "persistence": "runtime", "fields": [{ "name": "id", "type": "string" }, { "name": "answer", "type": "string" }] },
+                "osGrants": { "kernel": [{ "target": "guest", "kinds": ["spawn", "declared"] }], "env": ["ORB_GUEST_ENV_PROBE"] },
+                "traits": [{
+                    "name": "Opener", "linkedEntity": "Box",
+                    "stateMachine": {
+                        "states": [{ "name": "idle", "isInitial": true }],
+                        "events": [{ "key": "OPEN", "name": "Open", "payloadSchema": [{ "name": "program", "type": "object", "required": true }] }, { "key": "OPENED", "name": "Opened", "payloadSchema": [{ "name": "result", "type": "object" }] }, { "key": "ANSWERED", "name": "Answered", "payloadSchema": [{ "name": "result", "type": "object" }] }, { "key": "FAILED", "name": "Failed", "payloadSchema": [{ "name": "error", "type": "string" }] }],
+                        "transitions": [
+                            { "from": "idle", "to": "idle", "event": "OPEN", "effects": [["program/open", "@payload.program", { "route": "/", "declared": true, "integrations": "live", "env": { "ORB_GUEST_ENV_PROBE": "demo" } }, { "emit": { "success": "OPENED", "failure": "FAILED" } }]] },
+                            { "from": "idle", "to": "idle", "event": "OPENED", "effects": [["program/dispatch", "PRESENT", {}, { "guest": "@payload.result.guest", "emit": { "success": "ANSWERED", "failure": "FAILED" } }]] },
+                            { "from": "idle", "to": "idle", "event": "ANSWERED", "effects": [["set", "@entity.answer", ["json/stringify", "@payload.result.emitted"]]] },
+                            { "from": "idle", "to": "idle", "event": "FAILED", "effects": [["set", "@entity.answer", ["str/concat", "refused: ", "@payload.error"]]] }
+                        ]
+                    }
+                }]
+            }]
+        }))
+        .unwrap();
+        runtime.register_schema(opener).unwrap();
+        runtime.dispatch("Opener", "default", "OPEN", serde_json::from_value(serde_json::json!({ "program": guest })).unwrap()).unwrap();
+        let entity = serde_json::to_value(&runtime.kernel.snapshot_trait("Opener", Some("default")).entity).unwrap();
+        entity["answer"].as_str().unwrap_or_default().to_string()
+    }
+
+    #[test]
+    fn a_guest_dispatch_answers_what_its_keyed_completions_emit() {
+        let answer = guest_dispatch_emits(true);
+        assert!(answer.contains("BOUND"), "the guest's BOUND, emitted once its keyed ask completes, is in the dispatch answer: {answer}");
+    }
+
+    #[test]
+    fn control_a_guest_dispatch_answers_what_an_unkeyed_ask_emits() {
+        let answer = guest_dispatch_emits(false);
+        assert!(answer.contains("BOUND"), "{answer}");
+    }
+
     fn guest_root_with_file(label: &str) -> String {
         let root = std::env::temp_dir().join(format!("orb-guest-root-{label}-{}", std::process::id()));
         std::fs::create_dir_all(root.join("data")).unwrap();
