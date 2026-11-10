@@ -73,6 +73,7 @@ use crate::components::core::molecules::agent_activity_feed::AgentActivityFeedRe
 use crate::components::core::molecules::agent_activity_row::AgentActivityRowRenderer;
 use crate::components::core::molecules::agent_chat_feed::AgentChatFeedRenderer;
 use crate::components::core::molecules::alert::AlertRenderer;
+use crate::components::core::molecules::annotated_media::AnnotatedMediaRenderer;
 use crate::components::core::molecules::animated_counter::AnimatedCounterRenderer;
 use crate::components::core::molecules::avl_glyph::AvlGlyphRenderer;
 use crate::components::core::molecules::avl_state_machine::AvlStateMachineRenderer;
@@ -295,6 +296,7 @@ pub fn register_terminal(registry: &mut crate::PatternRegistry) {
     registry.register(Box::new(AgentActivityRowRenderer));
     registry.register(Box::new(AgentChatFeedRenderer));
     registry.register(Box::new(AlertRenderer));
+    registry.register(Box::new(AnnotatedMediaRenderer));
     registry.register(Box::new(AnimatedCounterRenderer));
     registry.register(Box::new(AvlGlyphRenderer));
     registry.register(Box::new(AvlStateMachineRenderer));

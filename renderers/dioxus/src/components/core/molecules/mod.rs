@@ -6,6 +6,7 @@ pub mod activity_rail;
 pub mod agent_activity_feed;
 pub mod agent_activity_row;
 pub mod agent_chat_feed;
+pub mod annotated_media;
 pub mod alert;
 pub mod animated_counter;
 pub mod avl_glyph;
