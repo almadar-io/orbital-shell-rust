@@ -3369,6 +3369,73 @@ mod tests {
         assert!(!seen.iter().any(|e| e == "BOUND"), "a BOUND emitted inside the dispatch was answered there, not on the live pass: {seen:?}");
     }
 
+    fn guest_said(arguments: serde_json::Value) -> String {
+        let guest = serde_json::json!({
+            "name": "SayGuest", "typeContractVersion": 1,
+            "orbitals": [{
+                "name": "Says",
+                "entity": { "name": "Doc", "persistence": "runtime", "fields": [{ "name": "id", "type": "string" }] },
+                "traits": [{
+                    "name": "Sayer", "linkedEntity": "Doc",
+                    "stateMachine": {
+                        "states": [{ "name": "idle", "isInitial": true }],
+                        "events": [{ "key": "INIT", "name": "Init" }, { "key": "SAY", "name": "Say", "payloadSchema": [{ "name": "word", "type": "string", "required": true }] }],
+                        "transitions": [
+                            { "from": "idle", "to": "idle", "event": "INIT", "effects": [["render-ui", "main", { "type": "typography", "content": "ready" }]] },
+                            { "from": "idle", "to": "idle", "event": "SAY", "effects": [["render-ui", "main", { "type": "typography", "content": ["str/concat", "said ", "@payload.word"] }]] }
+                        ]
+                    }
+                }],
+                "pages": [{ "name": "Home", "path": "/", "traits": [{ "ref": "Sayer" }] }]
+            }]
+        });
+        let runtime = Host::new(Arc::new(DriverAdapter::memory())).shared();
+        let opener: orbital_core::OrbitalSchema = serde_json::from_value(serde_json::json!({
+            "name": "Opener", "typeContractVersion": 1,
+            "orbitals": [{
+                "name": "Opener",
+                "entity": { "name": "Box", "persistence": "runtime", "fields": [{ "name": "id", "type": "string" }, { "name": "answer", "type": "string" }] },
+                "osGrants": { "kernel": [{ "target": "guest", "kinds": ["spawn", "declared"] }] },
+                "traits": [{
+                    "name": "Opener", "linkedEntity": "Box",
+                    "stateMachine": {
+                        "states": [{ "name": "idle", "isInitial": true }],
+                        "events": [{ "key": "OPEN", "name": "Open", "payloadSchema": [{ "name": "program", "type": "object", "required": true }] }, { "key": "OPENED", "name": "Opened", "payloadSchema": [{ "name": "result", "type": "object" }] }, { "key": "ANSWERED", "name": "Answered", "payloadSchema": [{ "name": "result", "type": "object" }] }, { "key": "FAILED", "name": "Failed", "payloadSchema": [{ "name": "error", "type": "string" }] }],
+                        "transitions": [
+                            { "from": "idle", "to": "idle", "event": "OPEN", "effects": [["program/open", "@payload.program", { "route": "/", "declared": true, "integrations": "live" }, { "emit": { "success": "OPENED", "failure": "FAILED" } }]] },
+                            { "from": "idle", "to": "idle", "event": "OPENED", "effects": [["program/dispatch", "Sayer.SAY", arguments, { "guest": "@payload.result.guest", "emit": { "success": "ANSWERED", "failure": "FAILED" } }]] },
+                            { "from": "idle", "to": "idle", "event": "ANSWERED", "effects": [["set", "@entity.answer", ["json/stringify", "@payload.result.rendered"]]] },
+                            { "from": "idle", "to": "idle", "event": "FAILED", "effects": [["set", "@entity.answer", ["str/concat", "refused: ", "@payload.error"]]] }
+                        ]
+                    }
+                }]
+            }]
+        }))
+        .unwrap();
+        runtime.register_schema(opener).unwrap();
+        runtime.dispatch("Opener", "default", "OPEN", serde_json::from_value(serde_json::json!({ "program": guest })).unwrap()).unwrap();
+        let entity = serde_json::to_value(&runtime.kernel.snapshot_trait("Opener", Some("default")).entity).unwrap();
+        entity["answer"].as_str().unwrap_or_default().to_string()
+    }
+
+    #[test]
+    fn a_guest_dispatch_takes_its_payload_as_json_text() {
+        let answer = guest_said(serde_json::json!("{\"word\":\"hi\"}"));
+        assert!(answer.contains("said hi"), "{answer}");
+    }
+
+    #[test]
+    fn control_a_guest_dispatch_takes_its_payload_as_an_object() {
+        let answer = guest_said(serde_json::json!({ "word": "hi" }));
+        assert!(answer.contains("said hi"), "{answer}");
+    }
+
+    #[test]
+    fn edge_a_guest_dispatch_refuses_text_that_is_not_a_json_object() {
+        let answer = guest_said(serde_json::json!("[1, 2]"));
+        assert!(answer.starts_with("refused:") && answer.contains("JSON object"), "{answer}");
+    }
+
     #[test]
     fn a_guest_dispatch_answers_what_its_keyed_completions_emit() {
         let answer = guest_dispatch_emits(true);
