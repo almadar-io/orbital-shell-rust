@@ -1920,7 +1920,7 @@ mod tests {
             "typeContractVersion": 1,
             "orbitals": [{
                 "name": "Desk",
-                "entity": { "name": "Note", "persistence": "persistent", "fields": [
+                "entity": { "name": "Note", "persistence": "persistent", "access_waivers": { "read": "test" }, "fields": [
                     { "name": "id", "type": "string" }, { "name": "title", "type": "string" }, { "name": "got", "type": "string" }] },
                 "traits": [{
                     "name": "Agent", "linkedEntity": "Note",
@@ -1962,17 +1962,17 @@ mod tests {
         std::thread::spawn(move || {
             sign_in(&inner, &id, &id);
             let _session = inner.kernel.enter_session(&id);
-            let _ = tx.send(inner.dispatch_continuing("Agent", "default", "GO", Value::Null, None, None).map(|_| ()));
+            let ran = inner.dispatch_continuing("Agent", "default", "GO", Value::Null, None, None).map(|_| ());
+            let _ = tx.send(ran.map(|()| inner.kernel.snapshot_trait("Agent", Some("default"))));
         });
-        rx.recv_timeout(std::time::Duration::from_secs(20)).expect("the nested dispatch returns").unwrap();
-        let snapshot = runtime.kernel.snapshot_trait("Agent", Some("default"));
+        let snapshot = rx.recv_timeout(std::time::Duration::from_secs(20)).expect("the nested dispatch returns").unwrap();
         let entity = serde_json::to_value(&snapshot.entity).unwrap();
         let text = |field: &str| entity[field].as_str().unwrap_or_default().to_string();
         (runtime, snapshot.state, text("got"), text("title"))
     }
 
     #[test]
-    #[ignore = "G-ORB-446 (f): nested program/dispatch: keyed deferral pending in orbital-core (R-b1)"]
+    #[ignore = "G-ORBITAL-SHELL-RUST-039: an unkeyed nested program/dispatch returns no reply text to its route"]
     fn a_second_dispatch_in_the_same_step_keeps_its_own_route_after_the_first_nested_one() {
         let (runtime, state, got, title) = go_as_with_title("u1");
         assert_eq!(state, "done", "{got}");
@@ -1985,7 +1985,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "G-ORB-446 (f): nested program/dispatch: keyed deferral pending in orbital-core (R-b1)"]
+    #[ignore = "G-ORBITAL-SHELL-RUST-039: an unkeyed nested program/dispatch returns no reply text to its route"]
     fn a_program_dispatch_runs_the_declared_input_through_the_server_as_the_asking_viewer() {
         let (runtime, state, got) = go_as("u1");
         assert_eq!(state, "done", "{got}");
@@ -1996,7 +1996,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "G-ORB-446 (f): nested program/dispatch: keyed deferral pending in orbital-core (R-b1)"]
+    #[ignore = "G-ORBITAL-SHELL-RUST-039: an unkeyed nested program/dispatch returns no reply text to its route"]
     fn control_the_nested_dispatch_keeps_the_asking_viewer_so_the_inputs_guard_refuses_another() {
         let (runtime, state, got) = go_as("u2");
         assert_eq!(state, "done", "a refused dispatch is still an answer a model can be told");
@@ -2488,7 +2488,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "G-ORB-446 (f): nested program/dispatch: keyed deferral pending in orbital-core (R-b1)"]
     fn an_inbound_program_dispatch_delivers_to_the_handler_and_answers_its_status_and_body() {
         let (state, answer) = go_hook("hook");
         assert_eq!(state, "done", "{answer}");
@@ -3216,6 +3215,85 @@ mod tests {
         }
         let entity = serde_json::to_value(&runtime.kernel.snapshot_trait("Opener", Some("default")).entity).unwrap();
         entity["answer"].as_str().unwrap_or_default().to_string()
+    }
+
+    /// A `persist` on a store-bound entity whose driver answers after a deferred file read. `reply` is the payload the
+    /// driver's `ROWS_WRITTEN` carries; its declared contract takes `outcomes` as a list. What the asker heard, or
+    /// `None` when its dispatch had not ended after ten seconds.
+    fn deferred_driver_write(label: &str, reply: serde_json::Value) -> Option<String> {
+        deferred_driver_write_heard_as(label, reply, serde_json::json!([]))
+    }
+
+    /// [`deferred_driver_write`] where the asker declares `saved` as the payload contract of its success event.
+    fn deferred_driver_write_heard_as(label: &str, reply: serde_json::Value, saved: serde_json::Value) -> Option<String> {
+        let dir = std::env::temp_dir().join(format!("orb-driver-reply-{label}-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("k.txt"), "k").unwrap();
+        let dir = std::fs::canonicalize(&dir).unwrap();
+        let file = dir.join("k.txt");
+        let program: orbital_core::OrbitalSchema = serde_json::from_value(serde_json::json!({
+            "name": "DriverReply", "typeContractVersion": 1,
+            "osGrants": { "fs": [{ "glob": format!("{}/**", dir.to_str().unwrap()), "modes": ["read"] }] },
+            "orbitals": [{
+                "name": "Desk",
+                "entity": { "name": "Box", "persistence": "runtime", "fields": [{ "name": "id", "type": "string" }, { "name": "answer", "type": "string" }] },
+                "auxiliaryEntities": [{ "name": "Ticket", "persistence": "persistent", "collection": "tickets", "store": "Rows", "fields": [{ "name": "id", "type": "string" }] }],
+                "traits": [{ "name": "Desk", "linkedEntity": "Box", "stateMachine": {
+                    "states": [{ "name": "idle", "isInitial": true }],
+                    "events": [{ "key": "SAVE", "name": "Save" }, { "key": "SAVED", "name": "Saved", "payloadSchema": saved }, { "key": "SAVE_FAILED", "name": "SaveFailed", "payloadSchema": [{ "name": "error", "type": "string" }] }],
+                    "transitions": [
+                        { "from": "idle", "to": "idle", "event": "SAVE", "effects": [["persist", "create", "Ticket", { "id": "t1" }, { "emit": { "success": "SAVED", "failure": "SAVE_FAILED" } }]] },
+                        { "from": "idle", "to": "idle", "event": "SAVED", "effects": [["set", "@entity.answer", "saved"]] },
+                        { "from": "idle", "to": "idle", "event": "SAVE_FAILED", "effects": [["set", "@entity.answer", "failed"]] }
+                    ] } }]
+            }, {
+                "name": "Rows", "pages": [],
+                "entity": { "name": "Mirror", "persistence": "runtime", "fields": [{ "name": "id", "type": "string" }] },
+                "traits": [{ "name": "RowsDriver", "linkedEntity": "Mirror",
+                    "emits": [{ "event": "ROWS_WRITTEN", "payloadSchema": [{ "name": "key", "type": "string", "required": true }, { "name": "outcomes", "type": "array", "required": true, "items": { "type": "object" } }] }],
+                    "stateMachine": {
+                        "states": [{ "name": "ready", "isInitial": true }],
+                        "events": [{ "key": "ROWS_WRITE", "name": "ROWS_WRITE" }, { "key": "FILE_READ", "name": "FILE_READ" }],
+                        "transitions": [
+                            { "from": "ready", "to": "ready", "event": "ROWS_WRITE", "effects": [["os/read-file", file.to_str().unwrap(), { "key": "@payload.key", "emit": { "success": "FILE_READ", "failure": "FILE_READ" } }]] },
+                            { "from": "ready", "to": "ready", "event": "FILE_READ", "effects": [["emit", "ROWS_WRITTEN", reply]] }
+                        ] } }]
+            }]
+        }))
+        .unwrap();
+        let runtime = Host::new(Arc::new(DriverAdapter::memory())).shared();
+        runtime.register_schema(program).unwrap();
+        let (done, ended) = std::sync::mpsc::channel();
+        let asker = runtime.clone();
+        std::thread::spawn(move || {
+            let _ = asker.dispatch("Desk", "default", "SAVE", serde_json::from_value(serde_json::json!({})).unwrap());
+            let entity = serde_json::to_value(&asker.kernel.snapshot_trait("Desk", Some("default")).entity).unwrap();
+            let _ = done.send(entity["answer"].as_str().unwrap_or_default().to_string());
+        });
+        ended.recv_timeout(std::time::Duration::from_secs(10)).ok()
+    }
+
+    // G-CROSS-581
+    #[test]
+    fn a_store_drivers_deferred_reply_that_breaks_its_contract_fails_the_asking_persist() {
+        let broken = deferred_driver_write("broken", serde_json::json!({ "key": "@payload.key", "outcomes": "not a list" }));
+        assert_eq!(broken.as_deref(), Some("failed"), "the persist ends on its failure route, it does not wait forever");
+    }
+
+    #[test]
+    fn a_store_drivers_deferred_outcome_that_is_no_write_outcome_or_misfits_its_entity_fails_the_persist() {
+        let bogus = deferred_driver_write("bogus", serde_json::json!({ "key": "@payload.key", "outcomes": [{ "kind": "bogus" }] }));
+        assert_eq!(bogus.as_deref(), Some("failed"), "an outcome that is no RowWriteOutcome");
+        let misfit = deferred_driver_write("misfit", serde_json::json!({ "key": "@payload.key", "outcomes": [{ "kind": "created", "row": { "id": 7 } }] }));
+        assert_eq!(misfit.as_deref(), Some("failed"), "a written row that does not fit its entity");
+        let none = deferred_driver_write("none", serde_json::json!({ "key": "another-ask", "outcomes": [] }));
+        assert_eq!(none.as_deref(), Some("failed"), "edge: the driver's work settles with no reply to this ask");
+    }
+
+    #[test]
+    fn control_a_store_drivers_deferred_reply_that_fits_its_contract_completes_the_persist() {
+        let fits = deferred_driver_write("fits", serde_json::json!({ "key": "@payload.key", "outcomes": [{ "kind": "created", "row": { "id": "t1" } }] }));
+        assert_eq!(fits.as_deref(), Some("saved"));
     }
 
     fn guest_signed_in_access(verify: &str) -> String {
@@ -4425,7 +4503,8 @@ mod tests {
         assert_eq!(state, "done", "{answer}");
         let fetch = answer["effectResults"].as_array().and_then(|r| r.iter().find(|e| e["effect"] == "fetch")).unwrap_or_else(|| panic!("no fetch result: {answer}"));
         assert_eq!(fetch["success"], true, "{answer}");
-        assert_eq!(fetch["data"][0]["id"], "t1", "{answer}");
+        let put = serde_json::json!(["put", "Desk", { "id": "t1" }]);
+        assert!(answer["frames"]["ops"].as_array().is_some_and(|ops| ops.contains(&put)), "a wire answer carries the row in its frames: {answer}");
     }
 
     fn topic_host() -> Arc<Host> {

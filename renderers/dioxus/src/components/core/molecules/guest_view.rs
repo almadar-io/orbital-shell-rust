@@ -43,6 +43,22 @@ fn guest_source(props: &Value) -> Option<String> {
     }
 }
 
+/// The guest's page-root traits that painted `children`, in the same order (`roots`): child N is scoped to `roots[N]`.
+fn guest_roots(props: &Value) -> Vec<String> {
+    props
+        .get("roots")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|root| root.as_str().filter(|name| !name.is_empty()).map(str::to_string))
+        .collect()
+}
+
+/// The trait child `index` is scoped to: the embed's own painter, else the page root that painted it, else `source`.
+fn child_painter<'a>(painter: Option<&'a str>, roots: &'a [String], index: usize) -> Option<&'a str> {
+    painter.or_else(|| roots.get(index).map(String::as_str))
+}
+
 impl DioxusPatternRenderer for GuestViewRenderer {
     fn pattern_name(&self) -> &str {
         Self::NAME
@@ -87,9 +103,10 @@ impl DioxusPatternRenderer for GuestViewRenderer {
             toggle_theme: view.toggle_theme,
         };
         let children = child_patterns(props, &content);
+        let roots = guest_roots(props);
         rsx! {
             div { class: "bg-transparent rounded-none shadow-none w-full h-full relative overflow-auto",
-                for (child, painter) in children.iter() { {guest.render_child(registry, child, painter.as_deref())} }
+                for (index, (child, painter)) in children.iter().enumerate() { {guest.render_child(registry, child, child_painter(painter.as_deref(), &roots, index))} }
             }
         }
     }
@@ -127,6 +144,20 @@ mod tests {
         let nested = child_patterns(content.get("Home").unwrap(), &content);
         assert_eq!(nested.len(), 1);
         assert_eq!(nested[0].1.as_deref(), Some("Toolbar"), "the embed names its painter");
+    }
+
+    #[test]
+    fn each_page_root_child_is_scoped_to_its_own_root() {
+        let two: Value = serde_json::from_value(serde_json::json!({
+            "type": "guest-view", "guest": "g", "source": "One", "roots": ["One", "Two"], "deliver": "D",
+            "children": [{ "type": "button", "action": "A" }, { "type": "button", "action": "B" }]
+        }))
+        .unwrap();
+        let roots = guest_roots(&two);
+        assert_eq!(child_painter(None, &roots, 0), Some("One"));
+        assert_eq!(child_painter(None, &roots, 1), Some("Two"), "the second root's controls dispatch under the second root");
+        assert_eq!(child_painter(Some("Toolbar"), &roots, 1), Some("Toolbar"), "an embed keeps its own painter");
+        assert_eq!(child_painter(None, &guest_roots(&props()), 0), None, "control: without `roots` the child falls to `source`");
     }
 
     #[test]
