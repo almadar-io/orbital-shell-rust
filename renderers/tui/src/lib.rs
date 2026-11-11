@@ -259,6 +259,28 @@ impl TuiApp {
         }
     }
 
+    /// A key press. A painted buffer that takes keys (a `code-block` in buffer mode declaring `onKey`) gets every key
+    /// but Ctrl+C, which always quits; with none painted the host's own shortcuts apply. Returns true to quit.
+    pub fn handle_key_event(&mut self, key: crossterm::event::KeyEvent) -> bool {
+        if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
+            return true;
+        }
+        let taken = self.core.slot_contents("main").into_iter().find_map(|content| {
+            if content.pattern != "code-block" {
+                return None;
+            }
+            let (event, payload) = components::core::molecules::code_block::key_event(&content.props, &key)?;
+            Some((event, content.source_trait.clone(), payload))
+        });
+        match taken {
+            Some(queued) => {
+                self.core.pending_events.push(queued);
+                false
+            }
+            None => self.handle_key(key.code),
+        }
+    }
+
     /// Handle keyboard input. Returns true when the app should quit.
     fn handle_key(&mut self, code: KeyCode) -> bool {
         match code {

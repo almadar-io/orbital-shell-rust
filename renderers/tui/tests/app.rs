@@ -44,6 +44,46 @@ fn the_first_page_mounts_through_the_kernel_and_draws_its_main_slot() {
     assert!(app.render_to_text(100, 20).unwrap().contains("hello notes"));
 }
 
+/// A page that paints a buffer-mode code-block taking keys (`onKey: KEY`); `KEY` moves the trait to `typed`.
+fn buffer_app(on_key: bool) -> TuiApp {
+    let mut block = serde_json::json!({ "type": "code-block", "code": "alpha", "language": "text", "editorId": "ed1", "cursor": { "row": 0, "col": 0 } });
+    if on_key {
+        block["onKey"] = serde_json::json!("KEY");
+    }
+    let mut notes = orbital("Notes", &block);
+    notes["traits"][0]["stateMachine"]["states"] = serde_json::json!([{ "name": "idle", "isInitial": true }, { "name": "typed" }]);
+    notes["traits"][0]["stateMachine"]["events"] = serde_json::json!([{ "key": "KEY", "name": "KEY", "payloadSchema": [{ "name": "key", "type": "string" }] }]);
+    notes["traits"][0]["stateMachine"]["transitions"].as_array_mut().unwrap().push(serde_json::json!({ "from": "idle", "to": "typed", "event": "KEY" }));
+    app(vec![notes])
+}
+
+fn press(code: crossterm::event::KeyCode, modifiers: crossterm::event::KeyModifiers) -> crossterm::event::KeyEvent {
+    crossterm::event::KeyEvent::new(code, modifiers)
+}
+
+// G-ORBITAL-SHELL-RUST-035
+#[test]
+fn a_keypress_reaches_the_painted_buffer_that_takes_keys_instead_of_the_host_shortcut() {
+    use crossterm::event::{KeyCode, KeyModifiers};
+    let mut app = buffer_app(true);
+    assert_eq!(app.core().current_state, "idle");
+    assert!(!app.handle_key_event(press(KeyCode::Char('q'), KeyModifiers::NONE)), "`q` is the buffer's key, not quit");
+    app.settle_round();
+    assert_eq!(app.core().current_state, "typed", "the buffer's onKey event reached its trait");
+    assert!(app.handle_key_event(press(KeyCode::Char('c'), KeyModifiers::CONTROL)), "Ctrl+C always quits");
+}
+
+#[test]
+fn control_without_a_key_taking_buffer_the_host_shortcuts_stand() {
+    use crossterm::event::{KeyCode, KeyModifiers};
+    let mut app = buffer_app(false);
+    assert!(app.handle_key_event(press(KeyCode::Char('q'), KeyModifiers::NONE)), "`q` quits");
+    let mut plain = buffer_app(false);
+    assert!(!plain.handle_key_event(press(KeyCode::Char('x'), KeyModifiers::NONE)));
+    plain.settle_round();
+    assert_eq!(plain.core().current_state, "idle", "no component takes the key");
+}
+
 #[test]
 fn control_a_pattern_without_a_terminal_renderer_draws_the_declared_unsupported_answer() {
     let mut app = app(vec![orbital(

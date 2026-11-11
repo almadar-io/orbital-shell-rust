@@ -472,6 +472,15 @@ pub fn key_payload(editor_id: &str, event: &KeyEvent) -> Option<Value> {
 }
 
 /// Queues the block's `onKey` event for a key press while it is focused; false when it declares no `onKey`.
+/// The `onKey` event and payload a buffer-mode block answers `event` with; `None` when it takes no keys.
+pub fn key_event(props: &Value, event: &KeyEvent) -> Option<(String, Value)> {
+    if !is_buffer_mode(props) {
+        return None;
+    }
+    let name = get_string(props, "onKey")?;
+    Some((name, key_payload(&get_string_or(props, "editorId", ""), event)?))
+}
+
 pub fn emit_key(props: &Value, ctx: &mut RenderContext<'_>, event: &KeyEvent) -> bool {
     let Some(name) = get_string(props, "onKey") else {
         return false;
