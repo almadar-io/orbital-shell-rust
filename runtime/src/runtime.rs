@@ -3148,6 +3148,12 @@ mod tests {
     }
 
     fn guest_dispatch_emits(keyed: bool) -> String {
+        guest_dispatch_emits_held(keyed, false)
+    }
+
+    /// `dispatch_keyed`: the opener's `program/dispatch` carries a `key` of its own, and the run is held as `orb run`
+    /// holds it before the answer is read (G-ORB-638).
+    fn guest_dispatch_emits_held(keyed: bool, dispatch_keyed: bool) -> String {
         let ask_options = if keyed {
             serde_json::json!({ "key": "probe", "emit": { "success": "GOT", "failure": "GOT" } })
         } else {
@@ -3174,6 +3180,11 @@ mod tests {
                 "pages": [{ "name": "Home", "path": "/", "traits": [{ "ref": "Binder" }] }]
             }]
         });
+        let dispatch_options = if dispatch_keyed {
+            serde_json::json!({ "guest": "@payload.result.guest", "key": "ask-guest", "emit": { "success": "ANSWERED", "failure": "FAILED" } })
+        } else {
+            serde_json::json!({ "guest": "@payload.result.guest", "emit": { "success": "ANSWERED", "failure": "FAILED" } })
+        };
         let runtime = Host::new(Arc::new(DriverAdapter::memory())).shared();
         let opener: orbital_core::OrbitalSchema = serde_json::from_value(serde_json::json!({
             "name": "Opener", "typeContractVersion": 1,
@@ -3188,7 +3199,7 @@ mod tests {
                         "events": [{ "key": "OPEN", "name": "Open", "payloadSchema": [{ "name": "program", "type": "object", "required": true }] }, { "key": "OPENED", "name": "Opened", "payloadSchema": [{ "name": "result", "type": "object" }] }, { "key": "ANSWERED", "name": "Answered", "payloadSchema": [{ "name": "result", "type": "object" }] }, { "key": "FAILED", "name": "Failed", "payloadSchema": [{ "name": "error", "type": "string" }] }],
                         "transitions": [
                             { "from": "idle", "to": "idle", "event": "OPEN", "effects": [["program/open", "@payload.program", { "route": "/", "declared": true, "integrations": "live", "env": { "ORB_GUEST_ENV_PROBE": "demo" } }, { "emit": { "success": "OPENED", "failure": "FAILED" } }]] },
-                            { "from": "idle", "to": "idle", "event": "OPENED", "effects": [["program/dispatch", "PRESENT", {}, { "guest": "@payload.result.guest", "emit": { "success": "ANSWERED", "failure": "FAILED" } }]] },
+                            { "from": "idle", "to": "idle", "event": "OPENED", "effects": [["program/dispatch", "PRESENT", {}, dispatch_options]] },
                             { "from": "idle", "to": "idle", "event": "ANSWERED", "effects": [["set", "@entity.answer", ["json/stringify", "@payload.result.emitted"]]] },
                             { "from": "idle", "to": "idle", "event": "FAILED", "effects": [["set", "@entity.answer", ["str/concat", "refused: ", "@payload.error"]]] }
                         ]
@@ -3199,6 +3210,10 @@ mod tests {
         .unwrap();
         runtime.register_schema(opener).unwrap();
         runtime.dispatch("Opener", "default", "OPEN", serde_json::from_value(serde_json::json!({ "program": guest })).unwrap()).unwrap();
+        if dispatch_keyed {
+            let (_keep, stop) = std::sync::mpsc::channel::<()>();
+            assert_eq!(super::super::run::hold(&runtime, &stop), super::super::run::RunEnd::Idle);
+        }
         let entity = serde_json::to_value(&runtime.kernel.snapshot_trait("Opener", Some("default")).entity).unwrap();
         entity["answer"].as_str().unwrap_or_default().to_string()
     }
@@ -3594,6 +3609,14 @@ mod tests {
     fn a_guest_dispatch_answers_what_its_keyed_completions_emit() {
         let answer = guest_dispatch_emits(true);
         assert!(answer.contains("BOUND"), "the guest's BOUND, emitted once its keyed ask completes, is in the dispatch answer: {answer}");
+    }
+
+    #[test]
+    fn a_held_run_waits_for_a_keyed_guest_dispatch_to_complete() {
+        let answer = guest_dispatch_emits_held(true, true);
+        assert!(answer.contains("BOUND"), "the keyed dispatch's completion lands before the run ends: {answer:?}");
+        let unkeyed_ask = guest_dispatch_emits_held(false, true);
+        assert!(unkeyed_ask.contains("BOUND"), "edge: a keyed dispatch of an event whose ask is unkeyed: {unkeyed_ask:?}");
     }
 
     #[test]
