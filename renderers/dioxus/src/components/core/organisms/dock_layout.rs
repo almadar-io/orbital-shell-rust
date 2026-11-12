@@ -1,7 +1,7 @@
 use crate::registry::{shared_root_attrs, DioxusPatternRegistry};
 use crate::renderer::{
-    array_value, cn, layout_box_spec, pattern_spec, DioxusPatternRenderer, DioxusView, DockCommand,
-    DockContext, OwnedDioxusView,
+    array_value, cn, emit_event, layout_box_spec, number_value, object_value, pattern_spec,
+    DioxusPatternRenderer, DioxusView, DockCommand, DockContext, OwnedDioxusView,
 };
 use dioxus::prelude::*;
 use orbital_core::client::helpers::{get_bool, get_bool_or, get_number_or, get_string};
@@ -81,25 +81,19 @@ fn region(class: &str, style: &str, children: Element) -> Element {
     rsx! { div { class: "{class}", style: "{style}", {children} } }
 }
 
-fn split_pane(horizontal: bool, ratio: f64, class: &str, left: Element, right: Element) -> Element {
-    let root = cn(&[
-        "flex w-full h-full",
-        if horizontal { "flex-row" } else { "flex-col" },
-        class,
-    ]);
-    let size = if horizontal { "width" } else { "height" };
-    let handle = if horizontal {
-        "flex-shrink-0 bg-border transition-colors touch-none w-1 cursor-col-resize hover:w-1.5 hover:bg-muted-foreground"
-    } else {
-        "flex-shrink-0 bg-border transition-colors touch-none h-1 cursor-row-resize hover:h-1.5 hover:bg-muted-foreground"
-    };
-    rsx! {
-        div { class: "{root}",
-            div { class: "flex flex-col overflow-auto", style: "{size}:{ratio}%;flex-shrink:0", {left} }
-            div { class: "{handle}" }
-            div { class: "flex flex-col flex-1 min-h-0 min-w-0 overflow-auto", {right} }
-        }
-    }
+fn split_pane(horizontal: bool, ratio: f64, min_size: f64, class: &str, left: Element, right: Element, on_ratio: Callback<f64>) -> Element {
+    rsx! { super::split_pane::SplitFrame {
+        horizontal,
+        ratio,
+        min_size,
+        resizable: true,
+        class: class.to_string(),
+        left_class: "flex flex-col overflow-auto".to_string(),
+        right_class: "flex flex-col flex-1 min-h-0 min-w-0 overflow-auto".to_string(),
+        left,
+        right,
+        on_ratio,
+    } }
 }
 
 fn toggle_spec(region: &str, collapsed: bool, action: &str) -> Value {
@@ -171,9 +165,9 @@ fn DockLayoutComponent(input: DockLayoutProps) -> Element {
     let mut bottom_local = use_signal(|| false);
     let mut secondary_local = use_signal(|| false);
     let props = &input.props;
-    let sidebar_ratio = use_signal(|| get_number_or(props, "sidebarWidth", 20.0));
-    let secondary_ratio = use_signal(|| get_number_or(props, "secondarySidebarWidth", 25.0));
-    let bottom_ratio = use_signal(|| get_number_or(props, "bottomPanelHeight", 30.0));
+    let mut sidebar_ratio = use_signal(|| get_number_or(props, "sidebarWidth", 20.0));
+    let mut secondary_ratio = use_signal(|| get_number_or(props, "secondarySidebarWidth", 25.0));
+    let mut bottom_ratio = use_signal(|| get_number_or(props, "bottomPanelHeight", 30.0));
     let has_rail = use_hook(|| Rc::new(Cell::new(false)));
     let compact = is_compact(props, input.view.viewport_width);
     if !compact {
@@ -433,9 +427,15 @@ fn DockLayoutComponent(input: DockLayoutProps) -> Element {
             "",
             node(secondary).unwrap_or(rsx! {}),
         );
+        let on_change = get_string(props, "onSecondarySidebarWidthChange").filter(|name| !name.is_empty());
+        let on_ratio = Callback::new(move |main: f64| {
+            secondary_ratio.set(100.0 - main);
+            emit_event(outer, &on_change, object_value([("width", number_value(100.0 - main))]));
+        });
         split_pane(
             true,
             100.0 - ratio,
+            get_number_or(props, "secondarySidebarMinSize", 240.0),
             "flex-1 min-h-0 min-w-0",
             main_region,
             stack(
@@ -443,6 +443,7 @@ fn DockLayoutComponent(input: DockLayoutProps) -> Element {
                 "h-full min-w-0",
                 rsx! { {gutter("secondary-sidebar", false, "l")} {panel} },
             ),
+            on_ratio,
         )
     } else {
         let closed_gutter = secondary
@@ -461,9 +462,15 @@ fn DockLayoutComponent(input: DockLayoutProps) -> Element {
             "",
             node(sidebar).unwrap_or(rsx! {}),
         );
+        let on_change = get_string(props, "onSidebarWidthChange").filter(|name| !name.is_empty());
+        let on_ratio = Callback::new(move |next: f64| {
+            sidebar_ratio.set(next);
+            emit_event(outer, &on_change, object_value([("width", number_value(next))]));
+        });
         split_pane(
             true,
             ratio,
+            get_number_or(props, "sidebarMinSize", 160.0),
             "flex-1 min-h-0 min-w-0",
             panel,
             stack(
@@ -471,6 +478,7 @@ fn DockLayoutComponent(input: DockLayoutProps) -> Element {
                 "h-full min-w-0",
                 rsx! { {gutter("sidebar", false, "r")} {center_row} },
             ),
+            on_ratio,
         )
     } else if sidebar.is_some() {
         stack(
@@ -519,12 +527,19 @@ fn DockLayoutComponent(input: DockLayoutProps) -> Element {
             "",
             node(bottom).unwrap_or(rsx! {}),
         );
+        let on_change = get_string(props, "onBottomPanelHeightChange").filter(|name| !name.is_empty());
+        let on_ratio = Callback::new(move |top: f64| {
+            bottom_ratio.set(100.0 - top);
+            emit_event(outer, &on_change, object_value([("height", number_value(100.0 - top))]));
+        });
         split_pane(
             false,
             100.0 - ratio,
+            get_number_or(props, "bottomPanelMinSize", 120.0),
             "flex-1 min-h-0",
             body,
             stack(false, "h-full", rsx! { {bottom_gutter} {panel} }),
+            on_ratio,
         )
     } else if bottom.is_some() {
         stack(false, "flex-1 min-h-0", rsx! { {body} {bottom_gutter} })
@@ -575,5 +590,101 @@ mod tests {
         assert!(!is_compact(&automatic, Some(1024.0)));
         assert!(!is_compact(&desktop, Some(320.0)));
         assert!(is_compact(&mobile, Some(1600.0)));
+    }
+}
+
+#[cfg(all(test, feature = "native", not(target_arch = "wasm32")))]
+mod drag_tests {
+    use super::*;
+    use blitz_dom::{Document as _, DocumentConfig};
+    use blitz_traits::events::{BlitzMouseButtonEvent, MouseEventButton, MouseEventButtons, UiEvent};
+    use blitz_traits::shell::{ColorScheme, Viewport};
+    use dioxus_native::DioxusDocument;
+    use keyboard_types::Modifiers;
+    use orbital_core::ValueMap;
+    use std::cell::RefCell;
+    use std::collections::HashMap;
+
+    thread_local! {
+        static EVENTS: RefCell<Vec<(String, Value)>> = const { RefCell::new(Vec::new()) };
+        static PROPS: RefCell<Value> = const { RefCell::new(Value::Null) };
+    }
+
+    fn app() -> Element {
+        let props = PROPS.with(|props| props.borrow().clone());
+        let entities = HashMap::new();
+        let trait_content = ValueMap::new();
+        let sink = Callback::new(|event| EVENTS.with(|events| events.borrow_mut().push(event)));
+        let view = DioxusView {
+            trait_name: "Dock",
+            orbital_name: "Dock",
+            current_state: "idle",
+            entities: &entities,
+            trait_content: &trait_content,
+            source_trait: None,
+            sink: Some(sink),
+            source_sink: Callback::new(move |_| sink),
+            navigate: None,
+            dock: None,
+            viewport_width: Some(1280.0),
+            canvas_theme: None,
+            theme_mode: None,
+            toggle_theme: None,
+        };
+        crate::registry::default_registry().render_spec(&props, None, &view)
+    }
+
+    fn settle(doc: &mut DioxusDocument) {
+        for _ in 0..4 {
+            if !doc.poll(None) {
+                break;
+            }
+        }
+        doc.resolve(0.0);
+    }
+
+    fn mouse(x: f32, y: f32, buttons: MouseEventButtons) -> BlitzMouseButtonEvent {
+        BlitzMouseButtonEvent { x, y, button: MouseEventButton::Main, buttons, mods: Modifiers::default() }
+    }
+
+    fn widths_after_dragging_the_sidebar(props: serde_json::Value) -> Vec<f64> {
+        PROPS.with(|slot| *slot.borrow_mut() = serde_json::from_value(props).unwrap());
+        EVENTS.with(|events| events.borrow_mut().clear());
+        let mut doc = DioxusDocument::new(
+            dioxus_core::VirtualDom::new(app),
+            DocumentConfig { viewport: Some(Viewport::new(1280, 600, 1.0, ColorScheme::Light)), ..Default::default() },
+        );
+        for css in crate::styles::stylesheets() {
+            doc.add_user_agent_stylesheet(&css);
+        }
+        doc.initial_build();
+        settle(&mut doc);
+        let handle = doc.query_selector("[data-split-handle]").unwrap().expect("the sidebar split has a handle");
+        let press = doc.get_node(handle).unwrap().synthetic_click_event_data(Modifiers::default());
+        doc.handle_ui_event(UiEvent::MouseMove(mouse(press.x, press.y, MouseEventButtons::None)));
+        doc.handle_ui_event(UiEvent::MouseDown(mouse(press.x, press.y, MouseEventButtons::Primary)));
+        settle(&mut doc);
+        doc.handle_ui_event(UiEvent::MouseMove(mouse(press.x + 128.0, press.y, MouseEventButtons::Primary)));
+        settle(&mut doc);
+        doc.handle_ui_event(UiEvent::MouseUp(mouse(press.x + 128.0, press.y, MouseEventButtons::None)));
+        settle(&mut doc);
+        EVENTS.with(|events| {
+            events.borrow().iter().filter(|(name, _)| name == "SIDEBAR_RESIZED").filter_map(|(_, p)| p.get("width").and_then(Value::as_number)).collect()
+        })
+    }
+
+    #[test]
+    fn dragging_the_sidebar_handle_reports_its_new_width() {
+        let _guard = crate::EVENT_CONVERTER_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let widths = widths_after_dragging_the_sidebar(serde_json::json!({ "type": "dock-layout", "sidebar": "S", "main": "M", "sidebarWidth": 20, "onSidebarWidthChange": "SIDEBAR_RESIZED" }));
+        assert_eq!(widths.len(), 1, "{widths:?}");
+        assert!(widths[0] > 25.0 && widths[0] < 35.0, "a 128px drag from 20% of 1280px is about 30%: {widths:?}");
+    }
+
+    #[test]
+    fn control_a_dock_that_hears_no_width_reports_none() {
+        let _guard = crate::EVENT_CONVERTER_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let widths = widths_after_dragging_the_sidebar(serde_json::json!({ "type": "dock-layout", "sidebar": "S", "main": "M", "sidebarWidth": 20 }));
+        assert!(widths.is_empty());
     }
 }

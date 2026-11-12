@@ -72,11 +72,7 @@ async fn video_number(script: String) -> Option<f64> {
     }
 }
 
-fn emit(sink: Option<EventSink>, name: &Option<String>, payload: Value) {
-    if let (Some(sink), Some(name)) = (sink, name) {
-        sink.call((name.clone(), payload));
-    }
-}
+use crate::renderer::emit_event as emit;
 
 #[allow(non_snake_case)]
 fn AnnotatedMedia(input: AnnotatedMediaProps) -> Element {

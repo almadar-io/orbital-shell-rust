@@ -314,14 +314,15 @@ impl EventHandler for DioxusEventHandler<'_> {
             | DomEventData::MouseLeave(mevent)
             | DomEventData::Click(mevent) => {
                 // ORBITAL PATCH: element coordinates on mouse events
-                let origin = mutr
+                let (origin, size) = mutr
                     .doc
                     .get_node(event.target)
-                    .map(|node| node.absolute_position(0.0, 0.0))
+                    .map(|node| (node.absolute_position(0.0, 0.0), node.final_layout.size))
                     .unwrap_or_default();
                 Some(wrap_event_data(NativeClickData(
                     mevent.clone(),
                     ((mevent.x - origin.x) as f64, (mevent.y - origin.y) as f64),
+                    (size.width as f64, size.height as f64),
                 )))
             }
 

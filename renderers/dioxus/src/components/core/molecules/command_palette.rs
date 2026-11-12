@@ -44,11 +44,7 @@ fn command_matches(command: &Value, query: &str) -> bool {
             .any(|keyword| matches_query(query, keyword))
 }
 
-fn emit(sink: Option<EventSink>, event: &Option<String>, payload: Value) {
-    if let (Some(sink), Some(event)) = (sink, event) {
-        sink.call((event.clone(), payload));
-    }
-}
+use crate::renderer::emit_event as emit;
 
 #[allow(non_snake_case)]
 fn Palette(input: PaletteProps) -> Element {

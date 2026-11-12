@@ -61,7 +61,39 @@ pub(crate) fn shared_root_attrs_with_defaults(
             attrs.push(Attribute::new("tabindex", index, None, false));
         }
     }
+    for (name, value) in fields.into_iter().flat_map(|fields| fields.iter()) {
+        let name: &str = name.as_ref();
+        if !name.starts_with("data-") {
+            continue;
+        }
+        let text = match value {
+            Value::String(text) => text.to_string(),
+            Value::Int(n) => n.to_string(),
+            Value::Bool(b) => b.to_string(),
+            _ => continue,
+        };
+        attrs.push(Attribute::new(data_attr_name(name), text, None, false));
+    }
     attrs
+}
+
+/// A `data-*` attribute name as the `'static` name a Dioxus attribute carries: each distinct name a program declares
+/// is kept once for the run.
+fn data_attr_name(name: &str) -> &'static str {
+    static NAMES: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<&'static str>>> =
+        std::sync::OnceLock::new();
+    let mut names = NAMES
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    match names.get(name) {
+        Some(kept) => kept,
+        None => {
+            let kept: &'static str = Box::leak(name.to_string().into_boxed_str());
+            names.insert(kept);
+            kept
+        }
+    }
 }
 
 pub(crate) fn entry_props(spec: &Value) -> Option<Value> {
@@ -420,6 +452,30 @@ mod tests {
             assert!(rendered.get("enter").is_none());
             assert!(rendered.get("enterDelay").is_none());
         }
+    }
+
+    #[test]
+    fn shared_root_attrs_forward_every_data_attribute_as_the_web_does() {
+        let props = serde_json::from_str(
+            r#"{"data-testid":"change-list-item","data-change-type":"added","data-rank":3,"datatype":"x","title":"t"}"#,
+        )
+        .unwrap();
+        let attrs: Vec<_> = shared_root_attrs(&props)
+            .iter()
+            .map(|attr| match &attr.value {
+                AttributeValue::Text(value) => (attr.name, value.clone()),
+                value => panic!("unexpected attribute value: {value:?}"),
+            })
+            .collect();
+        assert_eq!(
+            attrs,
+            vec![
+                ("data-testid", "change-list-item".to_string()),
+                ("data-change-type", "added".to_string()),
+                ("data-rank", "3".to_string()),
+            ],
+            "control: a key that only starts with `data` and a non-data prop are not forwarded"
+        );
     }
 
     #[test]

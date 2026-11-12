@@ -770,6 +770,33 @@ mod tests {
     }
 
     #[test]
+    fn a_union_lists_its_wider_record_arm_first_so_untagged_decoding_keeps_every_field() {
+        let mut m = OirModule::new("app", "1.0.0");
+        let mut holder = OirEntity::new("Holder");
+        let record = |names: &[&str]| OirType::Struct {
+            additional: None,
+            fields: names.iter().map(|n| OirField::new(*n, OirType::Number)).collect::<Vec<_>>().into(),
+        };
+        holder.fields.push(OirField::new(
+            "at",
+            OirType::Union {
+                variants: vec![
+                    OirField::new("number", OirType::Number),
+                    OirField::new("Flat", record(&["x", "y"])),
+                    OirField::new("Deep", record(&["x", "y", "z"])),
+                ]
+                .into(),
+            },
+        ));
+        m.entities.push(holder);
+        let content = entities_file(&m).content;
+        assert!(
+            content.contains("pub enum HolderAt {\n    Number(f64),\n    Deep(HolderAtDeep),\n    Flat(HolderAtFlat),\n}"),
+            "{content}"
+        );
+    }
+
+    #[test]
     fn a_payload_key_not_marked_required_renders_an_option() {
         let mut m = module(true);
         m.traits[0].events[0].payload_required_fields.remove("size");

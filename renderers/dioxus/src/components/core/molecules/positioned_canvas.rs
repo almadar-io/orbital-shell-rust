@@ -103,11 +103,7 @@ fn typography(
     pattern_spec("typography", fields)
 }
 
-fn emit(sink: Option<EventSink>, event: &Option<String>, payload: Value) {
-    if let (Some(sink), Some(event)) = (sink, event) {
-        sink.call((event.clone(), payload));
-    }
-}
+use crate::renderer::emit_event as emit;
 
 fn id_payload(id: Option<&str>) -> Value {
     object_value([("id", id.map(Value::string).unwrap_or(Value::Null))])

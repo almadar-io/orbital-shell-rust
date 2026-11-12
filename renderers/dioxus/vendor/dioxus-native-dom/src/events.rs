@@ -206,7 +206,14 @@ impl HasKeyboardData for BlitzKeyboardData {
 
 #[derive(Clone)]
 // ORBITAL PATCH: element coordinates on mouse events (the target's offset, as wheel events carry it)
-pub struct NativeClickData(pub(crate) BlitzMouseButtonEvent, pub(crate) (f64, f64));
+pub struct NativeClickData(pub(crate) BlitzMouseButtonEvent, pub(crate) (f64, f64), pub(crate) (f64, f64));
+
+// ORBITAL PATCH: the target's laid-out size, so a drag over a childless overlay reads its position as a share of it
+impl NativeClickData {
+    pub fn target_size(&self) -> (f64, f64) {
+        self.2
+    }
+}
 
 impl InteractionLocation for NativeClickData {
     fn client_coordinates(&self) -> ClientPoint {

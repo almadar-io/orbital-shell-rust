@@ -101,12 +101,19 @@ impl SelfSubstrate {
     }
 
     /// The work of a deferred keyed op (EXEC-QUEUE-13), built on the asking thread: it runs in the session that thread
-    /// entered, so a deferred `program/dispatch` keeps the asking session's identity (EXEC-AGENT-1).
+    /// entered, so a deferred `program/dispatch` keeps the asking session's identity (EXEC-AGENT-1), and for the tab that
+    /// thread served, so what that dispatch defers in turn completes on the asking tab (EXEC-QUEUE-10).
     fn later(self: &Arc<Self>, op: &str, args: &[Value]) -> orbital_core::runtime::native_host::SubstrateWork {
         let (this, op, args) = (Arc::clone(self), op.to_string(), args.to_vec());
         let session = this.shared().and_then(|runtime| runtime.kernel.thread_session());
+        // A completion's thread serves no tab of its own; the client session it runs in is the asking tab's (EXEC-DIST-9).
+        let origin = this
+            .shared()
+            .and_then(|runtime| runtime.origin_by_thread.read().get(&std::thread::current().id()).cloned())
+            .or_else(|| session.as_deref().map(str::to_string));
         Box::new(move || {
             let _session = this.shared().zip(session).map(|(runtime, session)| runtime.kernel.enter_session(&session));
+            let _origin = this.shared().map(|runtime| runtime.enter_origin(origin.as_deref()));
             orbital_core::effects::executor::SubstrateHandler::run(this.as_ref(), &op, &args)
         })
     }
@@ -4417,6 +4424,103 @@ mod tests {
     fn control_the_askers_own_completion_is_still_pushed_once_beside_the_tool_dispatch() {
         let (_runtime, mut live) = tool_painter_asked_by(Some("tab-1"));
         assert_eq!(items_of(&mut live, "DONE").len(), 1);
+    }
+
+    fn tool_that_reads_later(dir: &std::path::Path) -> orbital_core::OrbitalSchema {
+        let path = dir.join("note.txt");
+        std::fs::write(&path, "hello").unwrap();
+        let machine = |states: serde_json::Value, events: serde_json::Value, transitions: serde_json::Value| serde_json::json!({ "states": states, "events": events, "transitions": transitions });
+        serde_json::from_value(serde_json::json!({
+            "name": "Desk",
+            "osGrants": { "fs": [{ "glob": format!("{}/**", dir.display()), "modes": ["read"] }] },
+            "typeContractVersion": 1,
+            "orbitals": [{
+                "name": "Desk",
+                "entity": { "name": "Card", "persistence": "runtime", "fields": [{ "name": "id", "type": "string" }, { "name": "text", "type": "string" }] },
+                "traits": [{
+                    "name": "Agent", "linkedEntity": "Card",
+                    "stateMachine": machine(
+                        serde_json::json!([{ "name": "idle", "isInitial": true }]),
+                        serde_json::json!([{ "key": "GO", "name": "Go" }, { "key": "DONE", "name": "Done" }, { "key": "FAILED", "name": "Failed" }]),
+                        serde_json::json!([
+                            { "from": "idle", "to": "idle", "event": "GO", "effects": [
+                                ["program/dispatch", "Panel.SHOW", {}, { "key": "t1", "emit": { "success": "DONE", "failure": "FAILED" } }]] },
+                            { "from": "idle", "to": "idle", "event": "DONE", "effects": [] },
+                            { "from": "idle", "to": "idle", "event": "FAILED", "effects": [] }]))
+                }, {
+                    "name": "Panel", "linkedEntity": "Card",
+                    "stateMachine": machine(
+                        serde_json::json!([{ "name": "hidden", "isInitial": true }, { "name": "reading" }, { "name": "shown" }]),
+                        serde_json::json!([{ "key": "SHOW", "name": "Show", "input": true }, { "key": "READ_DONE", "name": "Read done" }, { "key": "READ_FAILED", "name": "Read failed" },
+                            { "key": "PAINT_ASKED", "name": "Paint asked" }, { "key": "PAINT_REFUSED", "name": "Paint refused" }]),
+                        serde_json::json!([
+                            { "from": "hidden", "to": "reading", "event": "SHOW", "effects": [["os/read-file", path.to_str().unwrap(), { "key": "r1", "emit": { "success": "READ_DONE", "failure": "READ_FAILED" } }]] },
+                            { "from": "reading", "to": "shown", "event": "READ_DONE", "effects": [["render-ui", "main", { "type": "typography", "content": "read after the tool" }],
+                                ["program/dispatch", "Late.PAINT", {}, { "key": "t2", "emit": { "success": "PAINT_ASKED", "failure": "PAINT_REFUSED" } }]] },
+                            { "from": "shown", "to": "shown", "event": "PAINT_ASKED", "effects": [] },
+                            { "from": "shown", "to": "shown", "event": "PAINT_REFUSED", "effects": [] },
+                            { "from": "reading", "to": "hidden", "event": "READ_FAILED", "effects": [] }]))
+                }, {
+                    "name": "Late", "linkedEntity": "Card",
+                    "stateMachine": machine(
+                        serde_json::json!([{ "name": "idle", "isInitial": true }, { "name": "reading" }, { "name": "painted" }]),
+                        serde_json::json!([{ "key": "PAINT", "name": "Paint", "input": true }, { "key": "LATE_DONE", "name": "Late done" }, { "key": "LATE_FAILED", "name": "Late failed" }]),
+                        serde_json::json!([
+                            { "from": "idle", "to": "reading", "event": "PAINT", "effects": [["os/read-file", path.to_str().unwrap(), { "key": "r2", "emit": { "success": "LATE_DONE", "failure": "LATE_FAILED" } }]] },
+                            { "from": "reading", "to": "painted", "event": "LATE_DONE", "effects": [["render-ui", "main", { "type": "typography", "content": "painted two hops later" }]] },
+                            { "from": "reading", "to": "idle", "event": "LATE_FAILED", "effects": [] }]))
+                }]
+            }]
+        }))
+        .expect("the program parses")
+    }
+
+    fn later_read_asked_by(client: Option<&str>) -> Vec<LiveBroadcastItem> {
+        later_event_asked_by(client, "READ_DONE")
+    }
+
+    fn later_event_asked_by(client: Option<&str>, event: &str) -> Vec<LiveBroadcastItem> {
+        let dir = scratch_dir();
+        let runtime = Host::new(Arc::new(DriverAdapter::memory())).shared();
+        runtime.register_schema(tool_that_reads_later(&dir)).unwrap();
+        let mut live = runtime.subscribe_live();
+        let mut request = serde_json::json!({ "orbital": "Desk", "targetTrait": "Agent", "event": "GO" });
+        if let Some(client) = client {
+            request["clientId"] = serde_json::json!(client);
+        }
+        dispatch_request(&runtime, request).unwrap();
+        items_of(&mut live, event)
+    }
+
+    #[test]
+    fn a_tool_dispatched_from_a_completion_still_completes_on_the_asking_tab() {
+        let items = later_event_asked_by(Some("tab-1"), "LATE_DONE");
+        assert_eq!(items.len(), 1, "{items:?}");
+        assert!(items[0].delivered_to(Some("tab-1"), |_| false));
+        assert!(!items[0].delivered_to(Some("tab-2"), |_| true), "control: another tab does not get it");
+        let frame = serde_json::to_value(live_item_value(&items[0])).unwrap();
+        assert!(frame["response"]["clientEffectsByTrait"].to_string().contains("painted two hops later"), "{frame}");
+    }
+
+    #[test]
+    fn control_a_tool_dispatched_from_a_completion_with_no_asking_tab_pushes_to_no_one() {
+        assert!(later_event_asked_by(None, "LATE_DONE").is_empty());
+    }
+
+    #[test]
+    fn what_a_tool_dispatch_defers_completes_on_the_asking_tab() {
+        let items = later_read_asked_by(Some("tab-1"));
+        assert_eq!(items.len(), 1, "{items:?}");
+        assert!(items[0].delivered_to(Some("tab-1"), |_| false));
+        assert!(!items[0].delivered_to(Some("tab-2"), |_| true), "control: another tab does not get it");
+        let frame = serde_json::to_value(live_item_value(&items[0])).unwrap();
+        assert_eq!(frame["response"]["states"]["Panel"], "shown", "{frame}");
+        assert!(frame["response"]["clientEffectsByTrait"].to_string().contains("read after the tool"), "the tab is sent what the completion painted: {frame}");
+    }
+
+    #[test]
+    fn control_what_a_tool_dispatch_defers_with_no_asking_tab_pushes_to_no_one() {
+        assert!(later_read_asked_by(None).is_empty());
     }
 
     fn completion_row(done_rewrites_list: bool) -> serde_json::Value {

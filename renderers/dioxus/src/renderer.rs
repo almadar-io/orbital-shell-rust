@@ -24,6 +24,39 @@ use std::collections::HashMap;
 pub type EventSink = Callback<(String, Value)>;
 pub type SourceSinkFactory = Callback<Option<String>, EventSink>;
 
+/// Dispatch `payload` under the declared event `event`, when the pattern names one.
+pub(crate) fn emit_event(sink: Option<EventSink>, event: &Option<String>, payload: Value) {
+    if let (Some(sink), Some(event)) = (sink, event) {
+        sink.call((event.clone(), payload));
+    }
+}
+
+/// Where a mouse event fell on its target element, and that element's laid-out size: a drag reads its position as a
+/// share of a childless overlay it lays over its container. Only the Blitz shell reports the size.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct TargetPoint {
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+}
+
+pub(crate) fn target_point(event: &MouseEvent) -> Option<TargetPoint> {
+    #[cfg(feature = "native")]
+    {
+        let data = event.data();
+        let native = data.downcast::<dioxus_native::NativeClickData>()?;
+        let (width, height) = native.target_size();
+        let at = data.element_coordinates();
+        Some(TargetPoint { x: at.x, y: at.y, width, height })
+    }
+    #[cfg(not(feature = "native"))]
+    {
+        let _ = event;
+        None
+    }
+}
+
 pub(crate) fn emit_empty_event(sink: Option<EventSink>, name: Option<&str>) {
     if let (Some(sink), Some(name)) = (sink, name.filter(|name| !name.is_empty())) {
         sink.call((name.to_string(), Value::Null));
@@ -70,7 +103,7 @@ pub(crate) fn array_value(items: Vec<Value>) -> Value {
     Value::Array(items.into())
 }
 
-/// The web's `domPassthrough`: the `aria-*`, `role`, `id`, `lang`, `dir` and `tabIndex` props a layout primitive forwards to its element.
+/// The web's `domPassthrough`: the `aria-*`, `data-*`, `role`, `id`, `lang`, `dir` and `tabIndex` props a layout primitive forwards to its element.
 pub(crate) fn dom_passthrough(props: &Value) -> Vec<(String, Value)> {
     let Some(fields) = props.as_object() else {
         return Vec::new();
@@ -79,7 +112,9 @@ pub(crate) fn dom_passthrough(props: &Value) -> Vec<(String, Value)> {
         .iter()
         .filter(|(key, value)| {
             let key: &str = key.as_ref();
-            (key.starts_with("aria-") || matches!(key, "role" | "id" | "lang" | "dir" | "tabIndex"))
+            (key.starts_with("aria-")
+                || key.starts_with("data-")
+                || matches!(key, "role" | "id" | "lang" | "dir" | "tabIndex"))
                 && matches!(value, Value::String(_) | Value::Int(_) | Value::Bool(_))
         })
         .map(|(key, value)| (key.to_string(), value.clone()))
@@ -875,7 +910,7 @@ pub(crate) fn passthrough_attrs(props: &Value, defaults: &[(&'static str, Value)
     let Some(fields) = props.as_object() else {
         return attrs;
     };
-    for name in ["title", "data-testid"] {
+    for name in ["title"] {
         if let Some(Value::String(text)) = fields.get(name) {
             attrs.push(Attribute::new(name, text.to_string(), None, false));
         }

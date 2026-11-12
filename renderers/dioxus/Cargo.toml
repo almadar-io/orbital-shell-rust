@@ -165,6 +165,8 @@ required-features = ["native"]
 
 [dev-dependencies]
 pretty_assertions = "1.4"
+# A reactor for the DOM tests whose components wait on `timer::Delay` (dioxus-sdk-time sleeps on Tokio natively).
+tokio = { version = "1.53", features = ["rt-multi-thread", "time"] }
 dioxus-html = { version = "0.7.9", features = ["serialize"] }
 
 [target.'cfg(target_os = "android")'.dependencies]
