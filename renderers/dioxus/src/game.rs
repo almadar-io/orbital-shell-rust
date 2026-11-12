@@ -57,6 +57,14 @@ fn canvas_size(node: &serde_json::Value) -> Option<(usize, usize)> {
     }
 }
 
+/// Whether the scene is an orbital-painter canvas that fills its parent (`fillContainer: true`)
+/// instead of taking its own size.
+fn fills_container(node: &serde_json::Value) -> bool {
+    let fields = node.get("props").unwrap_or(node);
+    fields.get("painter").and_then(serde_json::Value::as_str) == Some("orbital")
+        && fields.get("fillContainer").and_then(serde_json::Value::as_bool) == Some(true)
+}
+
 /// Paints one scene into the Blitz scene via the shared wgpu device. The scene host is shared
 /// with the component, which feeds it taps; this side keeps its viewport, clock, assets and fonts
 /// current and draws its frame. Owns the offscreen target texture (recreated on size change).
@@ -489,7 +497,8 @@ impl DioxusPatternRenderer for SceneCanvasRenderer {
         }
         let (class_name, a11y) = scene_presentation(props);
         let inline_style = style_with_props("", props);
-        rsx! { SceneCanvas { node, sink: view.sink, fill_parent: false, a11y, class_name, inline_style } }
+        let fill_parent = fills_container(&node);
+        rsx! { SceneCanvas { node, sink: view.sink, fill_parent, a11y, class_name, inline_style } }
     }
 }
 
@@ -652,6 +661,23 @@ mod tests {
         let node = scene_node("canvas", &props, Some(&theme));
         assert_eq!(node["canvasTheme"], theme);
         assert_eq!(canvas_size(&node), Some((640, 360)));
+    }
+
+    #[test]
+    fn an_orbital_canvas_fills_its_parent_only_when_it_asks_to() {
+        let fill: Value = serde_json::from_value(
+            json!({ "painter": "orbital", "fillContainer": true, "width": 640, "height": 360 }),
+        )
+        .unwrap();
+        assert!(fills_container(&scene_node("canvas", &fill, None)));
+        let own: Value =
+            serde_json::from_value(json!({ "painter": "orbital", "width": 640, "height": 360 }))
+                .unwrap();
+        assert!(!fills_container(&scene_node("canvas", &own, None)));
+        let other: Value =
+            serde_json::from_value(json!({ "fillContainer": true, "width": 640, "height": 360 }))
+                .unwrap();
+        assert!(!fills_container(&scene_node("canvas", &other, None)));
     }
 
     #[test]

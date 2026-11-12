@@ -435,7 +435,7 @@ struct HostRan<'a> {
 }
 
 /// Send the tab whose request caused `ran` the client view of its sealed `response`, as a dispatch it folds
-/// (EXEC-QUEUE-10, EXEC-AGENT-1). With no asking tab, or a trait of no orbital, nothing is sent.
+/// (EXEC-QUEUE-10, EXEC-AGENT-1). With no asking tab, a trait of no orbital, or a trait no browser runs, nothing is sent.
 fn push_host_dispatch(
     tx: &broadcast::Sender<LiveBroadcastItem>,
     kernel: Option<&RuntimeKernel>,
@@ -447,6 +447,9 @@ fn push_host_dispatch(
     let (Some(client_id), Some(orbital)) = (client_id, orbital) else {
         return;
     };
+    if kernel.is_some_and(|k| !k.browser_runs(ran.trait_name)) {
+        return;
+    }
     let (response, payload) = match kernel {
         Some(kernel) => (kernel.client_view(response), kernel.browser_completion_payload(ran.trait_name, ran.payload)),
         None => (response, ran.payload.clone()),
@@ -4560,6 +4563,35 @@ mod tests {
         assert_eq!(frame["request"]["event"], "SHOW");
         assert_eq!(frame["response"]["states"]["Panel"], "shown", "{frame}");
         assert!(frame["response"]["clientEffectsByTrait"].to_string().contains("asked by the tool"), "the tab is sent what the tool painted: {frame}");
+    }
+
+    fn tool_into_store_driver() -> orbital_core::OrbitalSchema {
+        let mut program = serde_json::to_value(tool_painter()).unwrap();
+        let panel = program["orbitals"][0]["traits"].as_array_mut().unwrap().remove(1);
+        program["orbitals"][0]["traits"][0]["stateMachine"]["transitions"][0]["effects"][0][1] = serde_json::json!("Rows.Panel.SHOW");
+        program["orbitals"][0]["entity"]["persistence"] = serde_json::json!("persistent");
+        program["orbitals"][0]["entity"]["store"] = serde_json::json!("Rows");
+        program["orbitals"].as_array_mut().unwrap().push(serde_json::json!({
+            "name": "Rows",
+            "entity": { "name": "RowsRun", "persistence": "runtime", "fields": [{ "name": "id", "type": "string" }, { "name": "text", "type": "string" }] },
+            "traits": [panel]
+        }));
+        serde_json::from_value(program).expect("the program parses")
+    }
+
+    #[test]
+    fn a_store_drivers_dispatch_is_never_pushed_to_the_asking_tab() {
+        let runtime = Host::new(Arc::new(DriverAdapter::memory())).shared();
+        runtime.register_schema(tool_into_store_driver()).unwrap();
+        let mut live = runtime.subscribe_live();
+        dispatch_request(&runtime, serde_json::json!({ "orbital": "Desk", "targetTrait": "Agent", "event": "GO", "clientId": "tab-1" })).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        let mut events = Vec::new();
+        while let Ok(item) = live.try_recv() {
+            events.push(item.event);
+        }
+        assert!(!events.contains(&"SHOW".to_string()), "{events:?}");
+        assert!(events.contains(&"DONE".to_string()), "control: the asker's own completion is still pushed: {events:?}");
     }
 
     #[test]
