@@ -237,7 +237,13 @@ impl orbital_core::effects::executor::SubstrateHandler for SelfSubstrate {
             .dispatch_continuing(trait_name, orbital_core::RUNTIME_SINGLETON, event, payload.clone(), None, None)
             .map_err(|e| failure(e.to_string()))?;
         let response = orbital_core::EventResponse::from_process_results(&outcomes, trait_name, event);
-        runtime.broadcast_persisted(&response, None);
+        let asker = runtime.kernel.thread_session();
+        runtime.broadcast_persisted(&response, asker.as_deref());
+        let mut pushed = response.clone();
+        runtime.kernel.stamp_emitted_sources(&mut pushed);
+        runtime.kernel.seal_outcomes(&mut pushed, &outcomes, None, false);
+        let ran = HostRan { orbital: None, trait_name, event, payload, entity_id: orbital_core::RUNTIME_SINGLETON };
+        push_host_dispatch(&runtime.live_tx, Some(&runtime.kernel), &ran, pushed, asker.as_deref());
         serde_json::to_value(&response)
             .and_then(serde_json::from_value)
             .map_err(|e| failure(format!("program/dispatch: the response does not serialize: {e}")))
@@ -412,6 +418,35 @@ pub struct TraceAsk {
 }
 
 /// Fan the `persist` effect's success emits of `response` out to every other connected `/api/events` client.
+/// A dispatch the host ran on its own: a deferred completion, or the input a `program/dispatch` named.
+struct HostRan<'a> {
+    orbital: Option<String>,
+    trait_name: &'a str,
+    event: &'a str,
+    payload: &'a Value,
+    entity_id: &'a str,
+}
+
+/// Send the tab whose request caused `ran` the client view of its sealed `response`, as a dispatch it folds
+/// (EXEC-QUEUE-10, EXEC-AGENT-1). With no asking tab, or a trait of no orbital, nothing is sent.
+fn push_host_dispatch(
+    tx: &broadcast::Sender<LiveBroadcastItem>,
+    kernel: Option<&RuntimeKernel>,
+    ran: &HostRan<'_>,
+    response: orbital_core::EventResponse,
+    client_id: Option<&str>,
+) {
+    let orbital = ran.orbital.clone().or_else(|| kernel.and_then(|k| k.orbital_of_trait(ran.trait_name)));
+    let (Some(client_id), Some(orbital)) = (client_id, orbital) else {
+        return;
+    };
+    let (response, payload) = match kernel {
+        Some(kernel) => (kernel.client_view(response), kernel.browser_completion_payload(ran.trait_name, ran.payload)),
+        None => (response, ran.payload.clone()),
+    };
+    let _ = tx.send(LiveBroadcastItem::dispatched(orbital, ran.trait_name, ran.event, &payload, orbital_core::public_entity_id(ran.entity_id), response, client_id));
+}
+
 fn broadcast_persisted(
     tx: &broadcast::Sender<LiveBroadcastItem>,
     response: &orbital_core::EventResponse,
@@ -804,14 +839,8 @@ impl Host {
                                 let _ = tx.send(item);
                             }
                         }
-                        let orbital = site.orbital.clone().or_else(|| kernel.as_ref().and_then(|k| k.orbital_of_trait(&site.trait_name)));
-                        if let (Some(client_id), Some(orbital)) = (client_id, orbital) {
-                            let (response, payload) = match &kernel {
-                                Some(kernel) => (kernel.client_view(response), kernel.browser_completion_payload(&site.trait_name, payload)),
-                                None => (response, payload.clone()),
-                            };
-                            let _ = tx.send(LiveBroadcastItem::dispatched(orbital, &site.trait_name, event, &payload, orbital_core::public_entity_id(&site.entity_id), response, client_id));
-                        }
+                        let ran = HostRan { orbital: site.orbital.clone(), trait_name: &site.trait_name, event, payload, entity_id: &site.entity_id };
+                        push_host_dispatch(&tx, kernel.as_deref(), &ran, response, client_id);
                     }
                     Err(error) => {
                         tracing::warn!(
@@ -4317,6 +4346,77 @@ mod tests {
         orbital["traits"][0]["stateMachine"]["transitions"][0]["effects"].as_array_mut().unwrap().insert(0, serde_json::json!(["render-ui", "main", { "type": "stack", "children": [
             { "type": "typography", "content": "@entity.count" }, { "type": "data-list", "items": "@entity.items" }] }]));
         serde_json::from_value(program).expect("the program parses")
+    }
+
+    fn tool_painter() -> orbital_core::OrbitalSchema {
+        let machine = |states: serde_json::Value, events: serde_json::Value, transitions: serde_json::Value| serde_json::json!({ "states": states, "events": events, "transitions": transitions });
+        serde_json::from_value(serde_json::json!({
+            "name": "Desk",
+            "typeContractVersion": 1,
+            "orbitals": [{
+                "name": "Desk",
+                "entity": { "name": "Card", "persistence": "runtime", "fields": [{ "name": "id", "type": "string" }, { "name": "text", "type": "string" }] },
+                "traits": [{
+                    "name": "Agent", "linkedEntity": "Card",
+                    "stateMachine": machine(
+                        serde_json::json!([{ "name": "idle", "isInitial": true }]),
+                        serde_json::json!([{ "key": "GO", "name": "Go" }, { "key": "DONE", "name": "Done" }, { "key": "FAILED", "name": "Failed" }]),
+                        serde_json::json!([
+                            { "from": "idle", "to": "idle", "event": "GO", "effects": [
+                                ["program/dispatch", "Panel.SHOW", { "text": "asked by the tool" }, { "key": "t1", "emit": { "success": "DONE", "failure": "FAILED" } }]] },
+                            { "from": "idle", "to": "idle", "event": "DONE", "effects": [] },
+                            { "from": "idle", "to": "idle", "event": "FAILED", "effects": [] }]))
+                }, {
+                    "name": "Panel", "linkedEntity": "Card",
+                    "stateMachine": machine(
+                        serde_json::json!([{ "name": "hidden", "isInitial": true }, { "name": "shown" }]),
+                        serde_json::json!([{ "key": "SHOW", "name": "Show", "input": true, "payloadSchema": [{ "name": "text", "type": "string", "required": true }] }]),
+                        serde_json::json!([{ "from": "hidden", "to": "shown", "event": "SHOW",
+                            "effects": [["set", "@entity.text", "@payload.text"], ["render-ui", "main", { "type": "typography", "content": "@payload.text" }]] }]))
+                }]
+            }]
+        }))
+        .expect("the program parses")
+    }
+
+    fn tool_painter_asked_by(client: Option<&str>) -> (Arc<Host>, broadcast::Receiver<LiveBroadcastItem>) {
+        let runtime = Host::new(Arc::new(DriverAdapter::memory())).shared();
+        runtime.register_schema(tool_painter()).unwrap();
+        let live = runtime.subscribe_live();
+        let mut request = serde_json::json!({ "orbital": "Desk", "targetTrait": "Agent", "event": "GO" });
+        if let Some(client) = client {
+            request["clientId"] = serde_json::json!(client);
+        }
+        dispatch_request(&runtime, request).unwrap();
+        (runtime, live)
+    }
+
+    #[test]
+    fn a_tool_dispatch_goes_to_the_asking_tab_as_a_dispatch_it_folds() {
+        let (_runtime, mut live) = tool_painter_asked_by(Some("tab-1"));
+        let items = items_of(&mut live, "SHOW");
+        assert_eq!(items.len(), 1, "{items:?}");
+        assert!(items[0].delivered_to(Some("tab-1"), |_| false));
+        assert!(!items[0].delivered_to(Some("tab-2"), |_| true), "control: another tab does not get it");
+        let frame = serde_json::to_value(live_item_value(&items[0])).unwrap();
+        assert_eq!(frame["type"], "dispatch");
+        assert_eq!(frame["orbitalName"], "Desk");
+        assert_eq!(frame["request"]["targetTrait"], "Panel");
+        assert_eq!(frame["request"]["event"], "SHOW");
+        assert_eq!(frame["response"]["states"]["Panel"], "shown", "{frame}");
+        assert!(frame["response"]["clientEffectsByTrait"].to_string().contains("asked by the tool"), "the tab is sent what the tool painted: {frame}");
+    }
+
+    #[test]
+    fn control_a_tool_dispatch_with_no_asking_tab_pushes_to_no_one() {
+        let (_runtime, mut live) = tool_painter_asked_by(None);
+        assert!(items_of(&mut live, "SHOW").is_empty());
+    }
+
+    #[test]
+    fn control_the_askers_own_completion_is_still_pushed_once_beside_the_tool_dispatch() {
+        let (_runtime, mut live) = tool_painter_asked_by(Some("tab-1"));
+        assert_eq!(items_of(&mut live, "DONE").len(), 1);
     }
 
     fn completion_row(done_rewrites_list: bool) -> serde_json::Value {
