@@ -3026,7 +3026,17 @@ mod tests {
     /// Opens `program` as a hosted guest at `/`, subscribes to its ticks with `program/live { kind: "guest" }` and answers
     /// the `onMessage` payloads (each stringified) that arrived within `wait`.
     fn guest_tick_items(program: serde_json::Value, wait: std::time::Duration) -> Vec<String> {
+        guest_tick_items_after(program, None, wait)
+    }
+
+    /// [`guest_tick_items`], and once the guest is open, `then` (an event address in the guest) is dispatched into it, as the
+    /// catalog's stage dispatches a viewer's press (`program/dispatch address payload { guest }`).
+    fn guest_tick_items_after(program: serde_json::Value, then: Option<&str>, wait: std::time::Duration) -> Vec<String> {
         let runtime = Host::new(Arc::new(DriverAdapter::memory())).shared();
+        let mut opened_effects = vec![serde_json::json!(["program/live", { "kind": "guest", "guest": "@payload.result.guest" }, { "key": "guest-ticks", "emit": { "onMessage": "TICKED", "failure": "FAILED" } }])];
+        if let Some(address) = then {
+            opened_effects.push(serde_json::json!(["program/dispatch", address, {}, { "guest": "@payload.result.guest", "emit": { "success": "DISPATCHED", "failure": "FAILED" } }]));
+        }
         let opener: orbital_core::OrbitalSchema = serde_json::from_value(serde_json::json!({
             "name": "Opener",
             "typeContractVersion": 1,
@@ -3039,12 +3049,13 @@ mod tests {
                     "stateMachine": {
                         "states": [{ "name": "idle", "isInitial": true }],
                         "events": [{ "key": "OPEN", "name": "Open", "payloadSchema": [{ "name": "program", "type": "object", "required": true }] },
-                            { "key": "OPENED", "name": "Opened" }, { "key": "FAILED", "name": "Failed" }, { "key": "TICKED", "name": "Ticked" }],
+                            { "key": "OPENED", "name": "Opened" }, { "key": "FAILED", "name": "Failed" }, { "key": "TICKED", "name": "Ticked" }, { "key": "DISPATCHED", "name": "Dispatched" }],
                         "transitions": [
                             { "from": "idle", "to": "idle", "event": "OPEN", "effects": [["program/open", "@payload.program", { "route": "/", "declared": true }, { "emit": { "success": "OPENED", "failure": "FAILED" } }]] },
-                            { "from": "idle", "to": "idle", "event": "OPENED", "effects": [["program/live", { "kind": "guest", "guest": "@payload.result.guest" }, { "key": "guest-ticks", "emit": { "onMessage": "TICKED", "failure": "FAILED" } }]] },
+                            { "from": "idle", "to": "idle", "event": "OPENED", "effects": opened_effects },
                             { "from": "idle", "to": "idle", "event": "TICKED", "effects": [["set", "@entity.items", ["array/concat", "@entity.items", [["json/stringify", "@payload.rendered"]]]]] },
-                            { "from": "idle", "to": "idle", "event": "FAILED", "effects": [["set", "@entity.failed", ["json/stringify", "@payload"]]] }]
+                            { "from": "idle", "to": "idle", "event": "FAILED", "effects": [["set", "@entity.failed", ["json/stringify", "@payload"]]] },
+                            { "from": "idle", "to": "idle", "event": "DISPATCHED", "effects": [] }]
                     }
                 }]
             }]
@@ -4129,6 +4140,143 @@ mod tests {
         assert!(items.iter().all(|i| !i.contains("hidden")), "control: a [client] trait on a page the guest does not show never ticks (EXEC-TICK-6): {items:?}");
         assert!(items.iter().all(|i| i != "[]"), "edge: a pass whose ticks painted nothing (ShownSilent, every 5 ms) is no item: {items:?}");
         assert!(items.len() < 40, "edge: items come at the painting tick's pace (20 ms), not the silent one's: {}", items.len());
+    }
+
+    /// A guest whose page lists only `Shell`, which embeds `Clock` (`@trait.Clock`); `Clock` is a `[client]` trait ticking every 20 ms.
+    fn embedded_ticking_guest_program() -> serde_json::Value {
+        serde_json::json!({ "name": "EmbeddedTicker", "typeContractVersion": 1, "orbitals": [{
+            "name": "ShellOrbital",
+            "entity": { "name": "Count", "persistence": "runtime", "fields": [{ "name": "id", "type": "string" }, { "name": "n", "type": "number", "default": 0 }] },
+            "traits": [
+                { "name": "Shell", "linkedEntity": "Count", "dispatch": "client",
+                  "stateMachine": { "states": [{ "name": "idle", "isInitial": true }], "events": [{ "key": "INIT", "name": "Init" }],
+                    "transitions": [{ "from": "idle", "to": "idle", "event": "INIT", "effects": [["render-ui", "main", { "type": "stack", "children": ["@trait.Clock"] }]] }] } },
+                { "name": "Clock", "linkedEntity": "Count", "dispatch": "client",
+                  "stateMachine": { "states": [{ "name": "idle", "isInitial": true }], "events": [{ "key": "INIT", "name": "Init" }],
+                    "transitions": [{ "from": "idle", "to": "idle", "event": "INIT", "effects": [["render-ui", "main", { "type": "typography", "content": ["str/concat", "clock ", "@entity.n"] }]] }] },
+                  "ticks": [{ "name": "beat", "interval": 20, "effects": [["set", "@entity.n", ["+", "@entity.n", 1]], ["render-ui", "main", { "type": "typography", "content": ["str/concat", "clock ", "@entity.n"] }]] }] }
+            ],
+            "pages": [{ "name": "ShellPage", "path": "/", "traits": [{ "ref": "Shell" }] }]
+        }] })
+    }
+
+    #[test]
+    fn a_hosted_guest_ticks_a_client_trait_its_page_trait_embeds() {
+        let items = guest_tick_items(embedded_ticking_guest_program(), std::time::Duration::from_millis(400));
+        assert!(items.iter().any(|i| i.contains("clock 2")), "a trait the page embeds paints on the page, so its [client] tick runs on the guest's clock (EXEC-TICK-6): {items:?}");
+    }
+
+    /// As [`embedded_ticking_guest_program`], but `Clock`'s tick paints nothing: it emits `STEPPED`, which `Shell` hears and paints,
+    /// the shape of `std-learn-transport` (the clock) under a sim trait (the painter).
+    fn embedded_emitting_clock_guest_program() -> serde_json::Value {
+        serde_json::json!({ "name": "EmbeddedClock", "typeContractVersion": 1, "orbitals": [{
+            "name": "ShellOrbital",
+            "entity": { "name": "Count", "persistence": "runtime", "fields": [{ "name": "id", "type": "string" }, { "name": "n", "type": "number", "default": 0 }] },
+            "traits": [
+                { "name": "Shell", "linkedEntity": "Count", "dispatch": "client",
+                  "listens": [{ "event": "STEPPED", "triggers": "STEP", "source": { "kind": "trait", "trait": "Clock" } }],
+                  "stateMachine": { "states": [{ "name": "idle", "isInitial": true }], "events": [{ "key": "INIT", "name": "Init" }, { "key": "STEP", "name": "Step" }],
+                    "transitions": [
+                        { "from": "idle", "to": "idle", "event": "INIT", "effects": [["render-ui", "main", { "type": "stack", "children": ["@trait.Clock"] }]] },
+                        { "from": "idle", "to": "idle", "event": "STEP", "effects": [["set", "@entity.n", ["+", "@entity.n", 1]], ["render-ui", "main", { "type": "stack", "children": [{ "type": "typography", "content": ["str/concat", "steps ", "@entity.n"] }, "@trait.Clock"] }]] }] } },
+                { "name": "Clock", "linkedEntity": "Count", "dispatch": "client",
+                  "emits": [{ "event": "STEPPED" }],
+                  "stateMachine": { "states": [{ "name": "idle", "isInitial": true }], "events": [{ "key": "INIT", "name": "Init" }],
+                    "transitions": [{ "from": "idle", "to": "idle", "event": "INIT", "effects": [["render-ui", "main", { "type": "typography", "content": "clock" }]] }] },
+                  "ticks": [{ "name": "beat", "interval": 20, "effects": [["emit", "STEPPED", {}]] }] }
+            ],
+            "pages": [{ "name": "ShellPage", "path": "/", "traits": [{ "ref": "Shell" }] }]
+        }] })
+    }
+
+    #[test]
+    fn a_hosted_guest_paints_what_an_embedded_clock_tick_emits_to_its_page_trait() {
+        let items = guest_tick_items(embedded_emitting_clock_guest_program(), std::time::Duration::from_millis(400));
+        assert!(items.iter().any(|i| i.contains("steps 2")), "the embedded clock's tick emits, the page trait hears it and repaints, and the pass carries that paint: {items:?}");
+    }
+
+    /// [`embedded_emitting_clock_guest_program`] with the clock paused: its tick is guarded on `running`, which only
+    /// `Clock.RUN` sets, the shape of `std-learn-transport`'s Play.
+    fn paused_clock_guest_program() -> serde_json::Value {
+        let mut program = embedded_emitting_clock_guest_program();
+        let orbital = &mut program["orbitals"][0];
+        orbital["entity"]["fields"].as_array_mut().unwrap().push(serde_json::json!({ "name": "running", "type": "boolean", "default": false }));
+        let clock = &mut orbital["traits"][1];
+        clock["ticks"][0]["guard"] = serde_json::json!(["==", "@entity.running", true]);
+        clock["stateMachine"]["events"].as_array_mut().unwrap().push(serde_json::json!({ "key": "RUN", "name": "Run" }));
+        clock["stateMachine"]["transitions"].as_array_mut().unwrap().push(serde_json::json!({ "from": "idle", "to": "idle", "event": "RUN", "effects": [["set", "@entity.running", true], ["render-ui", "main", { "type": "typography", "content": "clock running" }]] }));
+        program
+    }
+
+    #[test]
+    fn a_hosted_guest_runs_an_embedded_clock_that_a_dispatched_input_starts() {
+        let items = guest_tick_items_after(paused_clock_guest_program(), Some("Clock.RUN"), std::time::Duration::from_millis(400));
+        assert!(items.iter().any(|i| i.contains("steps 2")), "the input sets running, the guarded tick then fires and the page trait repaints each step: {items:?}");
+    }
+
+    #[test]
+    fn control_a_hosted_guest_never_ticks_an_embedded_clock_nothing_started() {
+        let items = guest_tick_items_after(paused_clock_guest_program(), None, std::time::Duration::from_millis(300));
+        assert!(items.iter().all(|i| !i.contains("steps")), "control: the guard holds the clock while running is false: {items:?}");
+    }
+
+    /// Opens a guest whose `[client]` Clock asks `audio/clock` at INIT, reads that ask from the open's `hostAsks`, then
+    /// returns `form` (`{ answer }` or `{ refuse }`) with `program/dispatch { ask, .. } { guest }`: answers the ask text and
+    /// what the guest painted in answer.
+    fn guest_ask_returned(form: serde_json::Value) -> (String, String) {
+        let runtime = Host::new(Arc::new(DriverAdapter::memory())).shared();
+        let guest = serde_json::json!({ "name": "AskingGuest", "typeContractVersion": 1, "orbitals": [{
+            "name": "ClockOrbital",
+            "entity": { "name": "Count", "persistence": "runtime", "fields": [{ "name": "id", "type": "string" }] },
+            "traits": [{ "name": "Clock", "linkedEntity": "Count", "dispatch": "client",
+                "stateMachine": { "states": [{ "name": "idle", "isInitial": true }],
+                    "events": [{ "key": "INIT", "name": "Init" }, { "key": "CLOCK", "name": "Clock" }, { "key": "CLOCK_FAILED", "name": "Clock failed" }],
+                    "transitions": [
+                        { "from": "idle", "to": "idle", "event": "INIT", "effects": [["audio/clock", { "emit": { "success": "CLOCK", "failure": "CLOCK_FAILED" } }]] },
+                        { "from": "idle", "to": "idle", "event": "CLOCK", "effects": [["render-ui", "main", { "type": "typography", "content": ["str/concat", "audio ", "@payload.audio"] }]] },
+                        { "from": "idle", "to": "idle", "event": "CLOCK_FAILED", "effects": [["render-ui", "main", { "type": "typography", "content": ["str/concat", "failed ", "@payload.kind"] }]] }] } }],
+            "pages": [{ "name": "ClockPage", "path": "/", "traits": [{ "ref": "Clock" }] }]
+        }] });
+        let mut returned = serde_json::json!({ "ask": "@entity.ask" });
+        for (k, v) in form.as_object().unwrap() {
+            returned[k] = serde_json::json!(format!("@payload.{k}"));
+            let _ = v;
+        }
+        let opener: orbital_core::OrbitalSchema = serde_json::from_value(serde_json::json!({
+            "name": "Opener", "typeContractVersion": 1,
+            "orbitals": [{ "name": "Opener",
+                "entity": { "name": "Box", "persistence": "runtime", "fields": [{ "name": "id", "type": "string" }, { "name": "guest", "type": "string", "default": "" }, { "name": "ask", "type": "string", "default": "" }, { "name": "painted", "type": "string", "default": "" }, { "name": "failed", "type": "string", "default": "" }] },
+                "osGrants": { "kernel": [{ "target": "guest", "kinds": ["spawn"] }] },
+                "traits": [{ "name": "Opener", "linkedEntity": "Box",
+                    "stateMachine": { "states": [{ "name": "idle", "isInitial": true }],
+                        "events": [{ "key": "OPEN", "name": "Open", "payloadSchema": [{ "name": "program", "type": "object", "required": true }] }, { "key": "OPENED", "name": "Opened" }, { "key": "RETURN", "name": "Return" }, { "key": "RETURNED", "name": "Returned" }, { "key": "FAILED", "name": "Failed" }],
+                        "transitions": [
+                            { "from": "idle", "to": "idle", "event": "OPEN", "effects": [["program/open", "@payload.program", { "route": "/" }, { "emit": { "success": "OPENED", "failure": "FAILED" } }]] },
+                            { "from": "idle", "to": "idle", "event": "OPENED", "effects": [["set", "@entity.guest", "@payload.result.guest"], ["set", "@entity.ask", ["object/get", ["array/first", "@payload.result.hostAsks"], "ask", ""]]] },
+                            { "from": "idle", "to": "idle", "event": "RETURN", "effects": [["program/dispatch", returned, {}, { "guest": "@entity.guest", "emit": { "success": "RETURNED", "failure": "FAILED" } }]] },
+                            { "from": "idle", "to": "idle", "event": "RETURNED", "effects": [["set", "@entity.painted", ["json/stringify", "@payload.result.rendered"]]] },
+                            { "from": "idle", "to": "idle", "event": "FAILED", "effects": [["set", "@entity.failed", ["json/stringify", "@payload"]]] }]
+                    } }] }]
+        })).unwrap();
+        runtime.register_schema(opener).unwrap();
+        runtime.dispatch("Opener", "default", "OPEN", serde_json::from_value(serde_json::json!({ "program": guest })).unwrap()).unwrap();
+        runtime.dispatch("Opener", "default", "RETURN", serde_json::from_value(form).unwrap()).unwrap();
+        let entity = serde_json::to_value(&runtime.kernel.snapshot_trait("Opener", Some("default")).entity).unwrap();
+        assert!(entity["failed"].is_null() || entity["failed"] == "", "the open and the return succeed: {}", entity["failed"]);
+        (entity["ask"].as_str().unwrap_or_default().to_string(), entity["painted"].as_str().unwrap_or_default().to_string())
+    }
+
+    #[test]
+    fn a_guest_lists_its_client_ask_and_paints_the_answer_its_viewer_returns() {
+        let (ask, painted) = guest_ask_returned(serde_json::json!({ "answer": "{\"ok\":{\"audio\":5,\"wall\":9}}" }));
+        assert!(ask.contains("audio/clock") && ask.contains("CLOCK"), "the open lists the guest's client ask with its route (EXEC-ENDPOINT-3a): {ask}");
+        assert!(painted.contains("audio 5"), "the returned answer fires the ask's success route in the guest (EXEC-DIST-13): {painted}");
+    }
+
+    #[test]
+    fn control_an_opener_with_no_viewer_refuses_the_guests_ask_as_unavailable() {
+        let (_, painted) = guest_ask_returned(serde_json::json!({ "refuse": "no viewer is watching this guest" }));
+        assert!(painted.contains("failed unavailable"), "the failure route fires with kind unavailable: {painted}");
     }
 
     #[test]
