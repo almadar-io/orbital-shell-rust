@@ -301,6 +301,23 @@ fn SceneCanvas(props: SceneCanvasProps) -> Element {
         props.inline_style.clone()
     };
     let sink = props.sink;
+    // A repaint queues events of its own (measured text); deliver them on the next UI frame, not on the next pointer move.
+    use_future({
+        let host = host.clone();
+        move || {
+            let host = host.clone();
+            async move {
+                if sink.is_none() {
+                    return;
+                }
+                loop {
+                    crate::timer::Delay::new(std::time::Duration::from_millis(16)).await;
+                    let emits = host.lock().expect("scene host poisoned").take_scene_events();
+                    deliver(sink, emits);
+                }
+            }
+        }
+    });
     let class_name = props.class_name.clone();
     rsx! {
         canvas {
@@ -330,10 +347,17 @@ fn SceneCanvas(props: SceneCanvasProps) -> Element {
             onmousemove: {
                 let host = host.clone();
                 move |evt: MouseEvent| {
-                    if !evt.held_buttons().is_empty() {
-                        pointer(&host, sink, "touch-move", &evt);
-                    }
+                    let kind = if evt.held_buttons().is_empty() {
+                        "hover"
+                    } else {
+                        "touch-move"
+                    };
+                    pointer(&host, sink, kind, &evt);
                 }
+            },
+            onmouseleave: {
+                let host = host.clone();
+                move |evt: MouseEvent| pointer(&host, sink, "leave", &evt)
             },
             onmouseup: {
                 let host = host.clone();
@@ -380,6 +404,11 @@ fn pointer(
         host.input(kind, at.x as f32, at.y as f32, button, None);
         host.take_scene_events()
     };
+    deliver(sink, emits);
+}
+
+/// Send the scene events a host queued to the sink, in queue order.
+fn deliver(sink: Option<crate::renderer::EventSink>, emits: Vec<scene::Emit>) {
     let Some(sink) = sink else { return };
     for emit in emits {
         match serde_json::from_value::<Value>(emit.delivered()) {
