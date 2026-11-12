@@ -47,6 +47,13 @@ pub trait PatternRenderer: Send + Sync {
     );
 }
 
+/// The terminal a child renders into: the frame and the area its parent gave it.
+/// Parents pass `&mut TuiChildTarget` type-erased through `RenderContext::render_one`.
+pub struct TuiChildTarget<'f, 'a> {
+    pub frame: &'f mut Frame<'a>,
+    pub area: Rect,
+}
+
 /// Registry mapping pattern names to their terminal renderers.
 pub struct PatternRegistry {
     renderers: HashMap<String, Box<dyn PatternRenderer>>,
@@ -405,6 +412,15 @@ impl TuiApp {
             .split(area)
             .to_vec();
 
+        let registry = &self.pattern_registry;
+        let child_render = |target_ptr: *mut (), child: &Value, ctx: &mut RenderContext<'_>| {
+            let target = unsafe { &mut *(target_ptr as *mut TuiChildTarget<'_, '_>) };
+            let pattern = get_string_or(child, "type", "");
+            registry
+                .get_renderer(&pattern)
+                .render(target.frame, target.area, child, None, ctx);
+        };
+
         for (content, area) in main_contents.iter().zip(areas) {
             let renderer = self.pattern_registry.get_renderer(&content.pattern);
             let painted =
@@ -417,7 +433,7 @@ impl TuiApp {
                 form_data: &mut core.form_data,
                 editing_entity: &core.editing_entity,
                 pending_events: &mut core.pending_events,
-                child_render: None,
+                child_render: Some(&child_render),
                 trait_content: &trait_content,
                 source_trait: content.source_trait.clone(),
                 canvas_theme: None,

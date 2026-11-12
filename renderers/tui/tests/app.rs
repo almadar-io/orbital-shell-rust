@@ -44,6 +44,41 @@ fn the_first_page_mounts_through_the_kernel_and_draws_its_main_slot() {
     assert!(app.render_to_text(100, 20).unwrap().contains("hello notes"));
 }
 
+#[test]
+fn dashboard_layout_draws_its_nested_header_actions_and_sidebar_content() {
+    let mut app = app(vec![orbital(
+        "Notes",
+        &serde_json::json!({
+            "type": "dashboard-layout",
+            "appName": "Zeta",
+            "navItems": [{ "label": "Inbox", "href": "/inbox" }],
+            "headerActions": { "type": "button", "label": "HdrAct" },
+            "sidebarContent": { "type": "typography", "content": "side-text" },
+            "sidebarFooter": { "type": "typography", "content": "foot-text" },
+            "children": [{ "type": "typography", "content": "body-text" }]
+        }),
+    )]);
+    let text = app.render_to_text(120, 30).unwrap();
+    for expected in ["Zeta", "Inbox", "HdrAct", "side-text", "foot-text", "body-text"] {
+        assert!(text.contains(expected), "missing {expected} in:\n{text}");
+    }
+}
+
+#[test]
+fn control_a_flat_dashboard_layout_still_draws_its_app_name() {
+    let mut app = app(vec![orbital(
+        "Notes",
+        &serde_json::json!({
+            "type": "dashboard-layout",
+            "appName": "Zeta",
+            "navItems": [{ "label": "Inbox", "href": "/inbox" }]
+        }),
+    )]);
+    let text = app.render_to_text(120, 30).unwrap();
+    assert!(text.contains("Zeta"), "{text}");
+    assert!(!text.contains("HdrAct") && !text.contains("side-text"));
+}
+
 /// A page that paints a buffer-mode code-block taking keys (`onKey: KEY`); `KEY` moves the trait to `typed`.
 fn buffer_app(on_key: bool) -> TuiApp {
     let mut block = serde_json::json!({ "type": "code-block", "code": "alpha", "language": "text", "editorId": "ed1", "cursor": { "row": 0, "col": 0 } });
