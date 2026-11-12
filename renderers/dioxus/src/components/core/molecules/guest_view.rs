@@ -167,3 +167,129 @@ mod tests {
         assert!(guest_trait_content(&bare).is_empty());
     }
 }
+
+#[cfg(all(test, feature = "native", not(target_arch = "wasm32")))]
+mod dom_tests {
+    use super::*;
+    use blitz_dom::{Document as _, DocumentConfig};
+    use blitz_traits::events::{BlitzMouseButtonEvent, MouseEventButton, MouseEventButtons, UiEvent};
+    use blitz_traits::shell::{ColorScheme, Viewport};
+    use dioxus_native::DioxusDocument;
+    use keyboard_types::Modifiers;
+    use std::cell::RefCell;
+    use std::collections::HashMap;
+
+    thread_local! {
+        static EVENTS: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+    }
+
+    fn page() -> Value {
+        serde_json::from_value(serde_json::json!({
+            "type": "stack",
+            "children": [
+                { "type": "button", "label": "Host", "aria-label": "host-button", "action": "HOST" },
+                {
+                    "type": "guest-view", "guest": "guest-1", "source": "Home", "deliver": "GUEST_CLICKED",
+                    "paints": [
+                        { "slot": "main", "trait": "Home", "orbital": "Notes", "embedded": false, "content": { "type": "button", "label": "Add", "aria-label": "guest-add", "action": "ADD" } },
+                        { "slot": "modal", "trait": "Confirm", "orbital": "Notes", "embedded": false, "content": { "type": "button", "label": "Sure", "aria-label": "guest-sure", "action": "SURE" } },
+                        { "slot": "toast", "trait": "Notify", "orbital": "Notes", "embedded": false, "content": { "type": "typography", "text": "Saved" } },
+                        { "slot": "drawer", "trait": "Gone", "orbital": "Notes", "embedded": false, "content": null },
+                        { "slot": "modal", "trait": "Inline", "orbital": "Notes", "embedded": true, "content": { "type": "typography", "text": "Inline only" } }
+                    ],
+                    "children": [{ "type": "button", "label": "Add", "aria-label": "guest-add", "action": "ADD" }]
+                }
+            ]
+        }))
+        .unwrap()
+    }
+
+    fn app() -> Element {
+        let props = page();
+        let entities = HashMap::new();
+        let trait_content = ValueMap::new();
+        let sink = Callback::new(|(event, _): (String, Value)| EVENTS.with(|events| events.borrow_mut().push(event)));
+        let view = DioxusView {
+            trait_name: "Opener",
+            orbital_name: "Opener",
+            current_state: "idle",
+            entities: &entities,
+            trait_content: &trait_content,
+            source_trait: None,
+            sink: Some(sink),
+            source_sink: Callback::new(move |_| sink),
+            navigate: None,
+            dock: None,
+            viewport_width: None,
+            canvas_theme: None,
+            theme_mode: None,
+            toggle_theme: None,
+        };
+        crate::registry::default_registry().render_spec(&props, None, &view)
+    }
+
+    fn settle(doc: &mut DioxusDocument) {
+        for _ in 0..4 {
+            if !doc.poll(None) {
+                break;
+            }
+        }
+        doc.resolve(0.0);
+    }
+
+    fn document() -> DioxusDocument {
+        EVENTS.with(|events| events.borrow_mut().clear());
+        let mut doc = DioxusDocument::new(
+            dioxus_core::VirtualDom::new(app),
+            DocumentConfig { viewport: Some(Viewport::new(800, 600, 1.0, ColorScheme::Light)), ..Default::default() },
+        );
+        for css in crate::styles::stylesheets() {
+            doc.add_user_agent_stylesheet(&css);
+        }
+        doc.initial_build();
+        settle(&mut doc);
+        doc
+    }
+
+    fn mouse(x: f32, y: f32, buttons: MouseEventButtons) -> BlitzMouseButtonEvent {
+        BlitzMouseButtonEvent { x, y, button: MouseEventButton::Main, buttons, mods: Modifiers::default() }
+    }
+
+    fn click(doc: &mut DioxusDocument, selector: &str) -> Vec<String> {
+        EVENTS.with(|events| events.borrow_mut().clear());
+        let id = doc.query_selector(selector).unwrap().unwrap_or_else(|| panic!("{selector} is painted"));
+        let at = doc.get_node(id).unwrap().synthetic_click_event_data(Modifiers::default());
+        doc.handle_ui_event(UiEvent::MouseMove(mouse(at.x, at.y, MouseEventButtons::None)));
+        doc.handle_ui_event(UiEvent::MouseDown(mouse(at.x, at.y, MouseEventButtons::Primary)));
+        doc.handle_ui_event(UiEvent::MouseUp(mouse(at.x, at.y, MouseEventButtons::None)));
+        settle(doc);
+        EVENTS.with(|events| events.borrow().clone())
+    }
+
+    fn painted(doc: &DioxusDocument, selector: &str) -> bool {
+        doc.query_selector(selector).unwrap().is_some()
+    }
+
+    #[test]
+    fn the_guests_modal_and_toast_paint_inside_the_view() {
+        let _guard = crate::EVENT_CONVERTER_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let doc = document();
+        assert!(painted(&doc, "[data-guest-frame] #slot-modal [aria-label=\"guest-sure\"]"), "the guest's modal paint sits inside the view");
+        assert!(painted(&doc, "[data-guest-frame] #slot-toast"), "the guest's toast paint sits inside the view");
+        assert!(!painted(&doc, "#slot-drawer"), "control: a slot the guest cleared paints nothing");
+        assert!(!doc_text_has(&doc, "Inline only"), "control: an embedded trait's modal paint shows only where its `@trait` embed names it");
+    }
+
+    fn doc_text_has(doc: &DioxusDocument, needle: &str) -> bool {
+        doc.root_element().text_content().contains(needle)
+    }
+
+    #[test]
+    fn a_click_on_a_guest_control_reaches_the_opener_scoped_to_its_painter() {
+        let _guard = crate::EVENT_CONVERTER_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let mut doc = document();
+        assert_eq!(click(&mut doc, "[data-guest-frame] [aria-label=\"guest-add\"]"), vec!["Home.ADD".to_string()]);
+        assert_eq!(click(&mut doc, "#slot-modal [aria-label=\"guest-sure\"]"), vec!["Confirm.SURE".to_string()], "a slot paint is scoped to the trait that painted it");
+        assert_eq!(click(&mut doc, "[aria-label=\"host-button\"]"), vec!["HOST".to_string()], "control: a host button outside the view dispatches the host's own event");
+    }
+}

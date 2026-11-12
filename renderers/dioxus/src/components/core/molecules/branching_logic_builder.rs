@@ -613,6 +613,197 @@ fn header(rule_count: usize, broken_count: usize, graph: bool) -> Value {
     )
 }
 
+const NODE_WIDTH: f64 = 180.0;
+const NODE_HEIGHT: f64 = 56.0;
+const NODE_GAP_Y: f64 = 80.0;
+const GRAPH_PADDING: f64 = 32.0;
+
+struct GraphNode {
+    key: String,
+    label: String,
+    is_end: bool,
+    x: f64,
+    y: f64,
+}
+
+struct GraphEdge {
+    key: String,
+    path: String,
+    label: String,
+    box_x: f64,
+    box_y: f64,
+    box_width: f64,
+    text_x: f64,
+    text_y: f64,
+}
+
+struct GraphLayout {
+    width: f64,
+    height: f64,
+    nodes: Vec<GraphNode>,
+    edges: Vec<GraphEdge>,
+}
+
+fn clip_label(text: &str) -> String {
+    if text.chars().count() > 22 {
+        let head: String = text.chars().take(21).collect();
+        format!("{head}\u{2026}")
+    } else {
+        text.to_string()
+    }
+}
+
+fn edge_label(rule: &Rule) -> String {
+    match &rule.value {
+        RuleValue::Many(items) if rule.operator == "in" => format!("in [{}]", items.join(", ")),
+        RuleValue::Many(items) => format!("{} {}", rule.operator, items.join(", ")),
+        RuleValue::One(text) => format!("{} {text}", rule.operator),
+    }
+}
+
+fn graph_layout(questions: &[Question], rules: &[Rule], end_label: &str) -> GraphLayout {
+    let items: Vec<(&str, &str, bool)> = questions
+        .iter()
+        .map(|q| (q.id.as_str(), q.label.as_str(), false))
+        .chain(std::iter::once((END_OF_SURVEY, end_label, true)))
+        .collect();
+    let mut positions: std::collections::HashMap<&str, (f64, f64)> = Default::default();
+    for (i, (id, _, _)) in items.iter().enumerate() {
+        positions.insert(
+            id,
+            (
+                GRAPH_PADDING,
+                GRAPH_PADDING + i as f64 * (NODE_HEIGHT + NODE_GAP_Y),
+            ),
+        );
+    }
+    let nodes = items
+        .iter()
+        .map(|(id, label, is_end)| {
+            let (x, y) = positions[id];
+            GraphNode {
+                key: id.to_string(),
+                label: clip_label(label),
+                is_end: *is_end,
+                x,
+                y,
+            }
+        })
+        .collect();
+    let edges = rules
+        .iter()
+        .enumerate()
+        .filter_map(|(i, rule)| {
+            let from = positions.get(rule.source.as_str())?;
+            let to = positions.get(rule.target.as_str())?;
+            let start_x = from.0 + NODE_WIDTH;
+            let start_y = from.1 + NODE_HEIGHT / 2.0;
+            let end_x = to.0 + NODE_WIDTH;
+            let end_y = to.1 + NODE_HEIGHT / 2.0;
+            let offset = 40.0 + (i % 4) as f64 * 30.0;
+            let cx = start_x.max(end_x) + offset;
+            let label = edge_label(rule);
+            let label_y = (start_y + end_y) / 2.0;
+            Some(GraphEdge {
+                key: rule.id.clone(),
+                path: format!(
+                    "M {start_x} {start_y} C {cx} {start_y}, {cx} {end_y}, {end_x} {end_y}"
+                ),
+                box_x: cx - 4.0,
+                box_y: label_y - 10.0,
+                box_width: (label.chars().count() as f64 * 7.0 + 12.0).min(160.0),
+                text_x: cx + 4.0,
+                text_y: label_y + 4.0,
+                label: clip_label(&label),
+            })
+        })
+        .collect();
+    GraphLayout {
+        width: NODE_WIDTH + GRAPH_PADDING * 2.0 + 220.0,
+        height: GRAPH_PADDING * 2.0 + items.len() as f64 * (NODE_HEIGHT + NODE_GAP_Y),
+        nodes,
+        edges,
+    }
+}
+
+fn logic_graph(layout: &GraphLayout) -> Element {
+    rsx! {
+        div { class: "overflow-auto p-2",
+            svg {
+                width: "{layout.width}",
+                height: "{layout.height}",
+                role: "img",
+                "aria-label": "Branching logic graph",
+                style: "display: block",
+                defs {
+                    marker {
+                        id: "branching-arrowhead",
+                        view_box: "0 0 10 10",
+                        ref_x: "8",
+                        ref_y: "5",
+                        marker_width: "8",
+                        marker_height: "8",
+                        orient: "auto",
+                        path { d: "M 0 0 L 10 5 L 0 10 z", fill: "var(--color-muted-foreground)" }
+                    }
+                }
+                for edge in layout.edges.iter() {
+                    g { key: "{edge.key}",
+                        path {
+                            d: "{edge.path}",
+                            fill: "none",
+                            stroke: "var(--color-muted-foreground)",
+                            stroke_width: "1.5",
+                            marker_end: "url(#branching-arrowhead)",
+                        }
+                        rect {
+                            x: "{edge.box_x}",
+                            y: "{edge.box_y}",
+                            width: "{edge.box_width}",
+                            height: "20",
+                            rx: "4",
+                            fill: "var(--color-card)",
+                            stroke: "var(--color-border)",
+                        }
+                        text {
+                            x: "{edge.text_x}",
+                            y: "{edge.text_y}",
+                            font_size: "11",
+                            font_family: "JetBrains Mono, monospace",
+                            fill: "var(--color-foreground)",
+                            "{edge.label}"
+                        }
+                    }
+                }
+                for node in layout.nodes.iter() {
+                    g { key: "{node.key}",
+                        rect {
+                            x: "{node.x}",
+                            y: "{node.y}",
+                            width: "{NODE_WIDTH}",
+                            height: "{NODE_HEIGHT}",
+                            rx: "6",
+                            fill: if node.is_end { "var(--color-surface)" } else { "var(--color-card)" },
+                            stroke: if node.is_end { "var(--color-error)" } else { "var(--color-border)" },
+                            stroke_width: if node.is_end { "2" } else { "1.5" },
+                        }
+                        text {
+                            x: "{node.x + NODE_WIDTH / 2.0}",
+                            y: "{node.y + NODE_HEIGHT / 2.0 + 4.0}",
+                            text_anchor: "middle",
+                            font_size: "13",
+                            font_family: "Inter, sans-serif",
+                            fill: "var(--color-foreground)",
+                            font_weight: "600",
+                            "{node.label}"
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 #[derive(Props, Clone, PartialEq)]
 struct BuilderProps {
     props: Value,
@@ -708,7 +899,7 @@ fn Builder(input: BuilderProps) -> Element {
         div { class: "{class}", ..shared_root_attrs(props),
             {header_el}
             if show_graph {
-                div { class: "overflow-auto p-2" }
+                {logic_graph(&graph_layout(&questions, &current, "End of survey"))}
             } else {
                 div { class: "flex flex-col gap-2",
                     if current.is_empty() { {empty_el} }
@@ -735,5 +926,117 @@ impl DioxusPatternRenderer for BranchingLogicBuilderRenderer {
         registry: &DioxusPatternRegistry,
     ) -> Element {
         rsx! { Builder { props: props.clone(), view: view.to_owned(), registry: registry.clone() } }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn question(id: &str, label: &str) -> Question {
+        Question {
+            id: id.into(),
+            label: label.into(),
+            option_values: None,
+        }
+    }
+
+    fn rule(id: &str, source: &str, op: &str, value: RuleValue, target: &str) -> Rule {
+        Rule {
+            id: id.into(),
+            source: source.into(),
+            operator: op.into(),
+            value,
+            target: target.into(),
+        }
+    }
+
+    #[test]
+    fn graph_has_a_node_per_question_plus_end_and_a_bezier_per_rule() {
+        let questions = [question("q1", "First"), question("q2", "Second")];
+        let rules = [
+            rule("r1", "q1", "equals", RuleValue::One("yes".into()), "q2"),
+            rule(
+                "r2",
+                "q2",
+                "in",
+                RuleValue::Many(vec!["a".into(), "b".into()]),
+                END_OF_SURVEY,
+            ),
+        ];
+        let layout = graph_layout(&questions, &rules, "End of survey");
+        assert_eq!((layout.width, layout.height), (464.0, 472.0));
+        let nodes: Vec<_> = layout
+            .nodes
+            .iter()
+            .map(|n| (n.key.as_str(), n.x, n.y, n.is_end))
+            .collect();
+        assert_eq!(
+            nodes,
+            vec![
+                ("q1", 32.0, 32.0, false),
+                ("q2", 32.0, 168.0, false),
+                (END_OF_SURVEY, 32.0, 304.0, true)
+            ]
+        );
+        assert_eq!(layout.nodes[2].label, "End of survey");
+        assert_eq!(layout.edges.len(), 2);
+        assert_eq!(layout.edges[0].path, "M 212 60 C 252 60, 252 196, 212 196");
+        assert_eq!(layout.edges[0].label, "equals yes");
+        assert_eq!(
+            (
+                layout.edges[0].box_x,
+                layout.edges[0].box_y,
+                layout.edges[0].box_width
+            ),
+            (248.0, 118.0, 82.0)
+        );
+        assert_eq!(
+            (layout.edges[0].text_x, layout.edges[0].text_y),
+            (256.0, 132.0)
+        );
+        assert_eq!(
+            layout.edges[1].path,
+            "M 212 196 C 282 196, 282 332, 212 332"
+        );
+        assert_eq!(layout.edges[1].label, "in [a, b]");
+    }
+
+    #[test]
+    fn control_a_rule_with_a_missing_endpoint_draws_no_edge_and_no_rules_draw_only_nodes() {
+        let questions = [question("q1", "First")];
+        let broken = [rule(
+            "r1",
+            "q1",
+            "contains",
+            RuleValue::One("x".into()),
+            "gone",
+        )];
+        assert!(graph_layout(&questions, &broken, "End of survey")
+            .edges
+            .is_empty());
+        let empty = graph_layout(&questions, &[], "End of survey");
+        assert!(empty.edges.is_empty());
+        assert_eq!(empty.nodes.len(), 2);
+    }
+
+    #[test]
+    fn labels_clip_at_twenty_two_characters_as_the_web_does() {
+        assert_eq!(
+            clip_label("abcdefghijklmnopqrstuv"),
+            "abcdefghijklmnopqrstuv"
+        );
+        assert_eq!(
+            clip_label("abcdefghijklmnopqrstuvw"),
+            "abcdefghijklmnopqrstu\u{2026}"
+        );
+        let many = rule(
+            "r",
+            "a",
+            "contains",
+            RuleValue::Many(vec!["x".into(), "y".into()]),
+            "b",
+        );
+        assert_eq!(edge_label(&many), "contains x, y");
     }
 }
