@@ -1,6 +1,7 @@
 //! Types and traits to enable interoperability between the other Blitz crates without
 //! circular or unnecessary dependencies.
 
+pub mod canvas_access;
 pub mod devtools;
 pub mod events;
 pub mod navigation;

@@ -3043,8 +3043,12 @@ mod tests {
     /// The open answer and each leg's answer of the split program opened as a hosted guest with `open`, every leg posted
     /// into it as `program/dispatch address {} { guest, ...leg }`.
     fn split_guest_answers(open: serde_json::Value) -> (serde_json::Value, Vec<serde_json::Value>, Vec<String>) {
+        split_guest_answers_with(open, split_legs())
+    }
+
+    fn split_guest_answers_with(open: serde_json::Value, legs: Vec<serde_json::Value>) -> (serde_json::Value, Vec<serde_json::Value>, Vec<String>) {
         let runtime = Host::new(Arc::new(DriverAdapter::memory())).shared();
-        let legs = split_legs()
+        let legs = legs
             .into_iter()
             .map(|leg| {
                 let mut options = leg.clone();
@@ -3106,9 +3110,13 @@ mod tests {
 
     /// Each leg's answer of the split program served by a host of its own.
     fn split_served_answers() -> Vec<serde_json::Value> {
+        split_served_answers_with(split_legs())
+    }
+
+    fn split_served_answers_with(legs: Vec<serde_json::Value>) -> Vec<serde_json::Value> {
         let runtime = Host::new(Arc::new(DriverAdapter::memory())).shared();
         runtime.register_schema(serde_json::from_value(split_program()).unwrap()).unwrap();
-        split_legs()
+        legs
             .into_iter()
             .map(|leg| {
                 let address = format!("Split.{}.{}", leg["targetTrait"].as_str().unwrap_or("Back"), leg["event"].as_str().unwrap_or_default());
@@ -3126,6 +3134,17 @@ mod tests {
         assert!(client.iter().any(|t| t["name"] == "Face"), "the viewer's kernel is handed the client program: {opened}");
         assert_eq!(opened["page"], serde_json::json!(["Face", "Back"]), "{opened}");
         assert!(!opened["rendered"].to_string().contains("face") && !opened["rendered"].to_string().contains("back"), "the page is the viewer's to mount: {opened}");
+    }
+
+    #[test]
+    fn a_split_guests_leg_without_wire_answers_the_whole_response_as_a_served_request_does() {
+        let mut legs = split_legs();
+        legs[1]["wire"] = serde_json::json!(false);
+        let (_, guest, failures) = split_guest_answers_with(serde_json::json!({ "route": "/", "split": true }), legs.clone());
+        assert!(failures.is_empty(), "{failures:?}");
+        let served = split_served_answers_with(legs);
+        assert_eq!(guest[1].get("states"), served[1].get("states"), "guest {} served {}", guest[1], served[1]);
+        assert!(guest[1]["clientEffectsByTrait"].to_string().contains("back 1"), "the raw answer keeps the server trait's paint: {}", guest[1]);
     }
 
     #[test]

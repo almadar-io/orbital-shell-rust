@@ -16,6 +16,9 @@ use blitz_traits::events::{
     BlitzMouseButtonEvent, BlitzWheelEvent, MouseEventButton, MouseEventButtons, UiEvent,
     WheelDeltaMode,
 };
+use blitz_traits::canvas_access::{
+    canvas_access_host, canvas_focus, route_ime, route_key, CanvasAccessHost, CanvasFocus,
+};
 use blitz_traits::shell::Viewport;
 use winit::keyboard::PhysicalKey;
 
@@ -85,6 +88,8 @@ pub struct View<Rend: WindowRenderer> {
     pub touch_scrolling: bool,
     pub animation_timer: Option<Instant>,
     pub is_visible: bool,
+    /// ORBITAL PATCH: the input-method cursor area last sent for a focused canvas text box.
+    ime_area: Option<(f32, f32, f32, f32)>,
 
     #[cfg(feature = "accessibility")]
     /// Accessibility adapter for `accesskit`.
@@ -148,6 +153,7 @@ impl<Rend: WindowRenderer> View<Rend> {
             #[cfg(any(target_os = "android", target_os = "ios"))]
             touch_scrolling: false,
             is_visible: winit_window.is_visible().unwrap_or(true),
+            ime_area: None,
             #[cfg(feature = "accessibility")]
             accessibility: AccessibilityState::new(event_loop, &winit_window, proxy.clone()),
             #[cfg(feature = "accessibility")]
@@ -259,6 +265,7 @@ impl<Rend: WindowRenderer> View<Rend> {
     pub fn redraw(&mut self) {
         let animation_time = self.current_animation_time();
         self.doc.resolve(animation_time);
+        self.sync_canvas_ime();
         #[cfg(feature = "accessibility")]
         if self.accessibility_dirty.replace(false) {
             self.accessibility.update_tree(&self.doc);
@@ -296,8 +303,46 @@ impl<Rend: WindowRenderer> View<Rend> {
         self.accessibility.update_tree(&self.doc);
     }
 
+    /// ORBITAL PATCH: the focused scene canvas, its host and the node of its tree that holds the program's focus.
+    fn canvas_input(&self) -> Option<(Arc<dyn CanvasAccessHost>, CanvasFocus, usize)> {
+        let (canvas_id, scene_id) = self.doc.focused_canvas_scene()?;
+        let host = canvas_access_host(scene_id)?;
+        let focus = canvas_focus(&host.nodes())?;
+        Some((host, focus, canvas_id))
+    }
+
+    /// ORBITAL PATCH: park the input method's candidate window at the focused canvas text box.
+    fn sync_canvas_ime(&mut self) {
+        let area = self.canvas_input().and_then(|(_, focus, canvas_id)| {
+            let (x, y) = self.doc.node_origin(canvas_id)?;
+            Some((x + focus.x, y + focus.y, focus.width, focus.height))
+        });
+        if area == self.ime_area {
+            return;
+        }
+        if let Some((x, y, width, height)) = area {
+            self.window.set_ime_cursor_area(
+                winit::dpi::LogicalPosition::new(x, y),
+                winit::dpi::LogicalSize::new(width, height),
+            );
+        }
+        self.ime_area = area;
+    }
+
     #[cfg(feature = "accessibility")]
     pub fn handle_accessibility_action(&mut self, request: &accesskit::ActionRequest) {
+        if let Some((canvas_id, scene_id, target)) = self.doc.canvas_access_target(request.target_node) {
+            let Some(action) = blitz_dom::canvas_access_action(request.action) else {
+                return;
+            };
+            let Some(host) = canvas_access_host(scene_id) else {
+                return;
+            };
+            self.doc.set_focus_to(canvas_id);
+            host.access_action(&target, action);
+            self.request_redraw();
+            return;
+        }
         if !matches!(
             request.action,
             accesskit::Action::Click | accesskit::Action::Focus
@@ -446,7 +491,14 @@ impl<Rend: WindowRenderer> View<Rend> {
             WindowEvent::Ime(ime_event) => {
                 #[cfg(target_os = "android")]
                 let full_state_from_ime = matches!(ime_event, winit::event::Ime::TextState { .. });
-                self.doc.handle_ui_event(UiEvent::Ime(winit_ime_to_blitz(ime_event)));
+                let ime_event = winit_ime_to_blitz(ime_event);
+                if let Some((host, focus, _)) = self.canvas_input() {
+                    if route_ime(host.as_ref(), &focus, &ime_event) {
+                        self.request_redraw();
+                        return;
+                    }
+                }
+                self.doc.handle_ui_event(UiEvent::Ime(ime_event));
                 #[cfg(target_os = "android")]
                 if !full_state_from_ime {
                     self.sync_ime_to_focus();
@@ -497,6 +549,14 @@ impl<Rend: WindowRenderer> View<Rend> {
 
                 // Unmodified keypresses
                 let key_event_data = winit_key_event_to_blitz(&event, self.keyboard_modifiers.state());
+                if event.state.is_pressed() {
+                    if let Some((host, focus, _)) = self.canvas_input() {
+                        if route_key(host.as_ref(), &focus, &key_event_data) {
+                            self.request_redraw();
+                            return;
+                        }
+                    }
+                }
                 let event = if event.state.is_pressed() {
                     UiEvent::KeyDown(key_event_data)
                 } else {

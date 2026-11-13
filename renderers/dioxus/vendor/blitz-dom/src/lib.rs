@@ -63,6 +63,8 @@ pub mod util;
 
 #[cfg(feature = "accessibility")]
 mod accessibility;
+#[cfg(feature = "accessibility")]
+pub use accessibility::canvas_access_action;
 
 pub use config::DocumentConfig;
 pub use document::{BaseDocument, Document};

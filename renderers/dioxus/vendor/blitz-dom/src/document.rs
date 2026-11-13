@@ -138,6 +138,10 @@ pub struct BaseDocument {
     pub(crate) hover_node_id: Option<usize>,
     /// The node which is currently focussed (if any)
     pub(crate) focus_node_id: Option<usize>,
+    /// ORBITAL PATCH: what each virtual accessibility node of a scene canvas stands for, rebuilt with every tree.
+    #[cfg(feature = "accessibility")]
+    pub(crate) canvas_access_targets:
+        std::sync::Mutex<HashMap<u64, crate::accessibility::CanvasAccessTarget>>,
     /// The node which is currently active (if any)
     pub(crate) active_node_id: Option<usize>,
     /// The node which recieved a mousedown event (if any)
@@ -266,6 +270,8 @@ impl BaseDocument {
 
             hover_node_id: None,
             focus_node_id: None,
+            #[cfg(feature = "accessibility")]
+            canvas_access_targets: Default::default(),
             active_node_id: None,
             mousedown_node_id: None,
             drag_candidate: None,
@@ -358,6 +364,24 @@ impl BaseDocument {
     pub fn get_focussed_node_id(&self) -> Option<usize> {
         self.focus_node_id
             .or(self.try_root_element().map(|el| el.id))
+    }
+
+    /// ORBITAL PATCH: the DOM node id and paint-source id of the focused `canvas` element, if the focus is on one.
+    pub fn focused_canvas_scene(&self) -> Option<(usize, u64)> {
+        let id = self.focus_node_id?;
+        let element = self.get_node(id)?.element_data()?;
+        if element.name.local != local_name!("canvas") {
+            return None;
+        }
+        let scene = element.attr(local_name!("src"))?.parse().ok()?;
+        Some((id, scene))
+    }
+
+    /// ORBITAL PATCH: the top-left of a node in viewport CSS pixels.
+    pub fn node_origin(&self, node_id: usize) -> Option<(f32, f32)> {
+        let position = self.get_node(node_id)?.absolute_position(0.0, 0.0);
+        let scroll = self.viewport_scroll();
+        Some((position.x - scroll.x as f32, position.y - scroll.y as f32))
     }
 
     pub fn mutate<'doc>(&'doc mut self) -> DocumentMutator<'doc> {
