@@ -852,7 +852,7 @@ impl Host {
                         }
                         broadcast_persisted(&tx, &response, client_id);
                         if let Some(kernel) = &kernel {
-                            for item in LiveBroadcastItem::program_wide(kernel.program_wide_emits(&response), client_id) {
+                            for item in LiveBroadcastItem::program_wide_completion(kernel.program_wide_emits(&response), client_id) {
                                 let _ = tx.send(item);
                             }
                         }
