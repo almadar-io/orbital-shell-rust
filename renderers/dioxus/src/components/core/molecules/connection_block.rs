@@ -47,7 +47,7 @@ impl DioxusPatternRenderer for ConnectionBlockRenderer {
                 ("variant", Value::string("h6")),
                 ("as", Value::string("h4")),
                 ("className", Value::string("mb-2")),
-                ("content", Value::string("Building On What You Know")),
+                ("content", Value::string(crate::i18n::t("connection.title"))),
             ],
         );
         let markdown = pattern_spec(

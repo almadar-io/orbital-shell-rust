@@ -85,7 +85,7 @@ impl DioxusPatternRenderer for DocTOCRenderer {
         let spec = layout_box_spec(
             &class,
             None,
-            nav_landmark(props, "Table of contents"),
+            nav_landmark(props, &crate::i18n::t("aria.tableOfContents")),
             vec![column],
         );
         registry.render_spec(&spec, None, view)

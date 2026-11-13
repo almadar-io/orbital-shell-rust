@@ -48,6 +48,7 @@ fn remote_mount(version: Signal<u32>) {
         let mut borrow = cell.borrow_mut();
         let state = borrow.as_mut()?;
         let kernel = state.core.client_kernel.clone()?;
+        kernel.open_feed();
         match state.core.begin_mount_page() {
             Ok(begun) => Some((kernel, begun)),
             Err(error) => {
@@ -199,6 +200,14 @@ fn remote_followups(version: Signal<u32>) {
 
 #[cfg(all(feature = "native-http", not(target_arch = "wasm32")))]
 fn remote_frame(version: Signal<u32>) {
+    let heard = APP.with(|cell| {
+        let mut borrow = cell.borrow_mut();
+        borrow.as_mut().is_some_and(|state| state.core.drain_host_feed())
+    });
+    if heard {
+        bump(version);
+        remote_followups(version);
+    }
     if APP.with(|cell| {
         cell.borrow()
             .as_ref()
@@ -642,6 +651,12 @@ pub fn App() -> Element {
         let reduced_motion = crate::native::reduced_motion();
         #[cfg(not(all(feature = "native", not(target_arch = "wasm32"))))]
         let reduced_motion = false;
+        let locale = core.locale();
+        let messages = locale
+            .as_ref()
+            .and_then(|locale| core.schema.messages.as_ref()?.get(locale).cloned())
+            .unwrap_or_default();
+        crate::i18n::set_locale(locale, messages);
         let view = DioxusView {
             trait_name: &core.current_trait_name,
             orbital_name: &orbital,

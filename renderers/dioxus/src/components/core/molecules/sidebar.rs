@@ -122,9 +122,9 @@ fn Sidebar(props: SidebarProps) -> Element {
         if collapsed { " mx-auto" } else { "" }
     );
     let collapse_title = if collapsed {
-        "Expand sidebar"
+        crate::i18n::t("sidebar.expand")
     } else {
-        "Collapse sidebar"
+        crate::i18n::t("sidebar.collapse")
     };
     let toggle_button = |class: &str, children: Vec<Value>, mut extra: Vec<(&str, Value)>| {
         extra.push(("action", Value::string("__local_toggle_collapse")));
@@ -161,7 +161,7 @@ fn Sidebar(props: SidebarProps) -> Element {
         vec![("title", Value::string(collapse_title))],
     );
     let close_button = {
-        let mut extra = vec![("aria-label", Value::string("Close sidebar"))];
+        let mut extra = vec![("aria-label", Value::string(crate::i18n::t("sidebar.close")))];
         if let Some(event) = close_event.as_ref() {
             extra.push(("action", Value::string(event.as_str())));
         }

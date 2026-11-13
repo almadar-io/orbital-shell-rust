@@ -49,7 +49,7 @@ fn Search(input: SearchProps) -> Element {
                 Value::string(get_string_or(
                     props,
                     "placeholder",
-                    "Search documentation...",
+                    &crate::i18n::t("docSearch.placeholder"),
                 )),
             ),
             ("value", Value::string(current.to_string())),

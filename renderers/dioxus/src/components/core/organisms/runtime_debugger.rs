@@ -47,15 +47,15 @@ fn tab_items(default_tab: Option<&str>) -> Value {
         object_value(fields)
     };
     array_value(vec![
-        tab("dispatch", "Dispatch", None),
-        tab("verify", "Verify", None),
-        tab("timeline", "Timeline", None),
-        tab("bridge", "Bridge", Some(1)),
-        tab("traits", "Traits", None),
-        tab("ticks", "Ticks", None),
-        tab("entities", "Entities", None),
-        tab("events", "Events", None),
-        tab("guards", "Guards", None),
+        tab("dispatch", &crate::i18n::t("debug.tabDispatch"), None),
+        tab("verify", &crate::i18n::t("debug.tabVerify"), None),
+        tab("timeline", &crate::i18n::t("debug.tabTimeline"), None),
+        tab("bridge", &crate::i18n::t("debug.tabBridge"), Some(1)),
+        tab("traits", &crate::i18n::t("debug.tabTraits"), None),
+        tab("ticks", &crate::i18n::t("debug.tabTicks"), None),
+        tab("entities", &crate::i18n::t("debug.tabEntities"), None),
+        tab("events", &crate::i18n::t("debug.tabEvents"), None),
+        tab("guards", &crate::i18n::t("debug.tabGuards"), None),
     ])
 }
 
@@ -121,7 +121,10 @@ fn Debugger(input: DebuggerProps) -> Element {
                         ("gap", s("sm")),
                         (
                             "children",
-                            array_value(vec![heading, badge("info", "Idle")]),
+                            array_value(vec![
+                                heading,
+                                badge("info", &crate::i18n::t("debug.idle")),
+                            ]),
                         ),
                     ],
                 )],
@@ -175,12 +178,12 @@ fn Debugger(input: DebuggerProps) -> Element {
                 if is_expanded { "40vh" } else { "auto" }
             );
             let aria = if is_expanded {
-                "Collapse the debugger"
+                crate::i18n::t("debug.collapseVerificationTimeline")
             } else {
-                "Expand the debugger"
+                crate::i18n::t("debug.expandVerificationTimeline")
             };
             let marker = if is_expanded { "\u{25BE}" } else { "\u{25B8}" };
-            let status = badge("success", "OK");
+            let status = badge("success", &crate::i18n::t("debug.ok"));
             let status_el = registry.render_spec(&status, None, &view);
             rsx! {
                 div { class: "{root}", "data-testid": "debugger-verify", "data-expanded": if is_expanded { "true" } else { "false" }, style: "{style}",

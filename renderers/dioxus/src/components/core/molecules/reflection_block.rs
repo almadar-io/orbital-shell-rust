@@ -55,9 +55,9 @@ fn Reflection(input: ReflectionProps) -> Element {
         &view,
     );
     let toggle_label = if saved.is_empty() {
-        "Answer this question"
+        crate::i18n::t("reflection.answerQuestion")
     } else {
-        "✓ Answered · Edit"
+        crate::i18n::t("reflection.answeredEdit")
     };
     let current = note();
     let is_expanded = expanded();
@@ -67,12 +67,12 @@ fn Reflection(input: ReflectionProps) -> Element {
             div { class: "flex items-start gap-3",
                 {icon}
                 div { class: "flex-1",
-                    div { class: "font-medium text-warning mb-2", "Pause & Reflect" }
+                    div { class: "font-medium text-warning mb-2", {crate::i18n::t("reflection.title")} }
                     p { class: "text-foreground text-sm mb-3", "{prompt}" }
                     if is_expanded {
                         textarea {
                             class: "w-full p-2 border border-input rounded-interactive text-sm bg-card text-foreground focus:ring-2 focus:ring-ring focus:border-transparent",
-                            placeholder: "Your thoughts...",
+                            placeholder: crate::i18n::t("reflection.placeholder"),
                             value: "{current}",
                             rows: "2",
                             oninput: move |event| {
@@ -94,7 +94,7 @@ fn Reflection(input: ReflectionProps) -> Element {
                                 }
                                 expanded.set(false);
                             },
-                            "Save & Continue"
+                            {crate::i18n::t("reflection.saveContinue")}
                         }
                     } else {
                         button {

@@ -131,7 +131,7 @@ impl DioxusPatternRenderer for LineChartRenderer {
             let class =
                 format!("flex items-center justify-center text-muted-foreground {class_name}");
             let style = format!("width:{}px;height:{}px", num(width), num(height));
-            return rsx! { div { class: "{class}", style: "{style}", "No data available" } };
+            return rsx! { div { class: "{class}", style: "{style}", {crate::i18n::t("empty.noData")} } };
         }
 
         let has_date = data.iter().any(|d| d.date.is_some());

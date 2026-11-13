@@ -63,7 +63,10 @@ impl DioxusPatternRenderer for GraphCanvasRenderer {
         if get_bool_or(props, "isLoading", false) {
             let spec = pattern_spec(
                 "loading-state",
-                with_class(vec![("message", Value::string("Loading..."))]),
+                with_class(vec![(
+                    "message",
+                    Value::string(crate::i18n::t("common.loading")),
+                )]),
             );
             return registry.render_spec(&spec, None, view);
         }
@@ -74,7 +77,7 @@ impl DioxusPatternRenderer for GraphCanvasRenderer {
             let spec = pattern_spec(
                 "error-state",
                 with_class(vec![
-                    ("title", Value::string("Graph error")),
+                    ("title", Value::string(crate::i18n::t("display.graphError"))),
                     (
                         "message",
                         Value::string(get_string_or(error, "message", "")),
@@ -88,8 +91,14 @@ impl DioxusPatternRenderer for GraphCanvasRenderer {
             let spec = pattern_spec(
                 "empty-state",
                 with_class(vec![
-                    ("title", Value::string("No graph data")),
-                    ("description", Value::string("No nodes to display.")),
+                    (
+                        "title",
+                        Value::string(crate::i18n::t("display.noGraphData")),
+                    ),
+                    (
+                        "description",
+                        Value::string(crate::i18n::t("graphCanvas.noNodes")),
+                    ),
                 ]),
             );
             return registry.render_spec(&spec, None, view);
@@ -129,7 +138,9 @@ impl DioxusPatternRenderer for GraphCanvasRenderer {
             "px-4 py-2 border-b border-border",
         ]);
         let canvas_host_class = cn(&[BOX, "w-full bg-background"]);
-        let label = title.clone().unwrap_or_else(|| "Graph".to_string());
+        let label = title
+            .clone()
+            .unwrap_or_else(|| crate::i18n::t("aria.graphCanvas"));
         let canvas_style = format!("height:{height}px");
         let desc_id = description.as_ref().map(|text| {
             let mut hasher = std::collections::hash_map::DefaultHasher::new();
@@ -139,9 +150,21 @@ impl DioxusPatternRenderer for GraphCanvasRenderer {
         let title_node = title
             .as_ref()
             .map(|title| registry.render_spec(&typography("h6", None, title), None, view));
-        let zoom_out = registry.render_spec(&icon_button("zoom-out", "Zoom out"), None, view);
-        let zoom_in = registry.render_spec(&icon_button("zoom-in", "Zoom in"), None, view);
-        let reset = registry.render_spec(&icon_button("rotate-ccw", "Reset"), None, view);
+        let zoom_out = registry.render_spec(
+            &icon_button("zoom-out", &crate::i18n::t("avl.zoomOut")),
+            None,
+            view,
+        );
+        let zoom_in = registry.render_spec(
+            &icon_button("zoom-in", &crate::i18n::t("avl.zoomIn")),
+            None,
+            view,
+        );
+        let reset = registry.render_spec(
+            &icon_button("rotate-ccw", &crate::i18n::t("common.reset")),
+            None,
+            view,
+        );
         let action_nodes: Vec<Element> = actions
             .iter()
             .map(|action| {

@@ -96,7 +96,7 @@ fn ReplyNode(input: NodeProps) -> Element {
             ("size", Value::string("sm")),
             ("leftIcon", Value::string(if is_collapsed { "chevron-right" } else { "chevron-down" })),
             ("label", Value::string("")),
-            ("aria-label", Value::string(if is_collapsed { "Expand replies" } else { "Collapse replies" })),
+            ("aria-label", Value::string(if is_collapsed { crate::i18n::t("replyTree.expandReplies") } else { crate::i18n::t("replyTree.collapseReplies") })),
             ("aria-expanded", Value::Bool(!is_collapsed)),
             ("className", Value::string("w-6 h-6 p-0 min-w-0 rounded-interactive text-muted-foreground hover:bg-muted hover:text-foreground")),
             ("action", Value::string("__local_collapse")),
@@ -169,7 +169,7 @@ fn ReplyNode(input: NodeProps) -> Element {
             ("variant", Value::string("ghost")),
             ("size", Value::string("sm")),
             ("leftIcon", Value::string("flag")),
-            ("label", Value::string("Flag")),
+            ("label", Value::string(crate::i18n::t("replyTree.flag"))),
             (
                 "aria-label",
                 Value::string(format!("Flag reply by {author}")),
@@ -190,7 +190,7 @@ fn ReplyNode(input: NodeProps) -> Element {
             ("variant", Value::string("ghost")),
             ("size", Value::string("sm")),
             ("leftIcon", Value::string("message-square")),
-            ("label", Value::string("Reply")),
+            ("label", Value::string(crate::i18n::t("replyTree.reply"))),
             ("aria-label", Value::string(format!("Reply to {author}"))),
             ("action", Value::string("__local_reply_toggle")),
         ],
@@ -213,7 +213,7 @@ fn ReplyNode(input: NodeProps) -> Element {
             ("variant", Value::string("primary")),
             ("size", Value::string("sm")),
             ("leftIcon", Value::string("send")),
-            ("label", Value::string("Send")),
+            ("label", Value::string(crate::i18n::t("replyTree.send"))),
             ("disabled", Value::Bool(trimmed.is_empty())),
             ("action", Value::string(send_action.as_str())),
             (
@@ -242,7 +242,7 @@ fn ReplyNode(input: NodeProps) -> Element {
         vec![
             ("variant", Value::string("ghost")),
             ("size", Value::string("sm")),
-            ("label", Value::string("Cancel")),
+            ("label", Value::string(crate::i18n::t("common.cancel"))),
             ("action", Value::string("__local_cancel")),
         ],
     );
@@ -261,7 +261,7 @@ fn ReplyNode(input: NodeProps) -> Element {
             ("variant", Value::string("ghost")),
             ("size", Value::string("sm")),
             ("rightIcon", Value::string("chevron-right")),
-            ("label", Value::string("Continue thread")),
+            ("label", Value::string(crate::i18n::t("replyTree.continueThread"))),
             ("className", Value::string("self-start gap-1 px-0 h-auto text-sm text-primary hover:underline hover:bg-transparent")),
         ];
         if let Some(event) = &config.continue_event {
@@ -358,7 +358,7 @@ fn Tree(input: TreeProps) -> Element {
     let class_name = get_string_or(props, "className", "");
     if nodes.is_empty() {
         let class = format!("text-sm text-muted-foreground {class_name}");
-        return rsx! { div { class: "{class}", "No replies yet." } };
+        return rsx! { div { class: "{class}", {crate::i18n::t("replyTree.noRepliesYet")} } };
     }
     let config = TreeConfig {
         vote_event: event_name(props, "voteEvent"),

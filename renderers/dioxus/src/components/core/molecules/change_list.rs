@@ -133,14 +133,14 @@ fn card(change: &Change, inspect: Option<&str>) -> Value {
         if !change.before.is_empty() {
             sides.push(diff_box(
                 "flex-1 rounded-container border border-error/20 bg-error/5 p-2",
-                "Before",
+                &crate::i18n::t("changeList.before"),
                 &change.before,
             ));
         }
         if !change.after.is_empty() {
             sides.push(diff_box(
                 "flex-1 rounded-container border border-success/20 bg-success/5 p-2",
-                "After",
+                &crate::i18n::t("changeList.after"),
                 &change.after,
             ));
         }
@@ -160,7 +160,7 @@ fn card(change: &Change, inspect: Option<&str>) -> Value {
                 ("variant", Value::string("ghost")),
                 ("size", Value::string("sm")),
                 ("icon", Value::string("external-link")),
-                ("label", Value::string("Inspect")),
+                ("label", Value::string(crate::i18n::t("changeList.inspect"))),
                 ("action", Value::string(event)),
                 (
                     "actionPayload",
@@ -226,7 +226,7 @@ impl DioxusPatternRenderer for ChangeListRenderer {
                         ("variant", Value::string("body2")),
                         ("color", Value::string("muted")),
                         ("align", Value::string("center")),
-                        ("content", Value::string("No changes in this version.")),
+                        ("content", Value::string(crate::i18n::t("changeList.empty"))),
                     ],
                 )],
             );

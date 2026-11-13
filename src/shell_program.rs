@@ -49,7 +49,7 @@ impl ShellProgram for RustProgram {
             &crate::RustBackend::new(),
             &request.write,
         )?;
-        let mut files = written_files(&generated);
+        let mut files = written_files(&generated, orbital_core::shell::Shell::generated_dir(&crate::RustShell::new()));
         if let Some(program) = program {
             std::fs::write(output.join(PROGRAM_FILE), program).map_err(|e| {
                 ShellFailure::new(CODE_GENERATE_FAILED, format!("write {PROGRAM_FILE}: {e}"))

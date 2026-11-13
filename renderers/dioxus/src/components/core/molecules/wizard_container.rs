@@ -165,7 +165,7 @@ fn WizardContainer(props: WizardContainerProps) -> Element {
     let content = step.and_then(|step| step.as_object()?.get("content"));
     let children = child_patterns(&props.props, view.trait_content);
     let back = button(
-        "Back",
+        &crate::i18n::t("wizard.back"),
         "secondary",
         is_first || !allow_back,
         "__wizard_back",
@@ -173,7 +173,11 @@ fn WizardContainer(props: WizardContainerProps) -> Element {
         None,
     );
     let next = button(
-        if is_last { "Complete" } else { "Next" },
+        &if is_last {
+            crate::i18n::t("wizard.complete")
+        } else {
+            crate::i18n::t("wizard.next")
+        },
         "primary",
         total == 0,
         if is_last {

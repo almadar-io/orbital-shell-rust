@@ -78,7 +78,11 @@ fn SearchInput(props: SearchInputProps) -> Element {
     }
 
     let class = merge_class_name("relative w-full", &props.props);
-    let placeholder = get_string_or(&props.props, "placeholder", "Search...");
+    let placeholder = get_string_or(
+        &props.props,
+        "placeholder",
+        &crate::i18n::t("common.search"),
+    );
     let is_loading = get_bool_or(&props.props, "isLoading", false);
     let clearable = get_bool_or(&props.props, "clearable", true) && !is_loading;
     let debounce_ms = get_number_or(&props.props, "debounceMs", 300.0).max(0.0) as u64;

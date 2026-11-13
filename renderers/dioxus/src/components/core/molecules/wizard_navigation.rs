@@ -53,9 +53,10 @@ impl DioxusPatternRenderer for WizardNavigationRenderer {
         let show_next = get_bool_or(props, "showNext", true);
         let show_complete = get_bool_or(props, "showComplete", true);
         let compact = get_bool_or(props, "compact", false);
-        let back_label = get_string_or(props, "backLabel", "Back");
-        let next_label = get_string_or(props, "nextLabel", "Next");
-        let complete_label = get_string_or(props, "completeLabel", "Complete");
+        let back_label = get_string_or(props, "backLabel", &crate::i18n::t("wizard.back"));
+        let next_label = get_string_or(props, "nextLabel", &crate::i18n::t("wizard.next"));
+        let complete_label =
+            get_string_or(props, "completeLabel", &crate::i18n::t("wizard.complete"));
         let on_back = get_string_or(props, "onBack", "WIZARD_BACK");
         let on_next = get_string_or(props, "onNext", "WIZARD_NEXT");
         let on_complete = get_string_or(props, "onComplete", "WIZARD_COMPLETE");

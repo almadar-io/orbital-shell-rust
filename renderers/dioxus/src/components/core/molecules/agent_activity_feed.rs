@@ -76,14 +76,18 @@ impl DioxusPatternRenderer for AgentActivityFeedRenderer {
                     ("icon", Value::string("sparkles")),
                     (
                         "title",
-                        Value::string(get_string_or(props, "emptyTitle", "No activity yet")),
+                        Value::string(get_string_or(
+                            props,
+                            "emptyTitle",
+                            &crate::i18n::t("agentActivity.emptyTitle"),
+                        )),
                     ),
                     (
                         "description",
                         Value::string(get_string_or(
                             props,
                             "emptyDescription",
-                            "Send a message and the agent's work shows up here.",
+                            &crate::i18n::t("agentActivity.emptyDescription"),
                         )),
                     ),
                 ],
@@ -108,7 +112,7 @@ impl DioxusPatternRenderer for AgentActivityFeedRenderer {
                     let label = conversation
                         .prompt
                         .clone()
-                        .unwrap_or_else(|| "Earlier activity".to_string());
+                        .unwrap_or_else(|| crate::i18n::t("agentActivity.earlierActivity"));
                     let header = pattern_spec(
                         "box",
                         [

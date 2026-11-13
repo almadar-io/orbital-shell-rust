@@ -186,7 +186,10 @@ fn Viewer(input: ViewerProps) -> Element {
     if get_bool_or(props, "isLoading", false) {
         let spec = pattern_spec(
             "loading-state",
-            [("message", Value::string("Loading...")), class_field()],
+            [
+                ("message", Value::string(crate::i18n::t("common.loading"))),
+                class_field(),
+            ],
         );
         return registry.render_spec(&spec, None, &view);
     }
@@ -197,7 +200,10 @@ fn Viewer(input: ViewerProps) -> Element {
         let spec = pattern_spec(
             "error-state",
             [
-                ("title", Value::string("Document error")),
+                (
+                    "title",
+                    Value::string(crate::i18n::t("display.documentError")),
+                ),
                 (
                     "message",
                     Value::string(get_string_or(error, "message", "")),
@@ -212,8 +218,11 @@ fn Viewer(input: ViewerProps) -> Element {
             "empty-state",
             [
                 ("icon", Value::string("file-text")),
-                ("title", Value::string("No document")),
-                ("description", Value::string("No document to display.")),
+                ("title", Value::string(crate::i18n::t("display.noDocument"))),
+                (
+                    "description",
+                    Value::string(crate::i18n::t("documentViewer.noDocumentDescription")),
+                ),
                 class_field(),
             ],
         );
@@ -381,7 +390,9 @@ fn Viewer(input: ViewerProps) -> Element {
     let zoom_value = zoom();
     let body = if active_type == "pdf" && active_src.is_some() {
         let source = active_src.clone().unwrap_or_default();
-        let frame_title = title.clone().unwrap_or_else(|| "Document".to_string());
+        let frame_title = title
+            .clone()
+            .unwrap_or_else(|| crate::i18n::t("documentViewer.iframeTitle"));
         let style = format!(
             "height:{height};transform:scale({});transform-origin:top left;width:{}%",
             zoom_value as f64 / 100.0,

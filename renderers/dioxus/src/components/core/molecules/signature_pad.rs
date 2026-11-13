@@ -135,7 +135,7 @@ fn SignaturePad(input: SignaturePadProps) -> Element {
         let spec = pattern_spec(
             "loading-state",
             [
-                ("message", Value::string("Loading...")),
+                ("message", Value::string(crate::i18n::t("common.loading"))),
                 ("className", Value::string(class_name)),
             ],
         );
@@ -150,7 +150,10 @@ fn SignaturePad(input: SignaturePadProps) -> Element {
         let spec = pattern_spec(
             "error-state",
             [
-                ("title", Value::string("Signature pad error")),
+                (
+                    "title",
+                    Value::string(crate::i18n::t("display.signaturePadError")),
+                ),
                 ("message", Value::string(message)),
                 ("className", Value::string(class_name)),
             ],
@@ -158,9 +161,9 @@ fn SignaturePad(input: SignaturePadProps) -> Element {
         return registry.render_spec(&spec, None, &view);
     }
 
-    let label = get_string(props, "label").unwrap_or_else(|| "Signature".to_string());
-    let helper =
-        get_string(props, "helperText").unwrap_or_else(|| "Draw your signature above".to_string());
+    let label = get_string(props, "label").unwrap_or_else(|| crate::i18n::t("signaturePad.label"));
+    let helper = get_string(props, "helperText")
+        .unwrap_or_else(|| crate::i18n::t("signaturePad.helperText"));
     let read_only = get_bool_or(props, "readOnly", false);
     let card_class = cn(&[
         "rounded-container relative transition-all duration-normal chrome-panel surface-content p-card-md p-4",
@@ -175,7 +178,7 @@ fn SignaturePad(input: SignaturePadProps) -> Element {
         },
     ]);
     let aria_label = if label.is_empty() {
-        "Signature".to_string()
+        crate::i18n::t("signaturePad.label")
     } else {
         label.clone()
     };
@@ -201,7 +204,7 @@ fn SignaturePad(input: SignaturePadProps) -> Element {
             ("variant", Value::string("ghost")),
             ("size", Value::string("sm")),
             ("leftIcon", Value::string("eraser")),
-            ("label", Value::string("Clear")),
+            ("label", Value::string(crate::i18n::t("signaturePad.clear"))),
             ("action", Value::string(CLEAR)),
             ("disabled", Value::Bool(!has_signature())),
         ],
@@ -213,7 +216,10 @@ fn SignaturePad(input: SignaturePadProps) -> Element {
                 ("variant", Value::string("primary")),
                 ("size", Value::string("sm")),
                 ("leftIcon", Value::string("check")),
-                ("label", Value::string("Confirm")),
+                (
+                    "label",
+                    Value::string(crate::i18n::t("signaturePad.confirm")),
+                ),
                 ("action", Value::string(SIGN)),
                 ("disabled", Value::Bool(!has_signature())),
             ],

@@ -65,7 +65,10 @@ impl DioxusPatternRenderer for ModalRenderer {
         close.insert("icon".into(), Value::string("x"));
         close.insert("size".into(), Value::string("sm"));
         close.insert("variant".into(), Value::string("ghost"));
-        close.insert("aria-label".into(), Value::string("Close modal"));
+        close.insert(
+            "aria-label".into(),
+            Value::string(crate::i18n::t("aria.closeModal")),
+        );
         if let Some(event) = close_event {
             close.insert("action".into(), Value::String(event.into()));
         }

@@ -107,7 +107,10 @@ fn control_spec(
         let mut rows = Vec::with_capacity(options.len() + 1);
         let mut all = ValueMap::new();
         all.insert("value".into(), Value::string("all"));
-        all.insert("label".into(), Value::string("All"));
+        all.insert(
+            "label".into(),
+            Value::string(crate::i18n::t("filterGroup.all")),
+        );
         rows.push(Value::Object(all.into()));
         for option in options {
             if let Some(text) = option.as_str() {
@@ -189,7 +192,7 @@ fn FilterPopover(controls: Element, class: String) -> Element {
     rsx! {
         div { class: "relative inline-block {class}",
             button { class: "rounded-interactive px-3 h-button-sm text-sm hover:bg-muted", aria_expanded: open(),
-                onclick: move |_| open.set(!open()), "Filters" }
+                onclick: move |_| open.set(!open()), {crate::i18n::t("filterGroup.filters")} }
             if open() {
                 div { class: "absolute left-0 z-50 mt-2 min-w-[16rem] rounded-container border border-border bg-card p-card-md shadow-elevation-popover",
                     {controls}
@@ -257,7 +260,7 @@ impl DioxusPatternRenderer for FilterGroupRenderer {
                 if show_icon {
                     span { class: "inline-flex items-center gap-1 text-muted-foreground",
                         {registry.render_spec(&icon, None, view)}
-                        if !compact && !pills { span { class: "text-xs font-bold uppercase tracking-wide", "Filters" } }
+                        if !compact && !pills { span { class: "text-xs font-bold uppercase tracking-wide", {crate::i18n::t("filterGroup.filters")} } }
                     }
                 }
                 for filter in filters.iter() {
@@ -271,15 +274,15 @@ impl DioxusPatternRenderer for FilterGroupRenderer {
                       let field_max = format!("{field}_max");
                       let wrapper = if vertical { "flex flex-col gap-1" } else { "flex items-center gap-2" };
                       let default_spec = control_spec(&kind, &label, &options, filter, loading);
-                      let from_spec = control_spec("date", "From", &[], filter, loading);
-                      let to_spec = control_spec("date", "To", &[], filter, loading);
-                      let min_spec = control_spec("number-range", "From", &[], filter, loading);
-                      let max_spec = control_spec("number-range", "To", &[], filter, loading);
+                      let from_spec = control_spec("date", &crate::i18n::t("filterGroup.from"), &[], filter, loading);
+                      let to_spec = control_spec("date", &crate::i18n::t("filterGroup.to"), &[], filter, loading);
+                      let min_spec = control_spec("number-range", &crate::i18n::t("filterGroup.from"), &[], filter, loading);
+                      let max_spec = control_spec("number-range", &crate::i18n::t("filterGroup.to"), &[], filter, loading);
                       rsx! { div { key: "{field}", class: "{wrapper}",
                           if !compact { label { class: "text-xs font-bold text-muted-foreground uppercase tracking-wide", "{label}" } }
                           if pills {
                               div { class: "flex flex-wrap items-center gap-1",
-                                  {render_pill(registry, view, "All", "all", &entity, &field, query.clone(), configured.clone(), callback.clone())}
+                                  {render_pill(registry, view, &crate::i18n::t("filterGroup.all"), "all", &entity, &field, query.clone(), configured.clone(), callback.clone())}
                                   for option in options.iter() {
                                       if let Some(option) = option.as_str() {
                                           {render_pill(registry, view, option, option, &entity, &field, query.clone(), configured.clone(), callback.clone())}
@@ -307,7 +310,7 @@ impl DioxusPatternRenderer for FilterGroupRenderer {
                 if clear_action {
                     button { class: "rounded-interactive px-3 h-button-sm text-sm hover:bg-muted", disabled: loading,
                         onclick: move |_| emit_clear(sink, &clear_event, &clear_callback, clear_payload.clone()),
-                        "Clear all"
+                        {crate::i18n::t("filterGroup.clearAll")}
                     }
                 }
             }

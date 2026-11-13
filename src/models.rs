@@ -3,7 +3,7 @@
 
 use orbital_core::generate::GeneratedFile;
 use orbital_core::ir::{
-    render_default, render_type, OirEntity, OirField, OirModule, OirType, TargetLiteralRenderer,
+    render_default_in, render_type, OirEntity, OirField, OirModule, OirType, TargetLiteralRenderer,
     TargetTypeRenderer, TypeMappingClass,
 };
 use orbital_core::str_utils::{
@@ -68,6 +68,7 @@ struct RsTypes<'a> {
     context: String,
     hoisted: &'a RefCell<Vec<String>>,
     local: &'a BTreeSet<String>,
+    named: &'a BTreeMap<String, OirType>,
 }
 
 impl RsTypes<'_> {
@@ -76,6 +77,7 @@ impl RsTypes<'_> {
             context,
             hoisted: self.hoisted,
             local: self.local,
+            named: self.named,
         }
     }
 }
@@ -305,7 +307,10 @@ impl TargetLiteralRenderer for RsLiteral<'_> {
         Some(format!("std::collections::BTreeMap::from([{}])", pairs.join(", ")))
     }
     fn union_arm(&self, arm: &str, inner: String) -> String {
-        format!("{}::{}({inner})", self.union_name, split_to_pascal_case(arm))
+        self.union_arm_in(None, arm, inner)
+    }
+    fn union_arm_in(&self, owner: Option<&str>, arm: &str, inner: String) -> String {
+        format!("{}::{}({inner})", owner.unwrap_or(self.union_name), split_to_pascal_case(arm))
     }
 }
 
@@ -364,7 +369,7 @@ fn field_line(f: &OirField, class: &str, types: &RsTypes<'_>) -> (String, Option
     let mut default_fn = None;
     let mut comment = String::new();
     if let Some(value) = &f.default {
-        match render_default(&RsLiteral { union_name: &child.context }, value, ty, None) {
+        match render_default_in(&RsLiteral { union_name: &child.context }, value, ty, None, types.named) {
             Ok(Some(expr)) => {
                 let fn_name = format!("default_{class}_{ident}");
                 let body = if optional { format!("Some({expr})") } else { expr };
@@ -383,13 +388,14 @@ fn field_line(f: &OirField, class: &str, types: &RsTypes<'_>) -> (String, Option
     (format!("{comment}{attr}    pub {ident}: {annotation},"), default_fn)
 }
 
-fn entity_source(entity: &OirEntity, local: &BTreeSet<String>) -> String {
+fn entity_source(entity: &OirEntity, local: &BTreeSet<String>, named: &BTreeMap<String, OirType>) -> String {
     let class = entity_class(&entity.name);
     let hoisted = RefCell::new(Vec::new());
     let types = RsTypes {
         context: class.clone(),
         hoisted: &hoisted,
         local,
+        named,
     };
     let rest: Vec<OirField> = entity
         .fields
@@ -428,6 +434,7 @@ pub fn entities_file(module: &OirModule) -> GeneratedFile {
         context: String::new(),
         hoisted: &file_hoisted,
         local: &local,
+        named: &module.named_types,
     };
     for (name, ty) in &module.named_types {
         render_type(&types.child(orbital_core::type_compat::type_identifier(name)), ty, None);
@@ -438,7 +445,7 @@ pub fn entities_file(module: &OirModule) -> GeneratedFile {
         body.push_str("\n\n");
     }
     for entity in module.distinct_entities() {
-        body.push_str(&entity_source(&entity, &local));
+        body.push_str(&entity_source(&entity, &local, &module.named_types));
         body.push_str("\n\n");
     }
     GeneratedFile::new(
@@ -506,6 +513,7 @@ pub fn events_file(module: &OirModule) -> GeneratedFile {
             context: name.clone(),
             hoisted: &hoisted,
             local: &local,
+            named: &module.named_types,
         };
         let rendered: Vec<(String, Option<String>)> = fields.iter().map(|f| field_line(f, &name, &types)).collect();
         let has_default_fn: Vec<bool> = rendered.iter().map(|(_, default_fn)| default_fn.is_some()).collect();
@@ -542,7 +550,7 @@ pub fn files(module: &OirModule) -> Vec<GeneratedFile> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use orbital_core::ir::{OirConfigFieldType, OirEvent, OirTrait, OirTypeMap, OirValue};
+    use orbital_core::ir::{render_default, OirConfigFieldType, OirEvent, OirTrait, OirTypeMap, OirValue};
 
     pub(crate) fn module(with_trait: bool) -> OirModule {
         let mut m = OirModule::new("app", "1.0.0");
@@ -635,6 +643,41 @@ mod tests {
         assert!(content.contains("pub struct Bar {"), "{content}");
         assert!(content.contains("pub claim: Bar,"), "{content}");
         assert!(!content.contains("StdFoo"), "{content}");
+    }
+
+    fn aliased_default_module() -> OirModule {
+        let mut m = OirModule::new("app", "1.0.0");
+        m.named_types.insert(
+            "Host".to_string(),
+            OirType::Union {
+                variants: vec![
+                    OirField::new("string", OirType::String),
+                    OirField::new("Env", OirType::Struct { additional: None, fields: vec![OirField::new("anchor", OirType::String)].into() }),
+                ]
+                .into(),
+            },
+        );
+        let mut holder = OirEntity::new("Holder");
+        let mut host = OirField::new("host", OirType::TypeRef { name: "Host".to_string() });
+        host.required = false;
+        host.default = Some(orbital_core::ir::OirValue::String("api.example.test".to_string()));
+        holder.fields.push(host);
+        m.entities.push(holder);
+        m
+    }
+
+    #[test]
+    fn a_default_on_an_aliased_union_field_renders_without_a_mismatch_marker() {
+        let content = entities_file(&aliased_default_module()).content;
+        assert!(!content.contains("LITERAL_TYPE_MISMATCH"), "{content}");
+        assert!(content.contains("Host::String(\"api.example.test\".to_string())"), "{content}");
+    }
+
+    #[test]
+    fn control_an_aliased_field_with_a_default_the_alias_cannot_hold_still_carries_the_marker() {
+        let mut m = aliased_default_module();
+        m.entities[0].fields[0].default = Some(orbital_core::ir::OirValue::Number(1.0));
+        assert!(entities_file(&m).content.contains("LITERAL_TYPE_MISMATCH"));
     }
 
     #[test]

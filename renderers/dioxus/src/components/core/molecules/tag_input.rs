@@ -29,7 +29,11 @@ fn TagInput(input: TagInputProps) -> Element {
     let disabled = get_bool_or(props, "disabled", false);
     let unique = get_bool_or(props, "unique", true);
     let variant = get_string_or(props, "variant", "default");
-    let placeholder = get_string_or(props, "placeholder", "Type and press Enter…");
+    let placeholder = get_string_or(
+        props,
+        "placeholder",
+        &crate::i18n::t("tagInput.placeholder"),
+    );
     let helper = get_string(props, "helperText").filter(|text| !text.is_empty());
     let add_event = get_string(props, "addEvent").filter(|name| !name.is_empty());
     let remove_event = get_string(props, "removeEvent").filter(|name| !name.is_empty());

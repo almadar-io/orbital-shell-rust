@@ -297,10 +297,18 @@ fn Diff(input: DiffProps) -> Element {
             ("variant", Value::string("small")),
             ("weight", Value::string("medium")),
             ("className", Value::string("whitespace-nowrap")),
-            ("content", Value::string("Compare")),
+            (
+                "content",
+                Value::string(crate::i18n::t("versionDiff.compare")),
+            ),
         ],
     );
-    let to = typography_spec("caption", Some("secondary"), "", "to");
+    let to = typography_spec(
+        "caption",
+        Some("secondary"),
+        "",
+        &crate::i18n::t("versionDiff.to"),
+    );
     let select = |value: &str, event: &str, label: &str| {
         pattern_spec(
             "select",
@@ -312,8 +320,16 @@ fn Diff(input: DiffProps) -> Element {
             ],
         )
     };
-    let before_select = select(&active_before_id, "__vd:before", "Before revision");
-    let after_select = select(&active_after_id, "__vd:after", "After revision");
+    let before_select = select(
+        &active_before_id,
+        "__vd:before",
+        &crate::i18n::t("versionDiff.beforeRevision"),
+    );
+    let after_select = select(
+        &active_after_id,
+        "__vd:after",
+        &crate::i18n::t("versionDiff.afterRevision"),
+    );
     let badge = |label: String, variant: &str| {
         pattern_spec(
             "badge",
@@ -342,9 +358,9 @@ fn Diff(input: DiffProps) -> Element {
             (
                 "aria-label",
                 Value::string(if side {
-                    "Switch to inline view"
+                    crate::i18n::t("versionDiff.switchToInline")
                 } else {
-                    "Switch to side-by-side view"
+                    crate::i18n::t("versionDiff.switchToSideBySide")
                 }),
             ),
         ],
@@ -353,7 +369,7 @@ fn Diff(input: DiffProps) -> Element {
         pattern_spec(
             "button",
             [
-                ("label", Value::string("Revert")),
+                ("label", Value::string(crate::i18n::t("versionDiff.revert"))),
                 ("variant", Value::string("ghost")),
                 ("size", Value::string("sm")),
                 ("icon", Value::string("rotate-ccw")),
@@ -396,7 +412,10 @@ fn Diff(input: DiffProps) -> Element {
             ("variant", Value::string("body2")),
             ("color", Value::string("muted")),
             ("align", Value::string("center")),
-            ("content", Value::string("No changes in this version.")),
+            (
+                "content",
+                Value::string(crate::i18n::t("versionDiff.noChanges")),
+            ),
         ],
     );
 
@@ -536,7 +555,7 @@ fn Diff(input: DiffProps) -> Element {
                         {render(&after_meta)}
                     }
                 }
-                div { class: "{BOX_ATOM_BASE} overflow-auto bg-muted/20", style: "max-height:600px", role: "region", tabindex: "0", aria_label: "Changes",
+                div { class: "{BOX_ATOM_BASE} overflow-auto bg-muted/20", style: "max-height:600px", role: "region", tabindex: "0", aria_label: crate::i18n::t("versionDiff.changes"),
                     if is_empty {
                         div { class: "{BOX_ATOM_BASE} py-8", {render(&empty)} }
                     } else if side {

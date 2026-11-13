@@ -280,7 +280,11 @@ fn tree_node(
     );
     let derived_chevron = icon_spec(chevron, "text-[var(--color-muted-foreground)]");
     let row_icon = icon_spec(icon_name, icon_class);
-    let toggle_label = if expanded { "Collapse" } else { "Expand" };
+    let toggle_label = if expanded {
+        crate::i18n::t("fileTree.collapse")
+    } else {
+        crate::i18n::t("fileTree.expand")
+    };
     let show_children = expandable_row && expanded && !node.children.is_empty();
 
     rsx! {
@@ -434,7 +438,11 @@ fn flat_node(
     );
     let action_tab = if active_here { "0" } else { "-1" };
     let action_label = s.node_action_label.clone();
-    let toggle_label = if expanded { "Collapse" } else { "Expand" };
+    let toggle_label = if expanded {
+        crate::i18n::t("fileTree.collapse")
+    } else {
+        crate::i18n::t("fileTree.expand")
+    };
 
     rsx! {
         div { key: "{item.id}", class: "{class}", style: "{style}", role: "treeitem", tabindex: "{tabindex}",
@@ -498,7 +506,11 @@ fn Tree(input: TreeProps) -> Element {
         on_node_select: non_empty("onNodeSelect"),
         on_node_action: non_empty("onNodeAction"),
         node_action_icon: get_string_or(props, "nodeActionIcon", "plus"),
-        node_action_label: get_string_or(props, "nodeActionLabel", "Node action"),
+        node_action_label: get_string_or(
+            props,
+            "nodeActionLabel",
+            &crate::i18n::t("fileTree.nodeAction"),
+        ),
         indent: get_number_or(props, "indent", 16.0),
         selected: if items_value.is_some() {
             selected_id.clone()

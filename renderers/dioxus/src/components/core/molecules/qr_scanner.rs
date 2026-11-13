@@ -89,17 +89,17 @@ fn QrScanner(input: QrProps) -> Element {
         &class_name,
     ]);
     let video = cn(&[BOX, "absolute w-full h-full", "inset-0 object-cover"]);
-    let aria = get_string_or(props, "aria-label", "QR scanner");
+    let aria = get_string_or(props, "aria-label", &crate::i18n::t("aria.qrScanner"));
     let pause_label = if is_paused {
-        "Resume scanning"
+        crate::i18n::t("qrScanner.resumeScanning")
     } else {
-        "Pause scanning"
+        crate::i18n::t("qrScanner.pauseScanning")
     };
     let pause_icon = if is_paused { "play" } else { "pause" };
     let facing_label = if *facing.read() == "environment" {
-        "Switch to front camera"
+        crate::i18n::t("qrScanner.switchToFrontCamera")
     } else {
-        "Switch to rear camera"
+        crate::i18n::t("qrScanner.switchToRearCamera")
     };
     let controls_el = show_controls.then(|| {
         let spec = pattern_spec(
@@ -108,8 +108,8 @@ fn QrScanner(input: QrProps) -> Element {
                 "children",
                 Value::Array(
                     vec![
-                        control("__qr_pause", pause_label, pause_icon),
-                        control("__qr_facing", facing_label, "refresh-cw"),
+                        control("__qr_pause", &pause_label, pause_icon),
+                        control("__qr_facing", &facing_label, "refresh-cw"),
                     ]
                     .into(),
                 ),
@@ -186,13 +186,13 @@ fn QrScanner(input: QrProps) -> Element {
             if let Some(message) = current_error.as_ref() {
                 div { class: "{err_wrap}",
                     {registry.render_spec(&camera_icon, None, &view)}
-                    {registry.render_spec(&text("body2", "text-white", "Camera unavailable"), None, &view)}
+                    {registry.render_spec(&text("body2", "text-white", &crate::i18n::t("qrScanner.cameraUnavailable")), None, &view)}
                     {registry.render_spec(&text("caption", "text-white opacity-70", message), None, &view)}
                 }
             }
             if is_paused && current_error.is_none() {
                 div { class: "{pause_wrap}",
-                    {registry.render_spec(&text("body2", "text-white", "Paused"), None, &view)}
+                    {registry.render_spec(&text("body2", "text-white", &crate::i18n::t("qrScanner.paused")), None, &view)}
                 }
             }
             if let Some(controls_el) = controls_el {

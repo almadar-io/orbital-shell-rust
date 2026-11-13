@@ -149,11 +149,20 @@ impl DioxusPatternRenderer for ImportPreviewTreeRenderer {
             m.insert("amount".to_string().into(), Value::Number(n as f64));
             Value::Object(m.into())
         };
-        let cancel_button = cancel_event
-            .map(|e| action_button(get_string_or(props, "cancelLabel", "Cancel"), "default", e));
+        let cancel_button = cancel_event.map(|e| {
+            action_button(
+                get_string_or(props, "cancelLabel", &crate::i18n::t("common.cancel")),
+                "default",
+                e,
+            )
+        });
         let confirm_button = confirm_event.map(|e| {
             action_button(
-                get_string_or(props, "confirmLabel", "Confirm import"),
+                get_string_or(
+                    props,
+                    "confirmLabel",
+                    &crate::i18n::t("import.confirmImport"),
+                ),
                 "primary",
                 e,
             )
@@ -177,8 +186,12 @@ impl DioxusPatternRenderer for ImportPreviewTreeRenderer {
                 ("className", Value::string("text-muted-foreground")),
             ],
         );
-        let empty_text = typo("body2", "No units staged.", "text-muted-foreground");
-        let skipped_label = typo("label", "Skipped", "");
+        let empty_text = typo(
+            "body2",
+            &crate::i18n::t("import.noUnitsStaged"),
+            "text-muted-foreground",
+        );
+        let skipped_label = typo("label", &crate::i18n::t("import.skipped"), "");
         rsx! {
             div { class: "{root_class}",
                 if units.is_empty() { {registry.render_spec(&empty_text, None, view)} }

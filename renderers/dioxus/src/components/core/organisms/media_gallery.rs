@@ -112,14 +112,20 @@ fn Gallery(input: GalleryProps) -> Element {
     if get_bool_or(props, "isLoading", false) {
         return wrapper(pattern_spec(
             "loading-state",
-            with_class(vec![("message", Value::string("Loading..."))]),
+            with_class(vec![(
+                "message",
+                Value::string(crate::i18n::t("common.loading")),
+            )]),
         ));
     }
     if let Some(error) = props.get("error").filter(|error| !error.is_null()) {
         return wrapper(pattern_spec(
             "error-state",
             with_class(vec![
-                ("title", Value::string("Gallery error")),
+                (
+                    "title",
+                    Value::string(crate::i18n::t("display.galleryError")),
+                ),
                 (
                     "message",
                     Value::string(get_string_or(error, "message", "")),
@@ -134,8 +140,11 @@ fn Gallery(input: GalleryProps) -> Element {
             "empty-state",
             with_class(vec![
                 ("icon", Value::string("image")),
-                ("title", Value::string("No media")),
-                ("description", Value::string("No media items to display.")),
+                ("title", Value::string(crate::i18n::t("display.noMedia"))),
+                (
+                    "description",
+                    Value::string(crate::i18n::t("mediaGallery.noMediaDescription")),
+                ),
             ]),
         ));
     }
@@ -180,7 +189,10 @@ fn Gallery(input: GalleryProps) -> Element {
                     ("variant", Value::string("secondary")),
                     ("size", Value::string("sm")),
                     ("icon", Value::string("upload")),
-                    ("label", Value::string("Upload")),
+                    (
+                        "label",
+                        Value::string(crate::i18n::t("mediaGallery.upload")),
+                    ),
                     ("action", Value::string("MEDIA_UPLOAD")),
                 ],
             ));

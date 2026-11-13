@@ -643,7 +643,7 @@ fn DashboardLayout(props: LayoutProps) -> Element {
             [
                 ("variant", Value::string("link")),
                 ("href", Value::string("#main-content")),
-                ("label", Value::string("Skip to content")),
+                ("label", Value::string(crate::i18n::t("aria.skipToContent"))),
                 (
                     "className",
                     Value::string("sr-only focus:not-sr-only focus:fixed focus:top-2 focus:start-2 focus:z-50 focus:px-3 focus:py-2 focus:bg-card focus:shadow-elevation-popover"),
@@ -720,7 +720,10 @@ fn DashboardLayout(props: LayoutProps) -> Element {
             "p-2",
             vec![icon_spec("x", "h-5 w-5")],
             vec![
-                ("aria-label", Value::string("Close panel")),
+                (
+                    "aria-label",
+                    Value::string(crate::i18n::t("aria.closePanel")),
+                ),
                 ("action", Value::string("__local_close_sidebar")),
             ],
         );
@@ -781,7 +784,7 @@ fn DashboardLayout(props: LayoutProps) -> Element {
                         {close_button}
                     }
                 }
-                nav { class: "{nav_class}", "aria-label": "Main navigation",
+                nav { class: "{nav_class}", "aria-label": crate::i18n::t("aria.mainNavigation"),
                     for link in links { {link} }
                 }
                 if let Some(content) = content {
@@ -811,7 +814,7 @@ fn DashboardLayout(props: LayoutProps) -> Element {
             "p-2 rounded-interactive hover:bg-muted text-muted-foreground touch-manipulation min-h-[44px] min-w-[44px] flex items-center justify-center",
             vec![icon_spec("menu", "h-5 w-5")],
             vec![
-                ("aria-label", Value::string("Open sidebar")),
+                ("aria-label", Value::string(crate::i18n::t("aria.openSidebar"))),
                 ("action", Value::string("__local_open_sidebar")),
             ],
         );
@@ -906,7 +909,7 @@ fn DashboardLayout(props: LayoutProps) -> Element {
                 })
                 .collect();
             rsx! {
-                nav { class: "{nav_class}", "aria-label": "Main navigation",
+                nav { class: "{nav_class}", "aria-label": crate::i18n::t("aria.mainNavigation"),
                     {brand}
                     for entry in entries { {entry} }
                 }
@@ -916,7 +919,10 @@ fn DashboardLayout(props: LayoutProps) -> Element {
             let mut fields = vec![
                 ("inputType", Value::string("search")),
                 ("leftIcon", Value::string("search")),
-                ("placeholder", Value::string("Search...")),
+                (
+                    "placeholder",
+                    Value::string(crate::i18n::t("common.search")),
+                ),
                 ("className", Value::string("w-full")),
             ];
             if let Some(event) = &search_event {
@@ -942,7 +948,7 @@ fn DashboardLayout(props: LayoutProps) -> Element {
                         "icon",
                         Value::string(if search_open() { "x" } else { "search" }),
                     ),
-                    ("aria-label", Value::string("Search")),
+                    ("aria-label", Value::string(crate::i18n::t("aria.search"))),
                     ("aria-expanded", Value::Bool(search_open())),
                     ("action", Value::string("__local_toggle_search")),
                 ],
@@ -1037,7 +1043,7 @@ fn DashboardLayout(props: LayoutProps) -> Element {
                 "relative p-2",
                 bell_children,
                 vec![
-                    ("aria-label", Value::string("Notifications")),
+                    ("aria-label", Value::string(crate::i18n::t("common.notifications"))),
                     ("action", Value::string("__local_notifications")),
                 ],
             );
@@ -1101,7 +1107,7 @@ fn DashboardLayout(props: LayoutProps) -> Element {
                     .collect();
                 let mut sign_out = vec![
                     ("id", Value::string("sign-out")),
-                    ("label", Value::string("Sign out")),
+                    ("label", Value::string(crate::i18n::t("auth.signOut"))),
                     ("icon", Value::string("log-out")),
                     ("variant", Value::string("danger")),
                 ];
@@ -1196,7 +1202,7 @@ fn DashboardLayout(props: LayoutProps) -> Element {
             .map(|item| bottom_link(item, active.as_deref(), navigate, &view, registry))
             .collect();
         rsx! {
-            nav { class: "{nav_class}", "aria-label": "Main navigation",
+            nav { class: "{nav_class}", "aria-label": crate::i18n::t("aria.mainNavigation"),
                 div { class: "{row}", for link in links { {link} } }
             }
         }

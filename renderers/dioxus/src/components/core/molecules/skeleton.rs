@@ -260,7 +260,8 @@ impl DioxusPatternRenderer for SkeletonRenderer {
         if spec.is_some_and(|value| value.as_str() == Some("none")) {
             return rsx! {};
         }
-        let label = get_string(props, "aria-label").unwrap_or_else(|| "Loading...".to_string());
+        let label =
+            get_string(props, "aria-label").unwrap_or_else(|| crate::i18n::t("common.loading"));
         let class_name = get_string_or(props, "className", "");
         let is_tree = spec.is_some_and(|value| value.get("stack").is_some());
         let (variant, content) = match spec {

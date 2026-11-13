@@ -21,9 +21,9 @@ impl DioxusPatternRenderer for GameAudioToggleRenderer {
     ) -> Element {
         let muted = get_bool_or(props, "muted", false);
         let label = if muted {
-            get_string_or(props, "mutedLabel", "Muted")
+            get_string_or(props, "mutedLabel", &crate::i18n::t("gameAudio.muted"))
         } else {
-            get_string_or(props, "soundOnLabel", "Sound on")
+            get_string_or(props, "soundOnLabel", &crate::i18n::t("gameAudio.soundOn"))
         };
         let asset = props
             .as_object()

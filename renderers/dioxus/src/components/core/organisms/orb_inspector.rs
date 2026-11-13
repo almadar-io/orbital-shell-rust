@@ -184,7 +184,7 @@ fn Inspector(input: InspectorProps) -> Element {
         Some(kind) => kind.clone(),
         None if is_expanded => {
             if event.is_empty() {
-                "Transition".to_string()
+                crate::i18n::t("avl.transition")
             } else {
                 event.clone()
             }
@@ -234,7 +234,7 @@ fn Inspector(input: InspectorProps) -> Element {
         "prototype" => {
             let label = small(
                 "text-muted-foreground text-xs uppercase tracking-wider mb-2",
-                "Transition",
+                &crate::i18n::t("avl.transition"),
             );
             let trait_line = if trait_name.is_empty() {
                 None
@@ -310,7 +310,7 @@ fn Inspector(input: InspectorProps) -> Element {
             let styles = match pattern_type.as_deref() {
                 None | Some("") => rsx! {
                     div { class: "{c3}",
-                        {registry.render_spec(&small("text-muted-foreground text-xs", "Select a pattern to view its style tokens."), None, &view)}
+                        {registry.render_spec(&small("text-muted-foreground text-xs", &crate::i18n::t("orbInspector.selectPatternForStyles")), None, &view)}
                     }
                 },
                 Some(kind) => {
@@ -323,12 +323,12 @@ fn Inspector(input: InspectorProps) -> Element {
                         div { class: "{c4}",
                             div { class: "{c1}",
                                 {registry.render_spec(&small("font-semibold text-xs", kind), None, &view)}
-                                div { class: "{tier}", style: "background-color:var(--color-muted);color:var(--color-muted-foreground)", "Pattern" }
+                                div { class: "{tier}", style: "background-color:var(--color-muted);color:var(--color-muted-foreground)", {crate::i18n::t("orbInspector.pattern")} }
                             }
                             div { class: "{c5}",
-                                {registry.render_spec(&small("text-muted-foreground text-xs uppercase tracking-wider mb-2", "Tokens"), None, &view)}
+                                {registry.render_spec(&small("text-muted-foreground text-xs uppercase tracking-wider mb-2", &crate::i18n::t("orbInspector.tokens")), None, &view)}
                                 if tokens.is_empty() {
-                                    {registry.render_spec(&small("text-muted-foreground text-xs italic", "No token contract declared for this pattern."), None, &view)}
+                                    {registry.render_spec(&small("text-muted-foreground text-xs italic", &crate::i18n::t("orbInspector.noTokenContract")), None, &view)}
                                 } else {
                                     div { class: "{c6}",
                                         for token in tokens.iter() {
@@ -373,7 +373,7 @@ fn Inspector(input: InspectorProps) -> Element {
                     div { class: "{head_left}", {title_el} }
                     button {
                         class: "text-muted-foreground hover:text-foreground text-sm cursor-pointer bg-transparent border-none p-1",
-                        "aria-label": "Close",
+                        "aria-label": crate::i18n::t("common.close"),
                         onclick: move |_| { if let (Some(sink), Some(event)) = (sink, on_close.clone()) { sink.call((event, Value::Null)); } },
                         "\u{d7}"
                     }

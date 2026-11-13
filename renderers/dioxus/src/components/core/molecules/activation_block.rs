@@ -63,12 +63,12 @@ fn Activation(input: ActivationProps) -> Element {
             div { class: "flex items-start gap-3",
                 {icon}
                 div { class: "flex-1",
-                    h4 { class: "heading-voice text-primary mb-2", "Before You Begin..." }
+                    h4 { class: "heading-voice text-primary mb-2", {crate::i18n::t("activation.title")} }
                     p { class: "text-foreground mb-3 text-sm md:text-base", "{question}" }
                     if is_expanded {
                         textarea {
                             class: "w-full p-3 border border-input rounded-interactive bg-card text-foreground focus:ring-2 focus:ring-ring focus:border-transparent text-sm",
-                            placeholder: "Jot down your thoughts...",
+                            placeholder: crate::i18n::t("activation.placeholder"),
                             value: "{current}",
                             rows: "3",
                             oninput: move |event| {
@@ -86,7 +86,7 @@ fn Activation(input: ActivationProps) -> Element {
                                     }
                                     expanded.set(false);
                                 },
-                                "Continue to Lesson →"
+                                {crate::i18n::t("activation.continue")}
                             }
                             button {
                                 class: "px-4 py-2 text-primary hover:underline text-sm",
@@ -97,7 +97,7 @@ fn Activation(input: ActivationProps) -> Element {
                                     }
                                     expanded.set(false);
                                 },
-                                "Skip for now"
+                                {crate::i18n::t("activation.skip")}
                             }
                         }
                     } else {
@@ -107,7 +107,7 @@ fn Activation(input: ActivationProps) -> Element {
                                 let mut expanded = expanded;
                                 expanded.set(true);
                             },
-                            "✓ Answered · Edit response"
+                            {crate::i18n::t("activation.answeredEdit")}
                         }
                     }
                 }

@@ -154,7 +154,7 @@ impl DioxusPatternRenderer for StatCardRenderer {
             .filter(|label| !label.is_empty())
             .or_else(|| get_string(props, "label").or_else(|| get_string(props, "title")))
             .filter(|label| !label.is_empty())
-            .unwrap_or_else(|| "Stat".to_string());
+            .unwrap_or_else(|| crate::i18n::t("statCard.defaultLabel"));
         let panel_class = cn(&[surface_class, "p-6 rounded-container", &class_name]);
 
         if let Some(message) = error_message {
@@ -311,7 +311,12 @@ impl DioxusPatternRenderer for StatCardRenderer {
                                     ),
                                 ],
                             ),
-                            typography_spec("small", Some("secondary"), "", "vs last period"),
+                            typography_spec(
+                                "small",
+                                Some("secondary"),
+                                "",
+                                &crate::i18n::t("statCard.vsLastPeriod"),
+                            ),
                         ]),
                     ),
                 ],

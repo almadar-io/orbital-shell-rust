@@ -35,7 +35,7 @@ impl DioxusPatternRenderer for StateJsonViewRenderer {
         let initial_state = get_string_or(props, "initialState", "");
         let states = get_string_array(props, "states");
         let transitions = get_array(props, "transitions");
-        let label = get_string_or(props, "label", "View Code");
+        let label = get_string_or(props, "label", &crate::i18n::t("stateArchitect.viewCode"));
         let states_text = format!("states: [{}]", states.join(", "));
         let lines: Vec<String> = transitions
             .iter()

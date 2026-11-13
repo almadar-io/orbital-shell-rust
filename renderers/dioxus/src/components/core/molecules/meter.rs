@@ -114,7 +114,7 @@ impl DioxusPatternRenderer for MeterRenderer {
     ) -> Element {
         let class_name = get_string_or(props, "className", "");
         if get_bool_or(props, "isLoading", false) {
-            let mut fields = vec![("message", Value::string("Loading..."))];
+            let mut fields = vec![("message", Value::string(crate::i18n::t("common.loading")))];
             if !class_name.is_empty() {
                 fields.push(("className", Value::string(class_name)));
             }
@@ -125,7 +125,7 @@ impl DioxusPatternRenderer for MeterRenderer {
             .and_then(|error| get_string(error, "message"))
         {
             let mut fields = vec![
-                ("title", Value::string("Meter error")),
+                ("title", Value::string(crate::i18n::t("display.meterError"))),
                 ("message", Value::string(message)),
             ];
             if !class_name.is_empty() {

@@ -96,9 +96,9 @@ fn Quiz(input: QuizProps) -> Element {
                 (
                     "content",
                     Value::string(if is_revealed {
-                        "Hide answer"
+                        crate::i18n::t("quiz.hideAnswer")
                     } else {
-                        "Show answer"
+                        crate::i18n::t("quiz.showAnswer")
                     }),
                 ),
             ],

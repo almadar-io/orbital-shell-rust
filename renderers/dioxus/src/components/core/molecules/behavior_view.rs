@@ -67,7 +67,7 @@ impl DioxusPatternRenderer for BehaviorViewRenderer {
             );
             m.insert(
                 "title".to_string().into(),
-                Value::String(("No trait data".to_string()).into()),
+                Value::String((crate::i18n::t("avl.noTraitData")).into()),
             );
             Value::Object(m.into())
         };

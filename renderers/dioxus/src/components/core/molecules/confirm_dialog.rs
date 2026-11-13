@@ -42,9 +42,9 @@ impl DioxusPatternRenderer for ConfirmDialogRenderer {
         let is_loading = get_bool_or(props, "isLoading", false);
         let title = get_string_or(props, "title", "");
         let confirm_text = first_string(props, &["confirmText", "confirmLabel"])
-            .unwrap_or_else(|| "Confirm".to_string());
+            .unwrap_or_else(|| crate::i18n::t("dialog.confirm"));
         let cancel_text = first_string(props, &["cancelText", "cancelLabel"])
-            .unwrap_or_else(|| "Cancel".to_string());
+            .unwrap_or_else(|| crate::i18n::t("dialog.cancel"));
         let confirm_event = get_string_or(props, "confirmEvent", "CONFIRM");
         let cancel_event = get_string_or(props, "cancelEvent", "CANCEL");
         let fields = props.as_object();
@@ -69,7 +69,7 @@ impl DioxusPatternRenderer for ConfirmDialogRenderer {
                     "label",
                     Value::String(
                         if is_loading {
-                            "Loading...".to_string()
+                            crate::i18n::t("common.loading")
                         } else {
                             confirm_text
                         }

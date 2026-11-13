@@ -102,7 +102,7 @@ impl DioxusPatternRenderer for CodeRunnerPanelRenderer {
                 ("size", Value::string("sm")),
                 ("icon", Value::string("copy")),
                 ("label", Value::string("")),
-                ("aria-label", Value::string("Copy")),
+                ("aria-label", Value::string(crate::i18n::t("common.copy"))),
             ],
         );
         let mut reset_fields = vec![
@@ -111,7 +111,7 @@ impl DioxusPatternRenderer for CodeRunnerPanelRenderer {
             ("icon", Value::string("rotate-ccw")),
             ("label", Value::string("")),
             ("disabled", Value::Bool(running)),
-            ("aria-label", Value::string("Reset")),
+            ("aria-label", Value::string(crate::i18n::t("common.reset"))),
         ];
         if let Some(event) = &reset_event {
             reset_fields.push(("action", Value::string(event.as_str())));
@@ -134,7 +134,11 @@ impl DioxusPatternRenderer for CodeRunnerPanelRenderer {
                 ),
                 (
                     "label",
-                    Value::string(if running { "Loading..." } else { "Run" }),
+                    Value::string(if running {
+                        crate::i18n::t("common.loading")
+                    } else {
+                        crate::i18n::t("codeRunner.run")
+                    }),
                 ),
                 ("isLoading", Value::Bool(running)),
                 (
@@ -169,7 +173,7 @@ impl DioxusPatternRenderer for CodeRunnerPanelRenderer {
                         {typography(registry, view, "small", &stderr, None, None, Some("text-error whitespace-pre-wrap"))}
                     }
                     if stdout.is_empty() && stderr.is_empty() {
-                        {typography(registry, view, "small", "No output", None, None, Some("text-background italic"))}
+                        {typography(registry, view, "small", &crate::i18n::t("codeRunner.noOutput"), None, None, Some("text-background italic"))}
                     }
                     if !tests.is_empty() {
                         div { class: "mt-3 pt-3 border-t border-border space-y-2",
@@ -188,7 +192,7 @@ impl DioxusPatternRenderer for CodeRunnerPanelRenderer {
                             ("size", Value::string("sm")),
                             ("className", Value::string("text-muted-foreground")),
                         ])}
-                        {typography(registry, view, "small", "Output", None, None, Some("text-foreground font-medium"))}
+                        {typography(registry, view, "small", &crate::i18n::t("codeRunner.output"), None, None, Some("text-foreground font-medium"))}
                         if let Some(code) = exit_code {
                             {render_pattern(registry, view, "badge", vec![
                                 ("variant", Value::string(if code == 0.0 { "success" } else { "danger" })),

@@ -59,7 +59,9 @@ fn text(content: String, variant: &str, color: &str, class: &str) -> Value {
 fn empty_state(props: &Value) -> Value {
     let mut fields = vec![(
         "title",
-        Value::string(get_string(props, "emptyTitle").unwrap_or_else(|| "No items".to_string())),
+        Value::string(
+            get_string(props, "emptyTitle").unwrap_or_else(|| crate::i18n::t("empty.noItems")),
+        ),
     )];
     if let Some(icon) = props.get("emptyIcon") {
         fields.push(("icon", icon.clone()));
@@ -217,7 +219,10 @@ fn action_menu(actions: &[Value], row: &Value) -> Value {
             ("icon", Value::string("more-horizontal")),
             ("variant", Value::string("ghost")),
             ("size", Value::string("sm")),
-            ("aria-label", Value::string("Actions")),
+            (
+                "aria-label",
+                Value::string(crate::i18n::t("common.actions")),
+            ),
         ],
     );
     pattern(
@@ -366,7 +371,10 @@ fn Grid(input: GridProps) -> Element {
         "checkbox",
         [
             ("checked", Value::Bool(all_selected)),
-            ("aria-label", Value::string("Select all")),
+            (
+                "aria-label",
+                Value::string(crate::i18n::t("aria.selectAll")),
+            ),
         ],
     );
     let toolbar_selection_event = selection_event.clone();
@@ -434,7 +442,7 @@ fn Grid(input: GridProps) -> Element {
                         let selection_sink = sink;
                         let selection_name = selection_event.clone();
                         let selection_id = id.clone();
-                        let checkbox = pattern("checkbox", [("checked", Value::Bool(is_selected)), ("aria-label", Value::string(format!("Select {}", title.clone().unwrap_or_else(|| "item".to_string()))))]);
+                        let checkbox = pattern("checkbox", [("checked", Value::Bool(is_selected)), ("aria-label", Value::string(format!("Select {}", title.clone().unwrap_or_else(|| crate::i18n::t("card.itemFallback")))))]);
                         let change: Callback<bool> = Callback::new(move |_| {
                             let next = selected_next(&row_selected.peek(), &selection_id);
                             let mut selected = row_selected;
@@ -675,7 +683,14 @@ fn render_body(
                 let badge = pattern(
                     "badge",
                     [
-                        ("label", Value::string(if truthy { "Yes" } else { "No" })),
+                        (
+                            "label",
+                            Value::string(if truthy {
+                                crate::i18n::t("common.yes")
+                            } else {
+                                crate::i18n::t("common.no")
+                            }),
+                        ),
                         (
                             "variant",
                             Value::string(if truthy { "success" } else { "neutral" }),

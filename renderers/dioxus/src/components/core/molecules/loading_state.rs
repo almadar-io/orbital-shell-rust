@@ -30,7 +30,8 @@ impl DioxusPatternRenderer for LoadingStateRenderer {
         registry: &DioxusPatternRegistry,
     ) -> Element {
         let title = get_string(props, "title").filter(|title| !title.is_empty());
-        let message = get_string(props, "message").unwrap_or_else(|| "Loading...".to_string());
+        let message =
+            get_string(props, "message").unwrap_or_else(|| crate::i18n::t("common.loading"));
         let full_page = get_bool_or(props, "fullPage", false);
         let layout = if full_page {
             "fixed inset-0 z-[1000] py-12 bg-background/80 backdrop-blur-sm animate-overlay-in"

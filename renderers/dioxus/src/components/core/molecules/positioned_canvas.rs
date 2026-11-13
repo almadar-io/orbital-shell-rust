@@ -133,7 +133,10 @@ fn Canvas(input: CanvasProps) -> Element {
         props,
         &[
             ("role", Value::string("group")),
-            ("aria-label", Value::string("Floor plan")),
+            (
+                "aria-label",
+                Value::string(crate::i18n::t("aria.positionedCanvas")),
+            ),
         ],
     );
     let plane_class = cn(&[

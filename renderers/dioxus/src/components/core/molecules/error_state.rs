@@ -22,11 +22,10 @@ impl DioxusPatternRenderer for ErrorStateRenderer {
         view: &DioxusView<'_>,
         registry: &DioxusPatternRegistry,
     ) -> Element {
-        let title =
-            get_string(props, "title").unwrap_or_else(|| "Something went wrong".to_string());
+        let title = get_string(props, "title").unwrap_or_else(|| crate::i18n::t("error.generic"));
         let message = get_string(props, "message")
             .or_else(|| get_string(props, "description"))
-            .unwrap_or_else(|| "An error occurred".to_string());
+            .unwrap_or_else(|| crate::i18n::t("error.occurred"));
         let icon = pattern(
             "icon",
             [
@@ -62,7 +61,7 @@ impl DioxusPatternRenderer for ErrorStateRenderer {
                 pattern(
                     "button",
                     [
-                        ("label", Value::string("Try again")),
+                        ("label", Value::string(crate::i18n::t("error.retry"))),
                         ("action", Value::string(event)),
                         ("actionPayload", Value::Object(ValueMap::new().into())),
                         ("variant", Value::string("secondary")),

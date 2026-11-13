@@ -52,15 +52,15 @@ fn constraint(props: &Value) -> Constraint {
 
 fn hint(constraint: &Constraint) -> String {
     match constraint {
-        Constraint::Single { required: true } => "Required, pick 1".to_string(),
-        Constraint::Single { required: false } => "Optional, pick up to 1".to_string(),
+        Constraint::Single { required: true } => crate::i18n::t("optionConstraint.requiredOne"),
+        Constraint::Single { required: false } => crate::i18n::t("optionConstraint.optionalOne"),
         Constraint::Multi { min, max } => {
             match (min.filter(|n| *n != 0), max.filter(|n| *n != 0)) {
                 (Some(min), Some(max)) if min == max => format!("Pick exactly {min}"),
                 (Some(min), Some(max)) => format!("Pick {min}-{max}"),
                 (Some(min), None) => format!("Pick at least {min}"),
                 (None, Some(max)) => format!("Pick up to {max}"),
-                (None, None) => "Optional".to_string(),
+                (None, None) => crate::i18n::t("optionConstraint.optional"),
             }
         }
     }
@@ -71,9 +71,9 @@ fn validate(selected: &[String], constraint: &Constraint) -> Option<String> {
     match constraint {
         Constraint::Single { required } => {
             if *required && selected.is_empty() {
-                Some("Pick 1 option".to_string())
+                Some(crate::i18n::t("optionConstraint.error.pickOne"))
             } else if count > 1 {
-                Some("Pick only 1 option".to_string())
+                Some(crate::i18n::t("optionConstraint.error.pickOnlyOne"))
             } else {
                 None
             }
@@ -263,7 +263,7 @@ fn OptionConstraintGroup(input: OptionConstraintGroupProps) -> Element {
                                 ("variant", Value::string("caption")),
                                 ("color", Value::string("warning")),
                                 ("className", Value::string("rounded-interactive border border-warning/40 px-1.5 py-0.5")),
-                                ("content", Value::string("Out of stock")),
+                                ("content", Value::string(crate::i18n::t("optionConstraint.outOfStock"))),
                             ])
                         });
                         rsx! {

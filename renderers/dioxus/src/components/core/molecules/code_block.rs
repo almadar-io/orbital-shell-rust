@@ -408,7 +408,7 @@ fn buffer_surface(
         .unwrap_or(0);
     let class_name = get_string_or(props, "className", "");
     let height = max_height(props);
-    let label = get_string_or(props, "title", "Code");
+    let label = get_string_or(props, "title", &crate::i18n::t("codeBlock.region"));
 
     let popover_top = popover.as_ref().map(|note| (note.from.0 + 1) as f64 * 1.6);
     let popover_left = popover.as_ref().map(|note| note.from.1);
@@ -588,7 +588,7 @@ fn Block(input: BlockProps) -> Element {
         let spec = pattern_spec(
             "loading-state",
             [
-                ("message", Value::string("Loading...")),
+                ("message", Value::string(crate::i18n::t("common.loading"))),
                 ("className", Value::string(class_name.to_string())),
             ],
         );
@@ -601,7 +601,10 @@ fn Block(input: BlockProps) -> Element {
         let spec = pattern_spec(
             "error-state",
             [
-                ("title", Value::string("Code viewer error")),
+                (
+                    "title",
+                    Value::string(crate::i18n::t("display.codeViewerError")),
+                ),
                 (
                     "message",
                     Value::string(get_string_or(error, "message", "")),
@@ -653,7 +656,9 @@ fn Block(input: BlockProps) -> Element {
         .map(|mode| mode.as_str() == "dark")
         .unwrap_or(true);
     let viewer_color = if dark { "#d4d4d4" } else { "#383a42" };
-    let region_label = title.clone().unwrap_or_else(|| "Code".to_string());
+    let region_label = title
+        .clone()
+        .unwrap_or_else(|| crate::i18n::t("codeBlock.region"));
     let height = max_height(props);
 
     if is_viewer && active_code.is_empty() && diff.is_none() {
@@ -661,8 +666,11 @@ fn Block(input: BlockProps) -> Element {
             "empty-state",
             [
                 ("icon", Value::string("code")),
-                ("title", Value::string("No code")),
-                ("description", Value::string("No code to display.")),
+                ("title", Value::string(crate::i18n::t("display.noCode"))),
+                (
+                    "description",
+                    Value::string(crate::i18n::t("codeBlock.noCode")),
+                ),
                 ("className", Value::string(class_name.to_string())),
             ],
         );
@@ -738,7 +746,10 @@ fn Block(input: BlockProps) -> Element {
                 ("variant", Value::string("ghost")),
                 ("size", Value::string("sm")),
                 ("icon", Value::string("wrap-text")),
-                ("aria-label", Value::string("Wrap lines")),
+                (
+                    "aria-label",
+                    Value::string(crate::i18n::t("aria.wrapLines")),
+                ),
                 ("aria-pressed", Value::string(wrapping.to_string())),
                 (
                     "className",
@@ -755,7 +766,7 @@ fn Block(input: BlockProps) -> Element {
                     ("variant", Value::string("ghost")),
                     ("size", Value::string("sm")),
                     ("icon", Value::string("copy")),
-                    ("aria-label", Value::string("Copy code")),
+                    ("aria-label", Value::string(crate::i18n::t("aria.copyCode"))),
                 ],
             )
         });
@@ -863,7 +874,7 @@ fn Block(input: BlockProps) -> Element {
                 ("size", Value::string("sm")),
                 ("icon", Value::string("copy")),
                 ("className", Value::string(copy_class)),
-                ("aria-label", Value::string("Copy")),
+                ("aria-label", Value::string(crate::i18n::t("common.copy"))),
             ],
         )
     });

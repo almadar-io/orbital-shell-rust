@@ -77,7 +77,10 @@ fn overflow_menu(
             ("size", Value::string("sm")),
             ("label", Value::string("")),
             ("icon", Value::string("more-horizontal")),
-            ("aria-label", Value::string("Actions")),
+            (
+                "aria-label",
+                Value::string(crate::i18n::t("common.actions")),
+            ),
         ],
     );
     let menu = pattern_spec(
@@ -163,7 +166,7 @@ impl DioxusPatternRenderer for PageHeaderRenderer {
                         ("variant", Value::string("ghost")),
                         ("label", Value::string("")),
                         ("icon", Value::string("arrow-left")),
-                        ("aria-label", Value::string("Back")),
+                        ("aria-label", Value::string(crate::i18n::t("common.back"))),
                         ("className", Value::string("mt-1 p-2 rtl:-scale-x-100")),
                         (
                             "action",

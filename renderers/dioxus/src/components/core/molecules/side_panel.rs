@@ -34,7 +34,7 @@ impl DioxusPatternRenderer for SidePanelRenderer {
         let width = get_string_or(props, "width", "w-full sm:w-96");
         let left = get_string_or(props, "position", "right") == "left";
         let close_event = get_string(props, "closeEvent");
-        let close_label = "Close panel";
+        let close_label = crate::i18n::t("aria.closePanel");
 
         let overlay = if get_bool_or(props, "showOverlay", true) {
             let mut fields = vec![(

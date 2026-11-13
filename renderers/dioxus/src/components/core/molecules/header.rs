@@ -107,9 +107,9 @@ impl DioxusPatternRenderer for HeaderRenderer {
                 ],
             );
             let label = if is_menu_open {
-                "Close menu"
+                crate::i18n::t("aria.closeMenu")
             } else {
-                "Open menu"
+                crate::i18n::t("aria.openMenu")
             };
             let mut extra = vec![("aria-label", Value::string(label))];
             if let Some(event) = on_menu_toggle.as_ref() {
@@ -187,7 +187,11 @@ impl DioxusPatternRenderer for HeaderRenderer {
         let search = show_search.then(|| {
             let mut fields = vec![(
                 "placeholder",
-                Value::string(get_string_or(props, "searchPlaceholder", "Search...")),
+                Value::string(get_string_or(
+                    props,
+                    "searchPlaceholder",
+                    &crate::i18n::t("common.search"),
+                )),
             )];
             if let Some(event) = get_string(props, "onSearch").filter(|event| !event.is_empty()) {
                 fields.push(("event", Value::string(event)));

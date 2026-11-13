@@ -375,14 +375,23 @@ fn rule_row(rule: &Rule, questions: &[Question], read_only: bool, broken: bool) 
         questions
             .iter()
             .map(|q| (q.id.to_string(), q.label.to_string()))
-            .chain([(END_OF_SURVEY.to_string(), "End of survey".to_string())]),
+            .chain([(
+                END_OF_SURVEY.to_string(),
+                crate::i18n::t("branchingLogic.endOfSurvey"),
+            )]),
     );
     let operator_options = options_value(
         [
-            ("equals", "equals"),
-            ("not-equals", "does not equal"),
-            ("contains", "contains"),
-            ("in", "is one of"),
+            ("equals", &crate::i18n::t("branchingLogic.operatorEquals")),
+            (
+                "not-equals",
+                &crate::i18n::t("branchingLogic.operatorNotEquals"),
+            ),
+            (
+                "contains",
+                &crate::i18n::t("branchingLogic.operatorContains"),
+            ),
+            ("in", &crate::i18n::t("branchingLogic.operatorIn")),
         ]
         .map(|(value, label)| (value.to_string(), label.to_string())),
     );
@@ -399,7 +408,8 @@ fn rule_row(rule: &Rule, questions: &[Question], read_only: bool, broken: bool) 
         RuleValue::One(text) => text.as_str(),
         RuleValue::Many(_) => "",
     };
-    let broken_text = "Broken reference";
+    let broken_owned = crate::i18n::t("branchingLogic.brokenReference");
+    let broken_text = broken_owned.as_str();
 
     let value_cell = if rule.operator == "in" {
         let mut cell: Vec<Value> = chips
@@ -429,7 +439,7 @@ fn rule_row(rule: &Rule, questions: &[Question], read_only: bool, broken: bool) 
                 vec![select(
                     remaining,
                     "",
-                    "Add value",
+                    &crate::i18n::t("branchingLogic.addValue"),
                     event_name("chipadd", id),
                     read_only,
                     None,
@@ -437,7 +447,7 @@ fn rule_row(rule: &Rule, questions: &[Question], read_only: bool, broken: bool) 
             ));
         } else {
             cell.push(text_input(
-                "Type value, press Enter",
+                &crate::i18n::t("branchingLogic.typeValuePressEnter"),
                 "",
                 read_only,
                 ("action", Value::string(event_name("chipadd", id))),
@@ -452,14 +462,14 @@ fn rule_row(rule: &Rule, questions: &[Question], read_only: bool, broken: bool) 
             select(
                 options_value(value_options.iter().map(|v| (v.to_string(), v.to_string()))),
                 scalar,
-                "Select value",
+                &crate::i18n::t("branchingLogic.selectValue"),
                 event_name("val", id),
                 read_only,
                 None,
             )
         } else {
             text_input(
-                "Value",
+                &crate::i18n::t("branchingLogic.value"),
                 scalar,
                 read_only,
                 ("onChange", Value::string(event_name("val", id))),
@@ -474,14 +484,14 @@ fn rule_row(rule: &Rule, questions: &[Question], read_only: bool, broken: bool) 
             None,
             Some("semibold"),
             "shrink-0",
-            Value::string("If"),
+            Value::string(crate::i18n::t("branchingLogic.if")),
         ),
         flex_box(
             "min-w-[10rem] grow basis-40",
             vec![select(
                 source_options,
                 &rule.source,
-                "Select question",
+                &crate::i18n::t("branchingLogic.selectQuestion"),
                 event_name("src", id),
                 read_only,
                 broken.then_some(broken_text),
@@ -512,7 +522,7 @@ fn rule_row(rule: &Rule, questions: &[Question], read_only: bool, broken: bool) 
                         ("className", Value::string("h-4 w-4")),
                     ],
                 ),
-                Value::string("go to"),
+                Value::string(crate::i18n::t("branchingLogic.goTo")),
             ]),
         ),
         flex_box(
@@ -520,7 +530,7 @@ fn rule_row(rule: &Rule, questions: &[Question], read_only: bool, broken: bool) 
             vec![select(
                 target_options,
                 &rule.target,
-                "Select target",
+                &crate::i18n::t("branchingLogic.selectTarget"),
                 event_name("tgt", id),
                 read_only,
                 (broken && rule.target != END_OF_SURVEY).then_some(broken_text),
@@ -535,7 +545,10 @@ fn rule_row(rule: &Rule, questions: &[Question], read_only: bool, broken: bool) 
                 ("size", Value::string("sm")),
                 ("leftIcon", Value::string("trash")),
                 ("action", Value::string(event_name("del", id))),
-                ("aria-label", Value::string("Delete rule")),
+                (
+                    "aria-label",
+                    Value::string(crate::i18n::t("branchingLogic.deleteRule")),
+                ),
             ],
         ));
     }
@@ -579,7 +592,7 @@ fn header(rule_count: usize, broken_count: usize, graph: bool) -> Value {
             None,
             Some("semibold"),
             "",
-            Value::string("Branching logic"),
+            Value::string(crate::i18n::t("branchingLogic.title")),
         ),
         badge("neutral", count_label),
     ];
@@ -596,14 +609,14 @@ fn header(rule_count: usize, broken_count: usize, graph: bool) -> Value {
                     button(
                         if graph { "ghost" } else { "primary" },
                         "pencil",
-                        "Rules",
+                        &crate::i18n::t("branchingLogic.rules"),
                         event_name("view", "edit"),
                         false,
                     ),
                     button(
                         if graph { "primary" } else { "ghost" },
                         "eye",
-                        "Logic graph",
+                        &crate::i18n::t("branchingLogic.logicGraph"),
                         event_name("view", "graph"),
                         false,
                     ),
@@ -733,7 +746,7 @@ fn logic_graph(layout: &GraphLayout) -> Element {
                 width: "{layout.width}",
                 height: "{layout.height}",
                 role: "img",
-                "aria-label": "Branching logic graph",
+                "aria-label": crate::i18n::t("branchingLogic.graphAriaLabel"),
                 style: "display: block",
                 defs {
                     marker {
@@ -859,9 +872,9 @@ fn Builder(input: BuilderProps) -> Element {
                     None,
                     "",
                     Value::string(if no_questions {
-                        "Add questions before building branching rules."
+                        crate::i18n::t("branchingLogic.emptyNoQuestions")
                     } else {
-                        "No rules yet. Add a rule to define branching logic."
+                        crate::i18n::t("branchingLogic.emptyNoRules")
                     }),
                 )]),
             ),
@@ -890,7 +903,7 @@ fn Builder(input: BuilderProps) -> Element {
         vec![button(
             "secondary",
             "plus",
-            "Add rule",
+            &crate::i18n::t("branchingLogic.addRule"),
             event_name("add", ""),
             no_questions,
         )],
@@ -899,7 +912,7 @@ fn Builder(input: BuilderProps) -> Element {
         div { class: "{class}", ..shared_root_attrs(props),
             {header_el}
             if show_graph {
-                {logic_graph(&graph_layout(&questions, &current, "End of survey"))}
+                {logic_graph(&graph_layout(&questions, &current, &crate::i18n::t("branchingLogic.endOfSurvey")))}
             } else {
                 div { class: "flex flex-col gap-2",
                     if current.is_empty() { {empty_el} }

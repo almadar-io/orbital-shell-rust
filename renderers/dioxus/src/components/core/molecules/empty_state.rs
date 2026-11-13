@@ -24,7 +24,7 @@ impl DioxusPatternRenderer for EmptyStateRenderer {
         let title = get_string(props, "title")
             .filter(|text| !text.is_empty())
             .or_else(|| get_string(props, "message").filter(|text| !text.is_empty()))
-            .unwrap_or_else(|| "No items".to_string());
+            .unwrap_or_else(|| crate::i18n::t("empty.noItems"));
         let description = get_string(props, "description").filter(|text| !text.is_empty());
         let destructive = get_bool_or(props, "destructive", false)
             || get_string_or(props, "variant", "default") == "error";

@@ -78,7 +78,7 @@ fn empty_pattern(props: &Value) -> Value {
             get_string(props, "emptyTitle")
                 .filter(|text| !text.is_empty())
                 .or_else(|| get_string(props, "emptyMessage").filter(|text| !text.is_empty()))
-                .unwrap_or_else(|| "No items".to_string()),
+                .unwrap_or_else(|| crate::i18n::t("empty.noItems")),
         ),
     )];
     if let Some(icon) = props.get("emptyIcon") {
@@ -349,7 +349,10 @@ fn DataListBody(p: DataListBodyProps) -> Element {
                                 ("size", Value::string("sm")),
                                 ("icon", Value::string("more-horizontal")),
                                 ("label", Value::string("")),
-                                ("aria-label", Value::string("Actions")),
+                                (
+                                    "aria-label",
+                                    Value::string(crate::i18n::t("common.actions")),
+                                ),
                             ],
                         ),
                     ),

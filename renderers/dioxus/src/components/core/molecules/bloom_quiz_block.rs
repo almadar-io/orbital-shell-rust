@@ -216,11 +216,11 @@ fn Bloom(input: BloomProps) -> Element {
                     }
                     revealed.set(!revealed());
                 },
-                if is_revealed { "Hide Answer" } else { "Reveal Answer" }
+                {if is_revealed { crate::i18n::t("bloomQuiz.hideAnswer") } else { crate::i18n::t("bloomQuiz.revealAnswer") }}
             }
             if is_revealed {
                 div { class: "rounded-container bg-card/80 p-3 text-sm text-foreground shadow-elevation-card surface-material border border-primary mt-3 space-y-2",
-                    div { class: "text-xs text-muted-foreground mb-1 font-medium uppercase tracking-wide", "Answer:" }
+                    div { class: "text-xs text-muted-foreground mb-1 font-medium uppercase tracking-wide", {crate::i18n::t("bloomQuiz.answer")} }
                     for part in answer_parts { {part} }
                 }
             }

@@ -74,7 +74,7 @@ fn Bar(input: BarProps) -> Element {
     let trimmed = current.trim().to_string();
     let placeholder = requested_placeholder()
         .or_else(|| get_string(props, "placeholder"))
-        .unwrap_or_else(|| "Ask the agent anything…".to_string());
+        .unwrap_or_else(|| crate::i18n::t("chatBar.askTheAgentAnything"));
 
     let key_event = send_event.clone();
     let on_keydown = move |event: KeyboardEvent| {
@@ -103,7 +103,7 @@ fn Bar(input: BarProps) -> Element {
             "secondary",
             "RETRY_GENERATION",
             "refresh-cw",
-            "Retry",
+            &crate::i18n::t("openFile.retry"),
             "rounded-none flex-shrink-0 h-auto",
         ),
         "running" => rsx! {
@@ -116,7 +116,7 @@ fn Bar(input: BarProps) -> Element {
             "primary",
             "RESUME",
             "play",
-            "Resume",
+            &crate::i18n::t("chatBar.resume"),
             "rounded-none flex-shrink-0 h-auto",
         ),
         _ => {
@@ -133,7 +133,10 @@ fn Bar(input: BarProps) -> Element {
                     ("leftIcon", Value::string("send")),
                     ("label", Value::string("")),
                     ("disabled", Value::Bool(trimmed.is_empty())),
-                    ("aria-label", Value::string("Send message")),
+                    (
+                        "aria-label",
+                        Value::string(crate::i18n::t("chatBar.sendMessage")),
+                    ),
                     (
                         "className",
                         Value::string("rounded-none flex-shrink-0 h-auto"),
@@ -172,7 +175,7 @@ fn Bar(input: BarProps) -> Element {
                         {typography(registry, &view, "caption", &label, None, None, Some("text-inherit truncate"))}
                         div {
                             class: "cursor-pointer flex items-center ml-1 hover:opacity-70",
-                            title: "Clear selection",
+                            title: crate::i18n::t("chatBar.clearSelection"),
                             onclick: move |_| {
                                 if let Some(sink) = sink {
                                     sink.call(("ELEMENT_SELECTED".to_string(), object_value([("focus", Value::Null)])));

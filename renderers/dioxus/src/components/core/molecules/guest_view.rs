@@ -4,10 +4,10 @@
 //! opener's trait, which the kernel delivers as the view's `deliver` event (`kernel/guest_controls.rs`).
 
 use crate::registry::DioxusPatternRegistry;
-use crate::renderer::{DioxusPatternRenderer, DioxusView, EventSink, SourceSinkFactory};
+use crate::renderer::{pattern_spec, DioxusPatternRenderer, DioxusView, EventSink, SourceSinkFactory};
 use dioxus::prelude::*;
 use orbital_core::client::recurse::*;
-use orbital_core::{Value, ValueMap};
+use orbital_core::{slot_role, SlotRole, Value, ValueMap};
 
 /// Dioxus renderer for the `guest-view` pattern.
 pub struct GuestViewRenderer;
@@ -59,6 +59,65 @@ fn child_painter<'a>(painter: Option<&'a str>, roots: &'a [String], index: usize
     painter.or_else(|| roots.get(index).map(String::as_str))
 }
 
+/// Whether a paint is a notification (the toast slot): an embedded trait's render there still paints in the slot.
+fn paints_in_slot(slot: &str, embedded: bool) -> bool {
+    !embedded || slot == "toast"
+}
+
+/// The classes of the contained frame the web's `UISlotRenderer` gives `slot` inside a guest view, `None` for a slot
+/// the view paints no frame for (the main slot is the view's children).
+fn slot_frame(slot: &str) -> Option<&'static str> {
+    match (slot_role(slot), slot) {
+        (SlotRole::Modal, "modal") | (SlotRole::Drawer, "drawer") => Some("contents"),
+        (SlotRole::Toast, _) => Some("absolute top-4 right-4 z-50"),
+        (SlotRole::Overlay, _) => Some("absolute inset-0 z-50 flex items-center justify-center overflow-auto bg-scrim"),
+        (SlotRole::HudTop, _) => Some("absolute top-0 left-0 right-0 z-40"),
+        (SlotRole::HudBottom, _) => Some("absolute bottom-0 left-0 right-0 z-40"),
+        _ => None,
+    }
+}
+
+/// The pattern a slot paint is drawn as: a self-overlaying modal or confirm dialog brings its own chrome, any other
+/// modal content sits in a contained modal, any other drawer content in a contained drawer.
+fn slot_spec(slot: &str, content: &Value) -> Value {
+    let kind = content.get("type").and_then(Value::as_str).unwrap_or_default();
+    let wrapped = |name: &str, fields: Vec<(&str, Value)>| {
+        let mut spec = vec![("isOpen", Value::Bool(true)), ("contained", Value::Bool(true)), ("children", Value::Array(vec![content.clone()].into()))];
+        spec.extend(fields.into_iter().filter(|(_, value)| !value.is_null()));
+        pattern_spec(name, spec)
+    };
+    let field = |name: &str| content.get(name).cloned().unwrap_or(Value::Null);
+    match slot {
+        "modal" if matches!(kind, "modal" | "confirm-dialog") => {
+            let mut spec = content.clone();
+            if let Value::Object(fields) = &mut spec {
+                fields.insert("contained".into(), Value::Bool(true));
+            }
+            spec
+        }
+        "modal" => wrapped("modal", vec![("title", field("title")), ("size", field("size"))]),
+        "drawer" => wrapped("drawer", vec![("title", field("title")), ("position", field("position")), ("width", field("width"))]),
+        _ => content.clone(),
+    }
+}
+
+/// The guest's paints outside the main slot, in the order the guest painted them: `(slot, painter, content)`.
+fn slot_paints(props: &Value) -> Vec<(String, String, Value)> {
+    props
+        .get("paints")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|paint| {
+            let slot = paint.get("slot").and_then(Value::as_str)?;
+            let painter = paint.get("trait").and_then(Value::as_str)?;
+            let content = paint.get("content").filter(|content| !content.is_null())?;
+            let embedded = matches!(paint.get("embedded"), Some(Value::Bool(true)));
+            (slot_frame(slot).is_some() && paints_in_slot(slot, embedded)).then(|| (slot.to_string(), painter.to_string(), content.clone()))
+        })
+        .collect()
+}
+
 impl DioxusPatternRenderer for GuestViewRenderer {
     fn pattern_name(&self) -> &str {
         Self::NAME
@@ -104,9 +163,20 @@ impl DioxusPatternRenderer for GuestViewRenderer {
         };
         let children = child_patterns(props, &content);
         let roots = guest_roots(props);
+        let slots = slot_paints(props);
         rsx! {
-            div { class: "bg-transparent rounded-none shadow-none w-full h-full relative overflow-auto",
-                for (index, (child, painter)) in children.iter().enumerate() { {guest.render_child(registry, child, child_painter(painter.as_deref(), &roots, index))} }
+            div { class: "bg-transparent rounded-none shadow-none w-full h-full relative", "data-guest-frame": "",
+                div { class: "w-full h-full relative overflow-auto",
+                    for (index, (child, painter)) in children.iter().enumerate() { {guest.render_child(registry, child, child_painter(painter.as_deref(), &roots, index))} }
+                }
+                for (slot, painter, painted) in slots.iter() {
+                    div { key: "{slot}:{painter}", id: "slot-{slot}", class: "ui-slot ui-slot-{slot} {slot_frame(slot).unwrap_or_default()}",
+                        {match painted {
+                            Value::String(_) => guest.for_trait_source(painter.clone()).render_node(registry, painted),
+                            _ => registry.render_spec(&slot_spec(slot, painted), None, &guest.for_trait_source(painter.clone())),
+                        }}
+                    }
+                }
             }
         }
     }
@@ -181,10 +251,12 @@ mod dom_tests {
 
     thread_local! {
         static EVENTS: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+        static DROPPED: std::cell::Cell<&'static [&'static str]> = const { std::cell::Cell::new(&[]) };
     }
 
     fn page() -> Value {
-        serde_json::from_value(serde_json::json!({
+        let dropped = DROPPED.with(std::cell::Cell::get);
+        let mut value = serde_json::json!({
             "type": "stack",
             "children": [
                 { "type": "button", "label": "Host", "aria-label": "host-button", "action": "HOST" },
@@ -193,6 +265,7 @@ mod dom_tests {
                     "paints": [
                         { "slot": "main", "trait": "Home", "orbital": "Notes", "embedded": false, "content": { "type": "button", "label": "Add", "aria-label": "guest-add", "action": "ADD" } },
                         { "slot": "modal", "trait": "Confirm", "orbital": "Notes", "embedded": false, "content": { "type": "button", "label": "Sure", "aria-label": "guest-sure", "action": "SURE" } },
+                        { "slot": "hud-top", "trait": "Hud", "orbital": "Notes", "embedded": false, "content": { "type": "button", "label": "Pause", "aria-label": "guest-pause", "action": "PAUSE" } },
                         { "slot": "toast", "trait": "Notify", "orbital": "Notes", "embedded": false, "content": { "type": "typography", "text": "Saved" } },
                         { "slot": "drawer", "trait": "Gone", "orbital": "Notes", "embedded": false, "content": null },
                         { "slot": "modal", "trait": "Inline", "orbital": "Notes", "embedded": true, "content": { "type": "typography", "text": "Inline only" } }
@@ -200,8 +273,10 @@ mod dom_tests {
                     "children": [{ "type": "button", "label": "Add", "aria-label": "guest-add", "action": "ADD" }]
                 }
             ]
-        }))
-        .unwrap()
+        });
+        let paints = value.pointer_mut("/children/1/paints").and_then(serde_json::Value::as_array_mut).unwrap();
+        paints.retain(|paint| !dropped.iter().any(|slot| paint["slot"] == *slot));
+        serde_json::from_value(value).unwrap()
     }
 
     fn app() -> Element {
@@ -287,9 +362,12 @@ mod dom_tests {
     #[test]
     fn a_click_on_a_guest_control_reaches_the_opener_scoped_to_its_painter() {
         let _guard = crate::EVENT_CONVERTER_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
-        let mut doc = document();
-        assert_eq!(click(&mut doc, "[data-guest-frame] [aria-label=\"guest-add\"]"), vec!["Home.ADD".to_string()]);
-        assert_eq!(click(&mut doc, "#slot-modal [aria-label=\"guest-sure\"]"), vec!["Confirm.SURE".to_string()], "a slot paint is scoped to the trait that painted it");
-        assert_eq!(click(&mut doc, "[aria-label=\"host-button\"]"), vec!["HOST".to_string()], "control: a host button outside the view dispatches the host's own event");
+        DROPPED.with(|dropped| dropped.set(&["modal", "hud-top"]));
+        let mut closed = document();
+        assert_eq!(click(&mut closed, "[data-guest-frame] [aria-label=\"guest-add\"]"), vec!["Home.ADD".to_string()]);
+        assert_eq!(click(&mut closed, "[aria-label=\"host-button\"]"), vec!["HOST".to_string()], "control: a host button outside the view dispatches the host's own event");
+        DROPPED.with(|dropped| dropped.set(&["modal"]));
+        let mut hud = document();
+        assert_eq!(click(&mut hud, "#slot-hud-top [aria-label=\"guest-pause\"]"), vec!["Hud.PAUSE".to_string()], "a slot paint is scoped to the trait that painted it");
     }
 }

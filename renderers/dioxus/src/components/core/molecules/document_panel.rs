@@ -67,10 +67,12 @@ fn Panel(input: PanelProps) -> Element {
     let title_commit = get_string(props, "titleCommitEvent").filter(|event| !event.is_empty());
     let edit_event = get_string(props, "editEvent").filter(|event| !event.is_empty());
     let done_event = get_string(props, "doneEvent").filter(|event| !event.is_empty());
-    let edit_label = get_string(props, "editLabel").unwrap_or_else(|| "Edit".to_string());
-    let done_label = get_string(props, "doneLabel").unwrap_or_else(|| "Done".to_string());
-    let autosave_hint =
-        get_string(props, "autosaveHint").unwrap_or_else(|| "Saves as you type".to_string());
+    let edit_label =
+        get_string(props, "editLabel").unwrap_or_else(|| crate::i18n::t("documentPanel.edit"));
+    let done_label =
+        get_string(props, "doneLabel").unwrap_or_else(|| crate::i18n::t("documentPanel.done"));
+    let autosave_hint = get_string(props, "autosaveHint")
+        .unwrap_or_else(|| crate::i18n::t("documentPanel.autosaveHint"));
     let actions = get_array(props, "actions");
     let inline_cap = get_number(props, "maxInlineActions")
         .map(|cap| cap.max(0.0) as usize)
@@ -149,7 +151,7 @@ fn Panel(input: PanelProps) -> Element {
     let view = owned.as_view();
 
     let title_shown = if title.is_empty() {
-        "Untitled".to_string()
+        crate::i18n::t("documentPanel.untitled")
     } else {
         title.clone()
     };
@@ -159,7 +161,7 @@ fn Panel(input: PanelProps) -> Element {
                 "input",
                 [
                     ("value", Value::string(draft)),
-                    ("aria-label", Value::string("Title")),
+                    ("aria-label", Value::string(crate::i18n::t("common.title"))),
                     ("className", Value::string("h-auto py-1 heading-voice text-3xl")),
                     ("onChange", Value::string(TITLE_DRAFT)),
                     ("action", Value::string(TITLE_COMMIT)),
@@ -307,7 +309,10 @@ fn Panel(input: PanelProps) -> Element {
                                 ("variant", Value::string("ghost")),
                                 ("size", Value::string("sm")),
                                 ("icon", Value::string("more-horizontal")),
-                                ("aria-label", Value::string("Actions")),
+                                (
+                                    "aria-label",
+                                    Value::string(crate::i18n::t("common.actions")),
+                                ),
                             ],
                         ),
                     ),
@@ -370,7 +375,9 @@ fn Panel(input: PanelProps) -> Element {
                 "children",
                 arr(vec![if value.is_empty() {
                     text(
-                        placeholder.as_deref().unwrap_or("Start writing…"),
+                        &placeholder
+                            .clone()
+                            .unwrap_or_else(|| crate::i18n::t("documentPanel.placeholder")),
                         "body",
                         "muted",
                         "",

@@ -1016,7 +1016,7 @@ impl DioxusPatternRenderer for ChartRenderer {
             let spec = pattern_spec(
                 "error-state",
                 [
-                    ("title", Value::string("Chart error")),
+                    ("title", Value::string(crate::i18n::t("display.chartError"))),
                     ("message", Value::string(message)),
                     ("className", Value::string(class_name)),
                 ],
@@ -1064,7 +1064,7 @@ impl DioxusPatternRenderer for ChartRenderer {
             let spec = pattern_spec(
                 "empty-state",
                 [
-                    ("title", Value::string("No data available")),
+                    ("title", Value::string(crate::i18n::t("empty.noData"))),
                     ("className", Value::string(class_name)),
                 ],
             );
@@ -1256,7 +1256,7 @@ impl DioxusPatternRenderer for ChartRenderer {
             );
             registry.render_spec(&spec, None, view)
         });
-        let aria = get_string(props, "aria-label").unwrap_or_else(|| "Chart".to_string());
+        let aria = get_string(props, "aria-label").unwrap_or_else(|| crate::i18n::t("aria.chart"));
         let paints_surface = get_string_or(props, "surface", "auto") == "auto"
             && try_consume_context::<crate::components::core::atoms::card::OnSurface>().is_none();
         let surface = if paints_surface {

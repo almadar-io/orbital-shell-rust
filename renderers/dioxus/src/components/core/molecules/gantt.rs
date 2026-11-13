@@ -162,7 +162,7 @@ impl DioxusPatternRenderer for GanttRenderer {
             let spec = pattern_spec(
                 "loading-state",
                 [
-                    ("message", Value::string("Loading...")),
+                    ("message", Value::string(crate::i18n::t("common.loading"))),
                     ("className", Value::string(class_name.clone())),
                 ],
             );
@@ -186,7 +186,7 @@ impl DioxusPatternRenderer for GanttRenderer {
             let spec = pattern_spec(
                 "empty-state",
                 [
-                    ("title", Value::string("No data available")),
+                    ("title", Value::string(crate::i18n::t("empty.noData"))),
                     ("className", Value::string(class_name.clone())),
                 ],
             );
@@ -397,7 +397,7 @@ impl DioxusPatternRenderer for GanttRenderer {
                                         "absolute top-1/2 -translate-y-1/2 h-4 rounded-sm transition-colors",
                                         bar_cls,
                                     ]);
-                                    let tip = if *reversed { Some("Ends before it starts — check its dates") } else { None };
+                                    let tip = if *reversed { Some(crate::i18n::t("gantt.datesReversed")) } else { None };
                                     let reversed_attr = if *reversed { Some("true") } else { None };
                                     let role = if click_event.is_some() { Some("button") } else { None };
                                     let tab_index = if click_event.is_some() { Some("0") } else { None };

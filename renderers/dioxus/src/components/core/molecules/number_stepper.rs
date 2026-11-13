@@ -96,7 +96,7 @@ fn Stepper(input: StepperProps) -> Element {
         );
     let label = get_string(props, "aria-label")
         .or_else(|| get_string(props, "label"))
-        .unwrap_or_else(|| "Number stepper".to_string());
+        .unwrap_or_else(|| crate::i18n::t("numberStepper.ariaLabel"));
     let button_base = "inline-flex items-center justify-center text-foreground hover:bg-muted active:bg-muted transition-colors duration-instant disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent focus:outline-none focus-visible:ring-[length:var(--focus-ring-width)] focus-visible:ring-ring focus-visible:ring-inset";
     let minus_class = format!("{button_base} rounded-l-interactive {button}");
     let plus_class = format!("{button_base} rounded-r-interactive {button}");
@@ -174,7 +174,7 @@ fn Stepper(input: StepperProps) -> Element {
                 r#type: "button",
                 class: "{minus_class}",
                 disabled: disabled || at_min,
-                "aria-label": "Decrease",
+                "aria-label": crate::i18n::t("aria.decrease"),
                 onclick: move |_| { if !at_min { emit(value - step); } },
                 onmousedown: move |_| { if !at_min && !disabled { hold(-step); } },
                 onmouseup: release,
@@ -186,7 +186,7 @@ fn Stepper(input: StepperProps) -> Element {
                 r#type: "button",
                 class: "{plus_class}",
                 disabled: disabled || at_max,
-                "aria-label": "Increase",
+                "aria-label": crate::i18n::t("aria.increase"),
                 onclick: move |_| { if !at_max { emit_plus(value + step); } },
                 onmousedown: move |_| { if !at_max && !disabled { hold_plus(step); } },
                 onmouseup: release,

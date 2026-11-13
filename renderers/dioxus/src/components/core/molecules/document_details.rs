@@ -430,7 +430,8 @@ fn Details(input: DetailsProps) -> Element {
         })
         .collect();
 
-    let heading = get_string(props, "title").unwrap_or_else(|| "Details".to_string());
+    let heading =
+        get_string(props, "title").unwrap_or_else(|| crate::i18n::t("documentDetails.title"));
     let card = pattern_spec(
         "card",
         [

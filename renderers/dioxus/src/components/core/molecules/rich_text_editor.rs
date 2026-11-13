@@ -35,20 +35,20 @@ const RICH_TEXT_CSS: &str = r#"
 "#;
 
 const TOOLBAR_BUTTONS: [(&str, &str, bool); 14] = [
-    ("bold", "Bold", false),
-    ("italic", "Italic", false),
-    ("underline", "Underline", false),
-    ("strikethrough", "Strikethrough", true),
-    ("heading-1", "Heading 1", false),
-    ("heading-2", "Heading 2", false),
-    ("heading-3", "Heading 3", true),
-    ("list", "Bullet list", false),
-    ("list-ordered", "Numbered list", true),
-    ("quote", "Quote", false),
-    ("code", "Code", false),
-    ("link", "Add link", false),
-    ("image", "Insert image", false),
-    ("minus", "Divider", false),
+    ("bold", "richTextEditor.bold", false),
+    ("italic", "richTextEditor.italic", false),
+    ("underline", "richTextEditor.underline", false),
+    ("strikethrough", "richTextEditor.strikethrough", true),
+    ("heading-1", "richTextEditor.heading1", false),
+    ("heading-2", "richTextEditor.heading2", false),
+    ("heading-3", "richTextEditor.heading3", true),
+    ("list", "richTextEditor.bulletList", false),
+    ("list-ordered", "richTextEditor.numberedList", true),
+    ("quote", "richTextEditor.quote", false),
+    ("code", "richTextEditor.code", false),
+    ("link", "richTextEditor.link", false),
+    ("image", "richTextEditor.image", false),
+    ("minus", "richTextEditor.divider", false),
 ];
 
 fn toolbar_button(icon: &str, label: &str) -> Value {
@@ -94,7 +94,11 @@ impl DioxusPatternRenderer for RichTextEditorRenderer {
             };
         }
         let show_toolbar = get_bool_or(props, "showToolbar", true);
-        let placeholder = get_string_or(props, "placeholder", "Start writing…");
+        let placeholder = get_string_or(
+            props,
+            "placeholder",
+            &crate::i18n::t("richTextEditor.placeholder"),
+        );
         let empty = value.trim().is_empty();
         let seeded = if empty {
             "<p><br></p>".to_string()
@@ -103,7 +107,9 @@ impl DioxusPatternRenderer for RichTextEditorRenderer {
         };
         let buttons: Vec<(Value, bool)> = TOOLBAR_BUTTONS
             .iter()
-            .map(|(icon, label, divider_after)| (toolbar_button(icon, label), *divider_after))
+            .map(|(icon, label, divider_after)| {
+                (toolbar_button(icon, &crate::i18n::t(label)), *divider_after)
+            })
             .collect();
         let class = format!("{BOX_ATOM_BASE} flex flex-col gap-2 {class_name}");
         rsx! {
@@ -112,7 +118,7 @@ impl DioxusPatternRenderer for RichTextEditorRenderer {
                 input { r#type: "file", accept: "image/*", class: "hidden", aria_hidden: "true", tabindex: "-1" }
                 if show_toolbar {
                     div { class: "{BOX_ATOM_BASE} sticky top-0 z-10 flex flex-wrap items-center gap-0.5 self-start rounded-container border border-border bg-background/95 px-1 py-0.5 shadow-elevation-popover",
-                        role: "toolbar", aria_label: "Formatting toolbar",
+                        role: "toolbar", aria_label: crate::i18n::t("richTextEditor.editorToolbar"),
                         for (spec, divider) in buttons.iter() {
                             {registry.render_spec(spec, None, view)}
                             if *divider { div { class: "{BOX_ATOM_BASE} mx-1 h-5 w-px bg-border" } }
@@ -120,7 +126,7 @@ impl DioxusPatternRenderer for RichTextEditorRenderer {
                     }
                 }
                 div { class: "{BOX_ATOM_BASE} almadar-rich-text max-w-none min-h-[8rem] outline-none focus-visible:ring-[length:var(--focus-ring-width)] focus-visible:ring-ring focus-visible:ring-inset data-[empty=true]:before:content-[attr(data-placeholder)] data-[empty=true]:before:text-muted-foreground/60 data-[empty=true]:before:pointer-events-none data-[empty=true]:before:absolute relative cursor-text",
-                    contenteditable: "true", role: "textbox", aria_multiline: "true", aria_label: "Rich text editor",
+                    contenteditable: "true", role: "textbox", aria_multiline: "true", aria_label: crate::i18n::t("richTextEditor.editorSurface"),
                     "data-placeholder": "{placeholder}", "data-empty": "{empty}",
                     dangerous_inner_html: "{seeded}",
                 }

@@ -259,29 +259,29 @@ fn PaginationFrame(input: PaginationProps) -> Element {
     } else {
         None
     };
-    let show_spec = small_text("Show:", "secondary", "");
+    let show_spec = small_text(&crate::i18n::t("pagination.show"), "secondary", "");
     let previous = NavButton {
         variant: "secondary",
         label: None,
         icon: Some(("icon", "chevron-left")),
-        aria_label: Some("Previous"),
+        aria_label: Some(&crate::i18n::t("pagination.previous")),
         disabled: current == 1,
         class: None,
         current: false,
         action: action.fields(current - 1),
-        child: Some(hidden_label("Previous")),
+        child: Some(hidden_label(&crate::i18n::t("pagination.previous"))),
     }
     .spec();
     let next = NavButton {
         variant: "secondary",
         label: None,
         icon: Some(("iconRight", "chevron-right")),
-        aria_label: Some("Next"),
+        aria_label: Some(&crate::i18n::t("pagination.next")),
         disabled: current == total,
         class: None,
         current: false,
         action: action.fields(current + 1),
-        child: Some(hidden_label("Next")),
+        child: Some(hidden_label(&crate::i18n::t("pagination.next"))),
     }
     .spec();
     let page_of = small_text(
@@ -316,10 +316,10 @@ fn PaginationFrame(input: PaginationProps) -> Element {
             .spec(),
         })
         .collect();
-    let go_to = small_text("Go to:", "secondary", "");
+    let go_to = small_text(&crate::i18n::t("pagination.goTo"), "secondary", "");
     let go_button = NavButton {
         variant: "ghost",
-        label: Some("Go".to_string()),
+        label: Some(crate::i18n::t("pagination.go")),
         icon: None,
         aria_label: None,
         disabled: false,
@@ -339,7 +339,7 @@ fn PaginationFrame(input: PaginationProps) -> Element {
     let attrs = shared_root_attrs(props);
 
     rsx! {
-        nav { class: "{nav_class}", aria_label: "Pagination", ..attrs,
+        nav { class: "{nav_class}", aria_label: crate::i18n::t("pagination.label"), ..attrs,
             div { class: "{row_class}", style: "height:auto",
                 div { class: "{left_class}", style: "height:auto",
                     if let Some(spec) = total_spec.as_ref() { {registry.render_spec(spec, None, &view)} }
@@ -385,7 +385,7 @@ fn PaginationFrame(input: PaginationProps) -> Element {
                         {registry.render_spec(&go_to, None, &view)}
                         input {
                             class: "block w-full rounded-interactive transition-all duration-fast border-[length:var(--border-width-thin)] border-border interactive-border h-input-md px-3 text-sm bg-card hover:bg-muted focus:bg-card text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring focus:border-ring disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-muted w-20",
-                            r#type: "number", value: "{jump}", placeholder: "Page",
+                            r#type: "number", value: "{jump}", placeholder: crate::i18n::t("pagination.jumpPlaceholder"),
                             oninput: move |event| jump.set(event.value()),
                             onkeydown: move |event| {
                                 if event.key() == Key::Enter {

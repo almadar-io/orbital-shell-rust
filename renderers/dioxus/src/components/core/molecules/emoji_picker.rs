@@ -32,7 +32,11 @@ impl DioxusPatternRenderer for EmojiPickerRenderer {
     ) -> Element {
         let __cn_merged = merge_class_name("almadar-emoji-picker", props);
         let pick_event = get_string_or(props, "pickEvent", "PICK");
-        let trigger_label = get_string_or(props, "triggerLabel", "Add emoji");
+        let trigger_label = get_string_or(
+            props,
+            "triggerLabel",
+            &crate::i18n::t("emojiPicker.addEmoji"),
+        );
         let sink = view.sink;
         const COMMON_EMOJI: [&str; 24] = [
             "😀", "😂", "😊", "😉", "😍", "🤔", "👍", "👎", "🙏", "👏", "💪", "🎉", "🔥", "❤️",

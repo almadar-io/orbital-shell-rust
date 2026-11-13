@@ -150,13 +150,13 @@ impl DioxusPatternRenderer for AvlStateMachineRenderer {
                         }
                         div { class: "flex flex-wrap gap-2",
                             if !entity_fields.is_empty() { span { class: "font-mono text-xs text-muted-foreground", "{fields_line}" } }
-                            for ev in listened.iter() { span { key: "in-{ev}", class: "inline-flex items-center gap-1 rounded-full border border-border bg-muted px-2 font-mono text-xs text-muted-foreground", "listens", span { class: "font-semibold text-foreground", "{ev}" } } }
-                            for ev in emitted.iter() { span { key: "out-{ev}", class: "inline-flex items-center gap-1 rounded-full border border-border bg-muted px-2 font-mono text-xs text-muted-foreground", "emits", span { class: "font-semibold text-foreground", "{ev}" } } }
+                            for ev in listened.iter() { span { key: "in-{ev}", class: "inline-flex items-center gap-1 rounded-full border border-border bg-muted px-2 font-mono text-xs text-muted-foreground", {crate::i18n::t("avl.listensRail")}, span { class: "font-semibold text-foreground", "{ev}" } } }
+                            for ev in emitted.iter() { span { key: "out-{ev}", class: "inline-flex items-center gap-1 rounded-full border border-border bg-muted px-2 font-mono text-xs text-muted-foreground", {crate::i18n::t("avl.emitsRail")}, span { class: "font-semibold text-foreground", "{ev}" } } }
                         }
                     }
                 }
                 if states.is_empty() {
-                    div { class: "rounded-md border border-dashed border-border p-6 text-center text-xs text-muted-foreground", "No state machine" }
+                    div { class: "rounded-md border border-dashed border-border p-6 text-center text-xs text-muted-foreground", {crate::i18n::t("avl.noStateMachine")} }
                 } else {
                     div { class: "flex flex-wrap items-center gap-4 py-2",
                         for (sn, cls, initial, visit, is_active, clickable) in state_rows.iter() {
@@ -177,7 +177,7 @@ impl DioxusPatternRenderer for AvlStateMachineRenderer {
                                             }
                                         },
                                         if let Some(v) = visit { span { class: "absolute -top-2 -left-2 flex items-center justify-center rounded-full border border-border bg-muted px-1 text-xs font-semibold text-muted-foreground", "{v + 1}" } }
-                                        if *is_active { span { class: "absolute -top-2 right-2 rounded-full bg-primary px-1.5 text-xs font-semibold text-primary-foreground", "now" } }
+                                        if *is_active { span { class: "absolute -top-2 right-2 rounded-full bg-primary px-1.5 text-xs font-semibold text-primary-foreground", {crate::i18n::t("avl.now")} } }
                                         if !initial.is_empty() { span { class: "mr-2 text-foreground", "{initial}" } }
                                         span { "{sn}" }
                                     }
@@ -214,7 +214,7 @@ impl DioxusPatternRenderer for AvlStateMachineRenderer {
                                         },
                                         span { "{from}" }
                                         span { "—" }
-                                        if guard_text.is_some() { span { aria_label: "Guard", "◇" } }
+                                        if guard_text.is_some() { span { aria_label: crate::i18n::t("avl.guard"), "◇" } }
                                         span { class: "whitespace-nowrap", "{event}" }
                                         if !effects_text.is_empty() { span { class: "text-muted-foreground", "{effects_text}" } }
                                         span { "→" }

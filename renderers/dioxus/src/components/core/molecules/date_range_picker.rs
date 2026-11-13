@@ -212,8 +212,8 @@ fn DateRangePicker(input: DateRangePickerProps) -> Element {
             (
                 "children",
                 array_value(vec![
-                    field("fromLabel", "From", FROM, from()),
-                    field("toLabel", "To", TO, to()),
+                    field("fromLabel", &crate::i18n::t("dateRange.from"), FROM, from()),
+                    field("toLabel", &crate::i18n::t("dateRange.to"), TO, to()),
                 ]),
             ),
         ],

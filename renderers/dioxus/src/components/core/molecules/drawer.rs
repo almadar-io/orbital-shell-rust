@@ -100,7 +100,11 @@ impl DioxusPatternRenderer for DrawerRenderer {
             get_bool_or(props, "closeOnOverlayClick", true),
         );
         let show_close = get_bool_or(props, "showCloseButton", true);
-        let close_label = get_string_or(props, "closeButtonLabel", "Close drawer");
+        let close_label = get_string_or(
+            props,
+            "closeButtonLabel",
+            &crate::i18n::t("aria.closeDrawer"),
+        );
         let close_button = close_button_spec(close_event.as_deref(), &close_label);
         let title = props.as_object().and_then(|fields| fields.get("title"));
         let footer = props.as_object().and_then(|fields| fields.get("footer"));

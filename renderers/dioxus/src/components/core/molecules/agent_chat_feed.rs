@@ -82,10 +82,10 @@ fn day_number(ms: i64) -> i64 {
 fn day_label(ms: i64, now_ms: i64) -> String {
     let day = day_number(ms);
     if day == day_number(now_ms) {
-        return "Today".to_string();
+        return crate::i18n::t("agentChat.today");
     }
     if day == day_number(now_ms) - 1 {
-        return "Yesterday".to_string();
+        return crate::i18n::t("agentChat.yesterday");
     }
     let (year, month, date) = civil_from_days(day);
     let name = [
@@ -244,7 +244,7 @@ fn ChatFeed(input: ChatFeedProps) -> Element {
                 {render_pattern(registry, &view, "empty-state", vec![
                     ("icon", Value::string("sparkles")),
                     ("title", Value::string(get_string_or(props, "emptyTitle", ""))),
-                    ("description", Value::string("Ask in your own words — the assistant can look things up and make changes for you.")),
+                    ("description", Value::string(crate::i18n::t("agentChat.emptyDescription"))),
                 ])}
             }
         };
@@ -286,7 +286,7 @@ fn ChatFeed(input: ChatFeedProps) -> Element {
                                         label: label.clone(),
                                         view: input.view.clone(),
                                         registry: input.registry.clone(),
-                                        switch_label: rsx! { "Raw LLM" },
+                                        switch_label: rsx! { {crate::i18n::t("agentActivity.showRawLlm")} },
                                         body: step_rows(&visible, registry, &view),
                                     }
                                 }
@@ -318,7 +318,7 @@ fn ChatFeed(input: ChatFeedProps) -> Element {
                                                         ("size", Value::string("sm")),
                                                         ("icon", Value::string("copy")),
                                                         ("label", Value::string("")),
-                                                        ("aria-label", Value::string("Copy reply")),
+                                                        ("aria-label", Value::string(crate::i18n::t("agentChat.copy"))),
                                                     ])}
                                                 }
                                             }

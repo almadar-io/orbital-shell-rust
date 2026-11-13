@@ -1671,3 +1671,58 @@ fn trait_slot_empty_remove_event_does_not_add_a_remove_control() {
     assert_eq!(count_clicks(slot), 1);
     assert_eq!(count_clicks(removable), 2);
 }
+
+fn search_input_placeholder(locale: &str) -> String {
+    use dioxus::prelude::*;
+    use dioxus_core::{AttributeValue, Mutation, Mutations};
+    use orbital_client_dioxus::{i18n, registry::default_registry, DioxusView};
+
+    fn app() -> Element {
+        let spec: orbital_core::Value = serde_json::from_str(r#"{"type":"search-input"}"#).unwrap();
+        let entities = std::collections::HashMap::new();
+        let trait_content = orbital_core::ValueMap::new();
+        let view = DioxusView {
+            trait_name: "Find",
+            orbital_name: "Main",
+            current_state: "idle",
+            entities: &entities,
+            trait_content: &trait_content,
+            source_trait: None,
+            sink: None,
+            source_sink: Callback::new(|_: Option<String>| Callback::new(|_: (String, orbital_core::Value)| {})),
+            navigate: None,
+            dock: None,
+            viewport_width: None,
+            canvas_theme: None,
+            theme_mode: None,
+            toggle_theme: None,
+        };
+        default_registry().render_spec(&spec, None, &view)
+    }
+
+    i18n::set_locale(Some(locale.to_string()), Default::default());
+    let mut dom = VirtualDom::new(app);
+    let mut initial = Mutations::default();
+    dom.rebuild(&mut initial);
+    initial
+        .edits
+        .iter()
+        .find_map(|edit| match edit {
+            Mutation::SetAttribute { name: "placeholder", value: AttributeValue::Text(text), .. } => Some(text.clone()),
+            _ => None,
+        })
+        .expect("the search input paints a placeholder")
+}
+
+#[test]
+fn a_std_pattern_paints_the_locale_catalog_text() {
+    let arabic = orbital_core::i18n::ui::ui_message("ar", "common.search");
+    assert_ne!(arabic, "Search...");
+    assert_eq!(search_input_placeholder("ar"), arabic);
+}
+
+#[test]
+fn control_en_paints_english_and_an_unshipped_locale_falls_back_to_it() {
+    assert_eq!(search_input_placeholder("en"), "Search...");
+    assert_eq!(search_input_placeholder("fr"), "Search...");
+}

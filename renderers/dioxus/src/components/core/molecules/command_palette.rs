@@ -55,8 +55,16 @@ fn Palette(input: PaletteProps) -> Element {
     let mut highlight = use_signal(|| 0usize);
 
     let open = get_bool_or(props, "open", false);
-    let placeholder = get_string_or(props, "placeholder", "Type a command...");
-    let empty_label = get_string_or(props, "emptyLabel", "No matching commands");
+    let placeholder = get_string_or(
+        props,
+        "placeholder",
+        &crate::i18n::t("commandPalette.placeholder"),
+    );
+    let empty_label = get_string_or(
+        props,
+        "emptyLabel",
+        &crate::i18n::t("commandPalette.noMatches"),
+    );
     let commands = get_array(props, "commands");
     let current_query = query();
     let filtered: Vec<Value> = commands

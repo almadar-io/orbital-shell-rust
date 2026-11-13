@@ -47,7 +47,7 @@ impl DioxusPatternRenderer for VoteStackRenderer {
         );
         let label = get_string(props, "aria-label")
             .or_else(|| get_string(props, "label"))
-            .unwrap_or_else(|| "Vote".to_string());
+            .unwrap_or_else(|| crate::i18n::t("voteStack.ariaLabel"));
         let button_base = "inline-flex items-center justify-center hover:bg-muted active:bg-muted transition-colors duration-instant disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent focus:outline-none focus-visible:ring-[length:var(--focus-ring-width)] focus-visible:ring-ring focus-visible:ring-inset";
         let up_class = format!(
             "{button_base} {} {} {button}",
@@ -116,7 +116,7 @@ impl DioxusPatternRenderer for VoteStackRenderer {
                     r#type: "button",
                     class: "{up_class}",
                     disabled: disabled,
-                    "aria-label": "Upvote",
+                    "aria-label": crate::i18n::t("aria.upvote"),
                     "aria-pressed": "{is_up}",
                     onclick: move |_| emit(if is_up { None } else { Some("up") }),
                     {registry.render_spec(&up_icon, None, view)}
@@ -126,7 +126,7 @@ impl DioxusPatternRenderer for VoteStackRenderer {
                     r#type: "button",
                     class: "{down_class}",
                     disabled: disabled,
-                    "aria-label": "Downvote",
+                    "aria-label": crate::i18n::t("aria.downvote"),
                     "aria-pressed": "{is_down}",
                     onclick: move |_| emit_down(if is_down { None } else { Some("down") }),
                     {registry.render_spec(&down_icon, None, view)}

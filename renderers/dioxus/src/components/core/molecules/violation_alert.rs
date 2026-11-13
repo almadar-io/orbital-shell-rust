@@ -78,7 +78,7 @@ impl DioxusPatternRenderer for ViolationAlertRenderer {
                     (
                         "message",
                         Value::string(
-                            get_string(props, "message").unwrap_or_else(|| "Violation".to_string()),
+                            get_string(props, "message").unwrap_or_else(|| crate::i18n::t("violationAlert.fallbackMessage")),
                         ),
                     ),
                     ("actionType", Value::string("measure")),
@@ -140,7 +140,10 @@ impl DioxusPatternRenderer for ViolationAlertRenderer {
                         ("variant", Value::string("ghost")),
                         ("size", Value::string("sm")),
                         ("icon", Value::string("arrow-right")),
-                        ("label", Value::string("Go to field")),
+                        (
+                            "label",
+                            Value::string(crate::i18n::t("violationAlert.goToField")),
+                        ),
                         ("onClick", navigate),
                         (
                             "actionPayload",
@@ -163,11 +166,17 @@ impl DioxusPatternRenderer for ViolationAlertRenderer {
         ];
         let admin_action = get_string_or(&violation, "adminAction", "");
         if !admin_action.is_empty() {
-            body.push(labelled("Admin:", &admin_action));
+            body.push(labelled(
+                &crate::i18n::t("violationAlert.adminLabel"),
+                &admin_action,
+            ));
         }
         let penalty_action = get_string_or(&violation, "penaltyAction", "");
         if !penalty_action.is_empty() {
-            body.push(labelled("Penalty:", &penalty_action));
+            body.push(labelled(
+                &crate::i18n::t("violationAlert.penaltyLabel"),
+                &penalty_action,
+            ));
         }
         fields.push((
             "children".to_string(),

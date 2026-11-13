@@ -216,7 +216,7 @@ fn Carousel(input: CarouselProps) -> Element {
         } else {
             "chevron-left"
         },
-        "Previous slide",
+        &crate::i18n::t("aria.previousSlide"),
         -1,
     );
     let next_button = arrow(
@@ -225,7 +225,7 @@ fn Carousel(input: CarouselProps) -> Element {
         } else {
             "chevron-right"
         },
-        "Next slide",
+        &crate::i18n::t("aria.nextSlide"),
         1,
     );
     let attrs: Vec<Attribute> = crate::registry::shared_root_attrs(props)
@@ -238,7 +238,7 @@ fn Carousel(input: CarouselProps) -> Element {
             class: "{root_class}",
             style: "{root_style}",
             role: "region",
-            "aria-roledescription": "carousel",
+            "aria-roledescription": crate::i18n::t("aria.carousel"),
             tabindex: "0",
             onmounted: move |event| {
                 let element = event.data();
@@ -301,7 +301,7 @@ fn Carousel(input: CarouselProps) -> Element {
             }
             if show_dots && total > 1 {
                 div { class: "{BOX_ATOM_BASE} absolute bottom-3 left-0 right-0 z-10",
-                    div { class: "flex flex-row gap-1 items-center justify-center", role: "tablist", "aria-label": "Slides",
+                    div { class: "flex flex-row gap-1 items-center justify-center", role: "tablist", "aria-label": crate::i18n::t("aria.carouselSlides"),
                         for index in 0..total {
                             {
                                 let is_active = index as i64 == current;

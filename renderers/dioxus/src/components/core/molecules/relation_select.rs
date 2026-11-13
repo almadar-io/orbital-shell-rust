@@ -79,11 +79,12 @@ fn RelationSelect(input: RelationSelectProps) -> Element {
     let clearable = get_bool_or(props, "clearable", true);
     let error = get_string(props, "error").filter(|text| !text.is_empty());
     let on_change = get_string(props, "onChange").filter(|name| !name.is_empty());
-    let placeholder = get_string(props, "placeholder").unwrap_or_else(|| "Select...".to_string());
+    let placeholder = get_string(props, "placeholder")
+        .unwrap_or_else(|| crate::i18n::t("relationSelect.selectPlaceholder"));
     let search_placeholder =
         get_string(props, "searchPlaceholder").unwrap_or_else(|| "Search".to_string());
     let empty_message =
-        get_string(props, "emptyMessage").unwrap_or_else(|| "No options found".to_string());
+        get_string(props, "emptyMessage").unwrap_or_else(|| crate::i18n::t("empty.noOptionsFound"));
     let mut open = use_signal(|| false);
     let mut query = use_signal(String::new);
     let sink = view.sink;
@@ -143,7 +144,7 @@ fn RelationSelect(input: RelationSelectProps) -> Element {
 
     let is_open = open();
     let trigger_label = if is_loading {
-        "Loading...".to_string()
+        crate::i18n::t("common.loading")
     } else if let Some(option) = &selected {
         option.label.clone()
     } else {
@@ -185,7 +186,7 @@ fn RelationSelect(input: RelationSelectProps) -> Element {
                 ("leftIcon", Value::string("x")),
                 ("label", Value::string("")),
                 ("action", Value::string(CLEAR)),
-                ("aria-label", Value::string("Clear")),
+                ("aria-label", Value::string(crate::i18n::t("common.clear"))),
                 (
                     "className",
                     Value::string(

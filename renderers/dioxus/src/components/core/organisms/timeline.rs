@@ -219,7 +219,10 @@ impl DioxusPatternRenderer for TimelineRenderer {
             let spec = wrap(node(
                 "error-state",
                 vec![
-                    ("title", Value::string("Timeline error")),
+                    (
+                        "title",
+                        Value::string(crate::i18n::t("display.timelineError")),
+                    ),
                     ("message", Value::string(message)),
                     ("className", Value::string(class_name)),
                 ],
@@ -233,10 +236,10 @@ impl DioxusPatternRenderer for TimelineRenderer {
             let spec = wrap(node(
                 "empty-state",
                 vec![
-                    ("title", Value::string("No events")),
+                    ("title", Value::string(crate::i18n::t("display.noEvents"))),
                     (
                         "description",
-                        Value::string("No timeline events to display."),
+                        Value::string(crate::i18n::t("display.noTimelineEvents")),
                     ),
                     ("className", Value::string(class_name)),
                 ],

@@ -93,7 +93,7 @@ fn Fab(input: FabProps) -> Element {
         let label = get_string(props, "label").filter(|label| !label.is_empty());
         let aria = get_string(props, "aria-label")
             .or(label)
-            .unwrap_or_else(|| "Action".to_string());
+            .unwrap_or_else(|| crate::i18n::t("fab.action"));
         let mut spec = vec![
             (
                 "variant",
@@ -131,9 +131,9 @@ fn Fab(input: FabProps) -> Element {
     );
     let main_aria = get_string(props, "aria-label").unwrap_or_else(|| {
         if is_expanded {
-            "Close actions"
+            crate::i18n::t("fab.closeActions")
         } else {
-            "Open actions"
+            crate::i18n::t("fab.openActions")
         }
         .to_string()
     });
@@ -146,7 +146,11 @@ fn Fab(input: FabProps) -> Element {
             ("aria-expanded", Value::Bool(is_expanded)),
             (
                 "children",
-                sr_only(if is_expanded { "Close" } else { "Open" }),
+                sr_only(&if is_expanded {
+                    crate::i18n::t("common.close")
+                } else {
+                    crate::i18n::t("common.open")
+                }),
             ),
             ("action", Value::string("__local_fab_main")),
         ],

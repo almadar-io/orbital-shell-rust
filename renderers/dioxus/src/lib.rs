@@ -17,6 +17,7 @@ pub mod audio;
 // `pub mod components;` allow in `orbital-client/src/rendering/mod.rs`.
 #[allow(dead_code, unused_variables, unused_imports)]
 pub mod components;
+pub mod i18n;
 pub mod registry;
 pub mod renderer;
 #[cfg(feature = "native")]

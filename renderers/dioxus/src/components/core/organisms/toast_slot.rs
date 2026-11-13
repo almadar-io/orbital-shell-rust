@@ -55,7 +55,7 @@ fn ToastSlot(input: ToastSlotProps) -> Element {
             ("variant", Value::string(variant)),
             (
                 "message",
-                Value::string(message.unwrap_or_else(|| "Notification".to_string())),
+                Value::string(message.unwrap_or_else(|| crate::i18n::t("toast.notification"))),
             ),
             (
                 "duration",

@@ -43,7 +43,7 @@ impl DioxusPatternRenderer for ErrorBoundaryRenderer {
                         return rsx! { div { class: "{class}", {node} } };
                     }
                     let message = errors.error().map(|error| error.to_string()).unwrap_or_default();
-                    let title = "Something went wrong";
+                    let title = crate::i18n::t("error.somethingWentWrong");
                     rsx! { div { class: "{class}", role: "alert",
                         div { class: "almadar-error-state__icon", "⚠" }
                         div { class: "almadar-error-state__title", "{title}" }

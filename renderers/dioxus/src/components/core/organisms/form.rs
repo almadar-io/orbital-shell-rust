@@ -616,7 +616,7 @@ fn control_node(
                 name,
             ));
             let mut url_field = field.clone();
-            url_field.placeholder = Some("…or paste an image address".to_string());
+            url_field.placeholder = Some(crate::i18n::t("form.imageUrlFallback"));
             children.push(input_node(
                 "url",
                 dom_id,
@@ -965,7 +965,7 @@ fn FormBody(body: FormBodyProps) -> Element {
     let mut leading: Vec<Value> = Vec::new();
     if let Some(error) = props.get("error").filter(|error| truthy(error)) {
         let message = nonempty(get_string(error, "message"))
-            .unwrap_or_else(|| "An error occurred".to_string());
+            .unwrap_or_else(|| crate::i18n::t("error.occurred"));
         leading.push(node(
             "alert",
             vec![
@@ -1013,7 +1013,14 @@ fn FormBody(body: FormBodyProps) -> Element {
                 "button",
                 vec![
                     ("variant", text("secondary")),
-                    ("label", text(get_string_or(props, "cancelLabel", "Cancel"))),
+                    (
+                        "label",
+                        text(get_string_or(
+                            props,
+                            "cancelLabel",
+                            &crate::i18n::t("common.cancel"),
+                        )),
+                    ),
                     ("disabled", Value::Bool(is_loading)),
                     ("action", text(CANCEL)),
                 ],
@@ -1024,7 +1031,14 @@ fn FormBody(body: FormBodyProps) -> Element {
                 "button",
                 vec![
                     ("variant", text("primary")),
-                    ("label", text(get_string_or(props, "submitLabel", "Save"))),
+                    (
+                        "label",
+                        text(get_string_or(
+                            props,
+                            "submitLabel",
+                            &crate::i18n::t("common.save"),
+                        )),
+                    ),
                     ("isLoading", Value::Bool(is_loading)),
                     ("action", text(SUBMIT)),
                 ],

@@ -33,7 +33,7 @@ impl DioxusPatternRenderer for JazariStateMachineRenderer {
         let __cn_merged = merge_class_name("almadar-jazari-state-machine", props);
         let is_loading = get_bool_or(props, "isLoading", false);
         if is_loading {
-            return rsx! { div { class: "almadar-loading-state", span { class: "almadar-spinner" } span { "Loading state machine…" } } };
+            return rsx! { div { class: "almadar-loading-state", span { class: "almadar-spinner" } span { {crate::i18n::t("stateMachine.loading")} } } };
         }
         let error = get_string(props, "error");
         if let Some(err) = error {

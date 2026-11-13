@@ -753,10 +753,10 @@ fn Panel(input: PanelProps) -> Element {
         let spec = pattern_spec(
             "empty-state",
             [
-                ("title", Value::string("Not found")),
+                ("title", Value::string(crate::i18n::t("error.notFound"))),
                 (
                     "description",
-                    Value::string("The requested item could not be found."),
+                    Value::string(crate::i18n::t("display.itemNotFound")),
                 ),
                 ("className", Value::string(class_name.as_str())),
             ],
@@ -953,7 +953,10 @@ fn Panel(input: PanelProps) -> Element {
                             ("variant", Value::string("ghost")),
                             ("size", Value::string("sm")),
                             ("icon", Value::string("more-horizontal")),
-                            ("aria-label", Value::string("Actions")),
+                            (
+                                "aria-label",
+                                Value::string(crate::i18n::t("common.actions")),
+                            ),
                         ],
                     ),
                 ),

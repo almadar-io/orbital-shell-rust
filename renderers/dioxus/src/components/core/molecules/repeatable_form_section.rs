@@ -102,8 +102,8 @@ fn RepeatableBody(body: RepeatableBodyProps) -> Element {
     let min_items = get_number_or(props, "minItems", 0.0) as usize;
     let max_items = get_number(props, "maxItems").map(|max| max as usize);
     let allow_reorder = get_bool_or(props, "allowReorder", false);
-    let add_label = get_string_or(props, "addLabel", "Add");
-    let empty_message = get_string_or(props, "emptyMessage", "No items added yet");
+    let add_label = get_string_or(props, "addLabel", &crate::i18n::t("common.add"));
+    let empty_message = get_string_or(props, "emptyMessage", &crate::i18n::t("empty.noItemsAdded"));
     let read_only = get_bool_or(props, "readOnly", false);
     let track_state = get_bool_or(props, "trackAddedInState", false);
     let current_state = get_string(props, "currentState").filter(|state| !state.is_empty());
@@ -204,7 +204,7 @@ fn RepeatableBody(body: RepeatableBodyProps) -> Element {
                                                 div { class: "{ROW_SM_CENTER}", style: "height:auto",
                                                     if let Some(state) = &added_state {
                                                         div { class: "flex flex-row gap-1 items-center justify-start", style: "height:auto",
-                                                            {registry.render_spec(&typography("caption", Some("muted"), None, "Added in:"), None, &control_view)}
+                                                            {registry.render_spec(&typography("caption", Some("muted"), None, &crate::i18n::t("repeatable.addedIn")), None, &control_view)}
                                                             {registry.render_spec(&typography("caption", None, Some("semibold"), state), None, &control_view)}
                                                         }
                                                     }
@@ -217,15 +217,15 @@ fn RepeatableBody(body: RepeatableBodyProps) -> Element {
                                         div { class: "flex flex-row gap-2 items-start justify-start", style: "height:auto",
                                             if can_reorder {
                                                 div { class: "flex flex-col gap-0 items-stretch justify-start", style: "height:auto",
-                                                    {registry.render_spec(&button("ghost", "", "chevron-up", MOVE, up, vec![("aria-label", text("Move up")), ("disabled", Value::Bool(index == 0))]), None, &control_view)}
-                                                    {registry.render_spec(&button("ghost", "", "chevron-down", MOVE, down, vec![("aria-label", text("Move down")), ("disabled", Value::Bool(index + 1 == count))]), None, &control_view)}
+                                                    {registry.render_spec(&button("ghost", "", "chevron-up", MOVE, up, vec![("aria-label", text(crate::i18n::t("common.moveUp"))), ("disabled", Value::Bool(index == 0))]), None, &control_view)}
+                                                    {registry.render_spec(&button("ghost", "", "chevron-down", MOVE, down, vec![("aria-label", text(crate::i18n::t("common.moveDown"))), ("disabled", Value::Bool(index + 1 == count))]), None, &control_view)}
                                                 }
                                             }
                                             div { class: "bg-transparent rounded-none shadow-none flex-1",
                                                 if let Some(child) = &rendered { {registry.render_spec(child, None, &view)} }
                                             }
                                             if can_remove {
-                                                {registry.render_spec(&button("ghost", "", "trash-2", REMOVE, remove_payload, vec![("aria-label", text("Remove")), ("className", text("text-foreground hover:bg-error/10"))]), None, &control_view)}
+                                                {registry.render_spec(&button("ghost", "", "trash-2", REMOVE, remove_payload, vec![("aria-label", text(crate::i18n::t("common.remove"))), ("className", text("text-foreground hover:bg-error/10"))]), None, &control_view)}
                                             }
                                         }
                                     }
@@ -236,7 +236,7 @@ fn RepeatableBody(body: RepeatableBodyProps) -> Element {
                 }
             }
             if count < min_items {
-                {registry.render_spec(&typography("caption", Some("warning"), None, &if min_items == 1 { "At least 1 item required".to_string() } else { format!("At least {min_items} items required") }), None, &control_view)}
+                {registry.render_spec(&typography("caption", Some("warning"), None, &if min_items == 1 { crate::i18n::t("repeatable.minItemsOne") } else { format!("At least {min_items} items required") }), None, &control_view)}
             }
         }
     }

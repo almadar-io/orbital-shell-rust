@@ -183,7 +183,10 @@ impl DioxusPatternRenderer for DocSidebarRenderer {
             props,
             &[
                 ("role", Value::string("navigation")),
-                ("aria-label", Value::string("Documentation sidebar")),
+                (
+                    "aria-label",
+                    Value::string(crate::i18n::t("aria.docsSidebar")),
+                ),
             ],
         );
         let owned = view.to_owned();

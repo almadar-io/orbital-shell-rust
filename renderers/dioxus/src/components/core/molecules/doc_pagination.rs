@@ -138,7 +138,8 @@ impl DioxusPatternRenderer for DocPaginationRenderer {
             }
             None => spacer(),
         };
-        let mut fields: Vec<(String, Value)> = nav_landmark(props, "Page navigation");
+        let mut fields: Vec<(String, Value)> =
+            nav_landmark(props, &crate::i18n::t("aria.pageNavigation"));
         fields.push(("justify".to_string(), Value::string("between")));
         fields.push(("align".to_string(), Value::string("stretch")));
         fields.push(("gap".to_string(), Value::string("md")));

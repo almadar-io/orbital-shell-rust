@@ -527,11 +527,11 @@ fn rich_card(sub: &Value) -> Value {
     let items = subagent_messages_to_items(&get_array(sub, "messages"));
     let tail = if items.is_empty() {
         let text = if status == "complete" {
-            "No conversation log"
+            crate::i18n::t("subagentTrace.noConversationLog")
         } else {
-            "Waiting for process data…"
+            crate::i18n::t("subagentTrace.waitingForProcessData")
         };
-        tx("caption", Some("muted"), "italic text-[10px]", text)
+        tx("caption", Some("muted"), "italic text-[10px]", &text)
     } else {
         bx(
             &format!("max-h-64 overflow-y-auto border-t border-[var(--color-border)]"),
@@ -634,7 +634,8 @@ fn chat_row(message: &Value, index: usize) -> Value {
     let role = get_string_or(message, "role", "");
     let content = get_string_or(message, "content", "");
     if role == "tool" {
-        let tool_name = get_string(message, "toolName").unwrap_or_else(|| "tool".to_string());
+        let tool_name = get_string(message, "toolName")
+            .unwrap_or_else(|| crate::i18n::t("subagentTrace.role.tool"));
         let suffix = get_string(message, "toolCallId")
             .filter(|id| !id.is_empty())
             .map(|id| format!(" {}", short_id(&id)))
@@ -676,7 +677,7 @@ fn chat_row(message: &Value, index: usize) -> Value {
     if let Some(reasoning) = reasoning {
         let items = vec![object_value([
             ("id", Value::string(format!("reasoning-{index}"))),
-            ("title", s("Reasoning")),
+            ("title", s(&crate::i18n::t("subagentTrace.reasoning"))),
             ("content", markdown(&reasoning)),
         ])];
         children.push(pattern_spec("accordion", [("items", array_value(items))]));
@@ -721,13 +722,23 @@ fn coordinator_card(activities: &[Value]) -> Option<Value> {
         "items-center mb-2",
         vec![
             icon("compass", "xs", ""),
-            tx("caption", None, "font-semibold text-[11px]", "Coordinator"),
+            tx(
+                "caption",
+                None,
+                "font-semibold text-[11px]",
+                &crate::i18n::t("subagentTrace.coordinator"),
+            ),
         ],
     )];
     if let Some(decision) = decision {
         let organism = get_string_or(decision, "organism", "");
         let mut row = vec![
-            tx("caption", Some("muted"), label_class, "Organism"),
+            tx(
+                "caption",
+                Some("muted"),
+                label_class,
+                &crate::i18n::t("subagentTrace.organism"),
+            ),
             badge("default", "text-[10px]", &organism),
         ];
         if let Some(prior) = get_string(decision, "priorOrganism")
@@ -887,15 +898,15 @@ fn timeline_label(item: &Timeline) -> String {
         Timeline::Message(m, _) => {
             let role = get_string_or(m, "role", "");
             if role == "tool" {
-                "tool".to_string()
+                crate::i18n::t("subagentTrace.role.tool")
             } else if get_string(m, "reasoningContent").is_some_and(|text| !text.is_empty()) {
-                "thinking".to_string()
+                crate::i18n::t("subagentTrace.thinking")
             } else {
                 role
             }
         }
         Timeline::Activity(a) => activity_type_label(&get_string_or(a, "type", "")),
-        Timeline::Subagent(_) => "subagent".to_string(),
+        Timeline::Subagent(_) => crate::i18n::t("subagentTrace.subagent"),
     }
 }
 
@@ -904,7 +915,8 @@ fn timeline_preview(item: &Timeline) -> String {
         Timeline::Message(m, _) => {
             let content = get_string_or(m, "content", "");
             if get_string_or(m, "role", "") == "tool" {
-                let name = get_string(m, "toolName").unwrap_or_else(|| "tool".to_string());
+                let name = get_string(m, "toolName")
+                    .unwrap_or_else(|| crate::i18n::t("subagentTrace.role.tool"));
                 let id = get_string(m, "toolCallId")
                     .map(|id| short_id(&id))
                     .unwrap_or_default();
@@ -984,7 +996,12 @@ fn detail(item: &Timeline) -> Value {
                 children.push(bx(
                     "",
                     vec![
-                        tx("caption", Some("muted"), "mb-1", "Reasoning"),
+                        tx(
+                            "caption",
+                            Some("muted"),
+                            "mb-1",
+                            &crate::i18n::t("subagentTrace.reasoning"),
+                        ),
                         markdown(&reasoning),
                     ],
                 ));
@@ -997,7 +1014,15 @@ fn detail(item: &Timeline) -> Value {
                 };
                 children.push(bx(
                     "",
-                    vec![tx("caption", Some("muted"), "mb-1", "Content"), body],
+                    vec![
+                        tx(
+                            "caption",
+                            Some("muted"),
+                            "mb-1",
+                            &crate::i18n::t("subagentTrace.content"),
+                        ),
+                        body,
+                    ],
                 ));
             }
             let calls = get_array(m, "toolCalls");
@@ -1005,7 +1030,12 @@ fn detail(item: &Timeline) -> Value {
                 children.push(bx(
                     "",
                     vec![
-                        tx("caption", Some("muted"), "mb-1", "Tool calls"),
+                        tx(
+                            "caption",
+                            Some("muted"),
+                            "mb-1",
+                            &crate::i18n::t("subagentTrace.toolCalls"),
+                        ),
                         tool_call_items(&calls, "tc-detail"),
                     ],
                 ));
@@ -1038,7 +1068,11 @@ fn detail(item: &Timeline) -> Value {
                                 badge(
                                     if ok { "default" } else { "warning" },
                                     "text-[10px]",
-                                    if ok { "success" } else { "fail" },
+                                    &if ok {
+                                        crate::i18n::t("subagentTrace.success")
+                                    } else {
+                                        crate::i18n::t("subagentTrace.fail")
+                                    },
                                 ),
                                 time,
                             ),
@@ -1067,7 +1101,14 @@ fn detail(item: &Timeline) -> Value {
                     "md",
                     "",
                     vec![
-                        detail_head(badge("warning", "text-[10px]", "error"), time),
+                        detail_head(
+                            badge(
+                                "warning",
+                                "text-[10px]",
+                                &crate::i18n::t("subagentTrace.badgeError"),
+                            ),
+                            time,
+                        ),
                         tx(
                             "body2",
                             None,
@@ -1080,7 +1121,14 @@ fn detail(item: &Timeline) -> Value {
                     "md",
                     "",
                     vec![
-                        detail_head(badge("neutral", "text-[10px]", "file"), time),
+                        detail_head(
+                            badge(
+                                "neutral",
+                                "text-[10px]",
+                                &crate::i18n::t("subagentTrace.badgeFile"),
+                            ),
+                            time,
+                        ),
                         tx(
                             "body2",
                             None,
@@ -1097,7 +1145,14 @@ fn detail(item: &Timeline) -> Value {
                     "md",
                     "",
                     vec![
-                        detail_head(badge("neutral", "text-[10px]", "diff"), time),
+                        detail_head(
+                            badge(
+                                "neutral",
+                                "text-[10px]",
+                                &crate::i18n::t("subagentTrace.badgeDiff"),
+                            ),
+                            time,
+                        ),
                         tx("body2", None, "", &get_string_or(a, "filePath", "")),
                     ],
                 ),
@@ -1180,7 +1235,12 @@ fn Panel(input: PanelProps) -> Element {
         let items = timeline_items(&messages, &activities, &subagents);
         let mut children = vec![panel_header(
             "sm",
-            tx("caption", None, "font-semibold flex-1", "Trace"),
+            tx(
+                "caption",
+                None,
+                "font-semibold flex-1",
+                &crate::i18n::t("subagentTrace.trace"),
+            ),
             close,
         )];
         if items.is_empty() {
@@ -1190,7 +1250,7 @@ fn Panel(input: PanelProps) -> Element {
                     "body2",
                     Some("muted"),
                     "text-center",
-                    "No agent activity yet",
+                    &crate::i18n::t("subagentTrace.noAgentActivity"),
                 )],
             ));
         } else {
@@ -1299,17 +1359,26 @@ fn Panel(input: PanelProps) -> Element {
             format!("absolute inset-x-3 bottom-3 sm:inset-x-auto sm:top-3 sm:right-3 sm:bottom-3 w-full sm:w-80 max-w-[calc(100vw-1.5rem)] max-h-[60vh] sm:max-h-none bg-[var(--color-card)] border border-[var(--color-border)] rounded-container shadow-elevation-popover surface-material overflow-hidden flex flex-col {class_name}")
         };
         let style = Some(object_value([("zIndex", s("20"))]));
-        let density = if rich { "Detailed" } else { "Compact" };
+        let density = if rich {
+            crate::i18n::t("subagentTrace.densityRich")
+        } else {
+            crate::i18n::t("subagentTrace.densityCompact")
+        };
         let has_coordinator = !messages.is_empty() || !activities.is_empty();
         let children = if filtered.is_empty() && !has_coordinator {
             let empty = match &focused {
                 Some(name) => format!("No subagents for {name}"),
-                None => "No subagents active".to_string(),
+                None => crate::i18n::t("subagentTrace.noSubagentsActive"),
             };
             vec![
                 panel_header(
                     "sm",
-                    tx("caption", None, "font-semibold flex-1", "Subagents"),
+                    tx(
+                        "caption",
+                        None,
+                        "font-semibold flex-1",
+                        &crate::i18n::t("subagentTrace.subagents"),
+                    ),
                     close,
                 ),
                 bx(
@@ -1380,7 +1449,12 @@ fn Panel(input: PanelProps) -> Element {
                     &format!("items-center px-3 py-1.5 bg-[var(--color-card)] {BORDER_B}"),
                     vec![
                         dot(""),
-                        tx("caption", None, "font-semibold text-[11px]", "Coordinator"),
+                        tx(
+                            "caption",
+                            None,
+                            "font-semibold text-[11px]",
+                            &crate::i18n::t("subagentTrace.coordinator"),
+                        ),
                         tx("caption", Some("muted"), "text-[10px]", &count),
                     ],
                 )
@@ -1415,7 +1489,7 @@ fn Panel(input: PanelProps) -> Element {
                 let mut groups: Vec<Vec<Value>> = Vec::new();
                 for sub in &filtered {
                     let key = get_string(sub, "orbitalName")
-                        .unwrap_or_else(|| "(unattached)".to_string());
+                        .unwrap_or_else(|| crate::i18n::t("subagentTrace.unattached"));
                     match order.iter().position(|existing| *existing == key) {
                         Some(index) => groups[index].push(sub.clone()),
                         None => {

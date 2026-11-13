@@ -35,7 +35,8 @@ impl DioxusPatternRenderer for FeatureCardRenderer {
         let description = get_string_or(props, "description", "");
         let glyph = get_string(props, "icon").map(|n| icon_name_to_glyph(n.as_str()));
         let href = get_string(props, "href").filter(|h| !h.is_empty());
-        let link_label = get_string_or(props, "linkLabel", "Learn more");
+        let link_label =
+            get_string_or(props, "linkLabel", &crate::i18n::t("featureCard.learnMore"));
         let interactive = get_string_or(props, "variant", "bordered") == "interactive";
         let size = get_string_or(props, "size", "md");
         let variant_cls = match get_string_or(props, "variant", "bordered").as_str() {

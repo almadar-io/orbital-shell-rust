@@ -101,7 +101,10 @@ impl DioxusPatternRenderer for AlertRenderer {
             ("size", Value::string("sm")),
             ("icon", Value::string("x")),
             ("className", Value::string("flex-shrink-0")),
-            ("aria-label", Value::string("Dismiss alert")),
+            (
+                "aria-label",
+                Value::string(crate::i18n::t("aria.closeAlert")),
+            ),
         ];
         if let Some(event) = dismiss_event {
             dismiss_fields.push(("action", Value::string(event)));

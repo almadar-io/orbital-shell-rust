@@ -293,7 +293,13 @@ pub(crate) fn format_display_value(value: &Value, format: Option<&str>) -> Strin
     };
     match value {
         Value::Null => return String::new(),
-        Value::Bool(flag) => return if *flag { "Yes" } else { "No" }.to_string(),
+        Value::Bool(flag) => {
+            return if *flag {
+                crate::i18n::t("common.yes")
+            } else {
+                crate::i18n::t("common.no")
+            }
+        }
         _ => {}
     }
     let text = plain_text(value);
@@ -336,7 +342,11 @@ pub(crate) fn format_display_value(value: &Value, format: Option<&str>) -> Strin
         },
         Some("boolean") => {
             let falsy = text == "false" || text == "0";
-            if falsy { "No" } else { "Yes" }.to_string()
+            if falsy {
+                crate::i18n::t("common.no")
+            } else {
+                crate::i18n::t("common.yes")
+            }
         }
         _ => text,
     }
@@ -466,7 +476,13 @@ fn clock_label(hour: i64, minute: i64) -> String {
 pub(crate) fn format_field_value(value: &Value, format: Option<&str>) -> String {
     match value {
         Value::Null => return String::new(),
-        Value::Bool(flag) => return if *flag { "Yes" } else { "No" }.to_string(),
+        Value::Bool(flag) => {
+            return if *flag {
+                crate::i18n::t("common.yes")
+            } else {
+                crate::i18n::t("common.no")
+            }
+        }
         _ => {}
     }
     let raw = js_string(value);

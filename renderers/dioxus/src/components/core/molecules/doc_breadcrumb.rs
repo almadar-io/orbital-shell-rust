@@ -84,7 +84,12 @@ impl DioxusPatternRenderer for DocBreadcrumbRenderer {
             ],
         );
         let class = cn(&["w-full", &get_string_or(props, "className", "")]);
-        let spec = layout_box_spec(&class, None, nav_landmark(props, "Breadcrumb"), vec![row]);
+        let spec = layout_box_spec(
+            &class,
+            None,
+            nav_landmark(props, &crate::i18n::t("aria.breadcrumb")),
+            vec![row],
+        );
         registry.render_spec(&spec, None, view)
     }
 }
