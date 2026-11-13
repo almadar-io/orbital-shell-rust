@@ -330,7 +330,19 @@ impl orbital_core::runtime::kernel::guest_hosting::GuestHost for GuestOf {
     }
 
     fn request(&self, payload: &Value, options: &ValueMap) -> Result<Value, orbital_core::effects::executor::SubstrateFailure> {
-        self.0.request_answer(payload, options).map_err(|(message, code, status)| orbital_core::effects::executor::SubstrateFailure {
+        let answered = self.0.request_answer(payload, options);
+        if tracing::enabled!(target: orbital_core::logging::ns::SERVER_DATA, tracing::Level::DEBUG) {
+            let option = |key: &str| options.get(key).and_then(Value::as_str).unwrap_or_default().to_string();
+            let outcome = match &answered {
+                Ok(value) => {
+                    let json = orbital_core::json_value::value_to_json(value);
+                    format!("success={} transitioned={} error={} rejections={}", json["success"], json["transitioned"], json["error"], json["rejections"])
+                }
+                Err((message, code, status)) => format!("refused {code} {status}: {message}"),
+            };
+            tracing::debug!(target: orbital_core::logging::ns::SERVER_DATA, orbital = %option("orbital"), target_trait = %option("targetTrait"), event = %option("event"), client = %option("clientId"), %outcome, "guest leg request answered");
+        }
+        answered.map_err(|(message, code, status)| orbital_core::effects::executor::SubstrateFailure {
             errors: vec![serde_json::from_value(serde_json::json!({ "code": code, "message": message, "status": status })).unwrap_or(Value::Null)],
             message,
         })
@@ -2772,6 +2784,39 @@ mod tests {
         let leg = dispatch_request(&runtime, serde_json::json!({ "wire": true, "orbital": "Gates", "targetTrait": "Gate", "event": "NEXT", "clientId": "c1",
             "traits": [{ "trait": "Gate", "from": "open", "event": "NEXT" }], "entityByTrait": { "Gate": { "queued": 2 } } })).unwrap();
         assert_eq!(leg["transitioned"], true, "{leg}");
+    }
+
+    /// A keyed `call-service` to a service no provider answers fails on its failure route; it never leaves the asking
+    /// trait waiting (the Studio team page waited forever on `registry handles`).
+    #[test]
+    fn a_keyed_call_to_a_service_with_no_provider_answers_its_failure_route() {
+        let runtime = Host::new(Arc::new(DriverAdapter::memory())).shared();
+        let schema = serde_json::from_value(serde_json::json!({
+            "name": "Calls", "typeContractVersion": 1,
+            "orbitals": [{ "name": "Ui",
+                "entity": { "name": "Run", "persistence": "runtime", "fields": [{ "name": "id", "type": "string" }, { "name": "seen", "type": "string" }] },
+                "traits": [{ "name": "Panel", "linkedEntity": "Run",
+                    "stateMachine": { "states": [{ "name": "loading", "isInitial": true }, { "name": "ready" }], "transitions": [
+                        { "from": "loading", "to": "loading", "event": "GO", "effects": [["call-service", "registry", "handles", {}, { "key": "k1", "emit": { "success": "LOADED", "failure": "FAILED" } }]] },
+                        { "from": "loading", "to": "ready", "event": "LOADED", "effects": [["set", "@entity.seen", "loaded"]] },
+                        { "from": "loading", "to": "ready", "event": "FAILED", "effects": [["set", "@entity.seen", "failed"]] }] } }],
+                "pages": [{ "name": "Home", "path": "/", "traits": [{ "ref": "Panel" }] }] }]
+        }))
+        .unwrap();
+        runtime.register_schema(schema).unwrap();
+        let answered = dispatch_request(&runtime, serde_json::json!({ "wire": true, "orbital": "Ui", "targetTrait": "Panel", "event": "GO", "clientId": "c1" })).unwrap();
+        let mut state = String::new();
+        for _ in 0..50 {
+            state = {
+                let _session = runtime.kernel.enter_session("c1");
+                runtime.kernel.snapshot_trait("Panel", None).state
+            };
+            if state == "ready" {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        assert_eq!(state, "ready", "the failure route ran: {answered}");
     }
 
     /// A client's wire request that targets a trait mounted only on a `boot` page runs that trait's step (the guest
