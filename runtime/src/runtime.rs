@@ -288,11 +288,14 @@ impl orbital_core::runtime::kernel::guest_hosting::GuestHosting for HostGuests {
             host.handles.set_env(name, value.clone());
         }
         host.tap_completions();
-        Arc::new(GuestOf(host.shared()))
+        let host = host.shared();
+        let live = Mutex::new(host.subscribe_live());
+        Arc::new(GuestOf(host, live))
     }
 }
 
-struct GuestOf(Arc<Host>);
+/// A guest's host, and its live stream: the dispatches it ran on its own for a viewer wait there for the next tick pass.
+struct GuestOf(Arc<Host>, Mutex<broadcast::Receiver<LiveBroadcastItem>>);
 
 impl orbital_core::runtime::kernel::guest_hosting::GuestHost for GuestOf {
     fn kernel(&self) -> Arc<RuntimeKernel> {
@@ -346,6 +349,47 @@ impl orbital_core::runtime::kernel::guest_hosting::GuestHost for GuestOf {
             errors: vec![serde_json::from_value(serde_json::json!({ "code": code, "message": message, "status": status })).unwrap_or(Value::Null)],
             message,
         })
+    }
+
+    fn take_host_dispatches(&self) -> Vec<Value> {
+        let mut live = self.1.lock();
+        let mut dispatches = Vec::new();
+        loop {
+            match live.try_recv() {
+                Ok(item) => {
+                    let target = if matches!(item.target, orbital_core::effects::LiveTarget::Origin) { "origin" } else { "peers" };
+                    let json = match item.dispatch {
+                        Some(dispatch) => {
+                            let Some(client) = item.origin_client_id else { continue };
+                            serde_json::json!({
+                                "kind": "dispatch",
+                                "clientId": client,
+                                "target": "origin",
+                                "orbitalName": dispatch.orbital_name,
+                                "request": orbital_core::json_value::value_to_json(&dispatch.request),
+                                "response": dispatch.response,
+                            })
+                        }
+                        // A pushed emit (a program-wide trait's, a persisted row's, a call's message): the viewer folds it
+                        // as its served client folds the live stream's emits.
+                        None => serde_json::json!({
+                            "kind": "push",
+                            "clientId": item.origin_client_id.unwrap_or_default(),
+                            "target": target,
+                            "emitted": { "event": item.event, "payload": item.payload.map(|p| orbital_core::json_value::value_to_json(&p)), "source": item.source },
+                        }),
+                    };
+                    if let Ok(value) = serde_json::from_value(json) {
+                        dispatches.push(value);
+                    }
+                }
+                Err(broadcast::error::TryRecvError::Lagged(skipped)) => {
+                    tracing::error!(target: orbital_core::logging::ns::SERVER_DATA, skipped, "guest live stream lagged: host dispatches were dropped");
+                }
+                Err(_) => break,
+            }
+        }
+        dispatches
     }
 
     fn tick_pass(&self) -> Result<DispatchOutcomes, String> {
@@ -2784,6 +2828,29 @@ mod tests {
         let leg = dispatch_request(&runtime, serde_json::json!({ "wire": true, "orbital": "Gates", "targetTrait": "Gate", "event": "NEXT", "clientId": "c1",
             "traits": [{ "trait": "Gate", "from": "open", "event": "NEXT" }], "entityByTrait": { "Gate": { "queued": 2 } } })).unwrap();
         assert_eq!(leg["transitioned"], true, "{leg}");
+    }
+
+    /// A split guest's viewer folds the dispatches the guest's host ran on its own for it (EXEC-DIST-8): the guest host
+    /// hands each host-run dispatch on its live stream to the next tick pass, and nothing else from that stream.
+    #[test]
+    fn a_guest_host_hands_its_host_run_dispatches_and_pushed_emits_to_the_tick_feed() {
+        use orbital_core::runtime::kernel::guest_hosting::GuestHost;
+        let host = Host::new(Arc::new(DriverAdapter::memory())).shared();
+        let guest = GuestOf(host.clone(), Mutex::new(host.subscribe_live()));
+        assert!(guest.take_host_dispatches().is_empty(), "nothing yet");
+        let response = orbital_core::EventResponse { success: true, ..Default::default() };
+        let _ = host.live_tx.send(LiveBroadcastItem::dispatched("Desk".to_string(), "Stage", "ARTIFACT_OPENED", &Value::Null, "", response, "viewer-1"));
+        let _ = host.live_tx.send(LiveBroadcastItem::call_message("ITEM".to_string(), Value::Null, "Feed".to_string(), Some("viewer-1".to_string())));
+        let taken = guest.take_host_dispatches();
+        assert_eq!(taken.len(), 2, "the host-run dispatch and the pushed emit: {taken:?}");
+        let json = orbital_core::json_value::value_to_json(&taken[0]);
+        assert_eq!(json["kind"], "dispatch");
+        let pushed = orbital_core::json_value::value_to_json(&taken[1]);
+        assert_eq!((pushed["kind"].as_str(), pushed["target"].as_str(), pushed["clientId"].as_str(), pushed["emitted"]["event"].as_str()), (Some("push"), Some("origin"), Some("viewer-1"), Some("ITEM")));
+        assert_eq!((json["clientId"].as_str(), json["orbitalName"].as_str()), (Some("viewer-1"), Some("Desk")));
+        assert_eq!(json["request"]["targetTrait"], "Stage");
+        assert_eq!(json["request"]["event"], "ARTIFACT_OPENED");
+        assert!(guest.take_host_dispatches().is_empty(), "each is handed once");
     }
 
     /// A keyed `call-service` to a service no provider answers fails on its failure route; it never leaves the asking

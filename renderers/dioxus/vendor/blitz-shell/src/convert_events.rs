@@ -1,7 +1,10 @@
-use blitz_traits::events::{BlitzImeEvent, BlitzKeyEvent, KeyState};
+use blitz_traits::events::{
+    BlitzImeEvent, BlitzKeyEvent, BlitzTouchEvent, BlitzTouchPhase, BlitzTouchPoint, KeyState,
+};
 use blitz_traits::shell::ColorScheme;
 use keyboard_types::{Code, Key, Location, Modifiers};
 use winit::event::ElementState;
+use winit::event::TouchPhase;
 use winit::event::Ime;
 use winit::event::KeyEvent as WinitKeyEvent;
 use winit::keyboard::Key as WinitKey;
@@ -75,6 +78,35 @@ mod android_text_offsets_tests {
             assert_eq!(byte_to_utf16_index(text, byte), utf16);
         }
         assert_eq!(utf16_to_byte_index(text, 3), 3);
+    }
+}
+
+// ORBITAL PATCH: multi-touch
+/// Fold one winit touch into the fingers held and make the DOM-shaped event for it: the finger that changed
+/// and every finger still on the screen after it.
+pub(crate) fn track_touch(
+    held: &mut Vec<BlitzTouchPoint>,
+    phase: TouchPhase,
+    changed: BlitzTouchPoint,
+    mods: Modifiers,
+) -> BlitzTouchEvent {
+    match phase {
+        TouchPhase::Started | TouchPhase::Moved => match held.iter_mut().find(|t| t.id == changed.id) {
+            Some(point) => *point = changed,
+            None => held.push(changed),
+        },
+        TouchPhase::Ended | TouchPhase::Cancelled => held.retain(|t| t.id != changed.id),
+    }
+    BlitzTouchEvent {
+        phase: match phase {
+            TouchPhase::Started => BlitzTouchPhase::Start,
+            TouchPhase::Moved => BlitzTouchPhase::Move,
+            TouchPhase::Ended => BlitzTouchPhase::End,
+            TouchPhase::Cancelled => BlitzTouchPhase::Cancel,
+        },
+        changed,
+        touches: held.clone(),
+        mods,
     }
 }
 
@@ -642,5 +674,42 @@ pub(crate) fn winit_key_to_kbt_key(winit_key: &WinitKey) -> Key {
             WinitNamedKey::F35 => Key::F35,
             _ => Key::Unidentified,
         },
+    }
+}
+
+#[cfg(test)]
+mod touch_tracking_tests {
+    use super::track_touch;
+    use blitz_traits::events::{BlitzTouchPhase, BlitzTouchPoint};
+    use winit::event::TouchPhase;
+
+    fn point(id: u64, x: f32, y: f32) -> BlitzTouchPoint {
+        BlitzTouchPoint { id, x, y }
+    }
+
+    #[test]
+    fn every_finger_is_held_with_its_id_and_each_event_carries_all_of_them() {
+        let mut held = Vec::new();
+        let first = track_touch(&mut held, TouchPhase::Started, point(7, 10.0, 10.0), Default::default());
+        assert_eq!((first.phase, first.touches.len()), (BlitzTouchPhase::Start, 1));
+        let second = track_touch(&mut held, TouchPhase::Started, point(9, 60.0, 50.0), Default::default());
+        assert_eq!(second.touches.iter().map(|t| t.id).collect::<Vec<_>>(), [7, 9]);
+        assert_eq!(second.changed.id, 9);
+        let moved = track_touch(&mut held, TouchPhase::Moved, point(9, 70.0, 50.0), Default::default());
+        assert_eq!((moved.phase, moved.touches[1]), (BlitzTouchPhase::Move, point(9, 70.0, 50.0)));
+        let lifted = track_touch(&mut held, TouchPhase::Ended, point(9, 70.0, 50.0), Default::default());
+        assert_eq!(lifted.touches, [point(7, 10.0, 10.0)]);
+        assert_eq!(lifted.changed.id, 9);
+        let cancelled = track_touch(&mut held, TouchPhase::Cancelled, point(7, 10.0, 10.0), Default::default());
+        assert_eq!(cancelled.phase, BlitzTouchPhase::Cancel);
+        assert!(cancelled.touches.is_empty() && held.is_empty());
+    }
+
+    #[test]
+    fn control_a_lone_finger_is_one_held_point_and_a_move_does_not_duplicate_it() {
+        let mut held = Vec::new();
+        track_touch(&mut held, TouchPhase::Started, point(1, 1.0, 1.0), Default::default());
+        let moved = track_touch(&mut held, TouchPhase::Moved, point(1, 2.0, 3.0), Default::default());
+        assert_eq!(moved.touches, [point(1, 2.0, 3.0)]);
     }
 }

@@ -1,6 +1,7 @@
 use crate::{BaseDocument, DocumentMutator};
 use blitz_traits::events::{
-    BlitzDragEvent, BlitzDragTransfer, BlitzMouseButtonEvent, BlitzWheelEvent, DomEvent,
+    BlitzDragEvent, BlitzDragTransfer, BlitzMouseButtonEvent, BlitzTouchEvent, BlitzTouchPhase,
+    BlitzTouchPoint, BlitzWheelEvent, DomEvent,
     DomEventData, EventState, MouseEventButton, MouseEventButtons, UiEvent,
 };
 use keyboard_types::Key;
@@ -303,6 +304,25 @@ impl<'doc, Handler: EventHandler> EventDriver<'doc, Handler> {
             UiEvent::Ime(_) => focussed_node_id,
             // ORBITAL PATCH: wheel events (G-ORBITAL-SHELL-RUST-033)
             UiEvent::Wheel(_) => hover_node_id,
+            // ORBITAL PATCH: multi-touch
+            UiEvent::Touch(ref touch) => {
+                let id = touch.changed.id;
+                let scroll_x = viewport_scroll.x as f32 / zoom;
+                let scroll_y = viewport_scroll.y as f32 / zoom;
+                let started = (touch.phase == BlitzTouchPhase::Start)
+                    .then(|| self.doc().hit(touch.changed.x + scroll_x, touch.changed.y + scroll_y))
+                    .flatten()
+                    .map(|hit| hit.node_id);
+                if let Some(node_id) = started {
+                    self.doc_mut().touch_targets.insert(id, node_id);
+                }
+                match touch.phase {
+                    BlitzTouchPhase::End | BlitzTouchPhase::Cancel => {
+                        self.doc_mut().touch_targets.remove(&id)
+                    }
+                    _ => self.doc().touch_targets.get(&id).copied(),
+                }
+            }
         };
 
         let data = match event {
@@ -331,6 +351,26 @@ impl<'doc, Handler: EventHandler> EventDriver<'doc, Handler> {
                 y: data.y + viewport_scroll.y as f32 / zoom,
                 ..data
             }),
+            // ORBITAL PATCH: multi-touch
+            UiEvent::Touch(touch) => {
+                let scrolled = |point: BlitzTouchPoint| BlitzTouchPoint {
+                    x: point.x + viewport_scroll.x as f32 / zoom,
+                    y: point.y + viewport_scroll.y as f32 / zoom,
+                    ..point
+                };
+                let phase = touch.phase;
+                let moved = BlitzTouchEvent {
+                    changed: scrolled(touch.changed),
+                    touches: touch.touches.iter().copied().map(scrolled).collect(),
+                    ..touch
+                };
+                match phase {
+                    BlitzTouchPhase::Start => DomEventData::TouchStart(moved),
+                    BlitzTouchPhase::Move => DomEventData::TouchMove(moved),
+                    BlitzTouchPhase::End => DomEventData::TouchEnd(moved),
+                    BlitzTouchPhase::Cancel => DomEventData::TouchCancel(moved),
+                }
+            }
         };
 
         let target = target.unwrap_or_else(|| self.doc().root_element().id);
@@ -556,5 +596,99 @@ mod native_drag_tests {
         assert!(events.contains(&"dragleave"));
         assert!(events.contains(&"dragend"));
         assert!(!events.contains(&"drop"));
+    }
+}
+
+#[cfg(test)]
+mod touch_tests {
+    use super::*;
+    use crate::DocumentConfig;
+    use blitz_traits::events::{BlitzTouchEvent, BlitzTouchPhase, BlitzTouchPoint};
+    use std::{cell::RefCell, rc::Rc};
+
+    struct Recorder(Rc<RefCell<Vec<(&'static str, BlitzTouchEvent)>>>);
+
+    impl EventHandler for Recorder {
+        fn handle_event(
+            &mut self,
+            _chain: &[usize],
+            event: &mut DomEvent,
+            _mutr: &mut DocumentMutator<'_>,
+            _event_state: &mut EventState,
+        ) {
+            match &event.data {
+                DomEventData::TouchStart(touch)
+                | DomEventData::TouchMove(touch)
+                | DomEventData::TouchEnd(touch)
+                | DomEventData::TouchCancel(touch) => {
+                    self.0.borrow_mut().push((event.name(), touch.clone()));
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn document() -> BaseDocument {
+        let mut doc = BaseDocument::new(DocumentConfig::default());
+        let mut mutator = doc.mutate();
+        let html = mutator.create_element(
+            crate::QualName::new(None, crate::ns!(html), markup5ever::local_name!("html")),
+            vec![],
+        );
+        mutator.append_children(0, &[html]);
+        drop(mutator);
+        doc
+    }
+
+    fn point(id: u64, x: f32, y: f32) -> BlitzTouchPoint {
+        BlitzTouchPoint { id, x, y }
+    }
+
+    fn touch(phase: BlitzTouchPhase, changed: BlitzTouchPoint, touches: &[BlitzTouchPoint]) -> UiEvent {
+        UiEvent::Touch(BlitzTouchEvent {
+            phase,
+            changed,
+            touches: touches.to_vec(),
+            mods: Default::default(),
+        })
+    }
+
+    #[test]
+    fn two_fingers_reach_the_dom_as_touch_events_carrying_every_finger_and_its_id() {
+        let mut doc = document();
+        let seen = Rc::new(RefCell::new(Vec::new()));
+        let mut driver = EventDriver::new(doc.mutate(), Recorder(seen.clone()));
+        driver.handle_ui_event(touch(BlitzTouchPhase::Start, point(7, 10.0, 10.0), &[point(7, 10.0, 10.0)]));
+        driver.handle_ui_event(touch(
+            BlitzTouchPhase::Start,
+            point(9, 60.0, 50.0),
+            &[point(7, 10.0, 10.0), point(9, 60.0, 50.0)],
+        ));
+        driver.handle_ui_event(touch(
+            BlitzTouchPhase::Move,
+            point(9, 70.0, 50.0),
+            &[point(7, 10.0, 10.0), point(9, 70.0, 50.0)],
+        ));
+        driver.handle_ui_event(touch(BlitzTouchPhase::End, point(9, 70.0, 50.0), &[point(7, 10.0, 10.0)]));
+        driver.handle_ui_event(touch(BlitzTouchPhase::Cancel, point(7, 10.0, 10.0), &[]));
+        let seen = seen.borrow();
+        let names: Vec<_> = seen.iter().map(|(name, _)| *name).collect();
+        assert_eq!(names, ["touchstart", "touchstart", "touchmove", "touchend", "touchcancel"]);
+        assert_eq!(seen[1].1.touches.iter().map(|t| t.id).collect::<Vec<_>>(), [7, 9]);
+        assert_eq!(seen[1].1.changed.id, 9);
+        assert_eq!(seen[2].1.touches[1], point(9, 70.0, 50.0));
+        assert_eq!(seen[3].1.touches.iter().map(|t| t.id).collect::<Vec<_>>(), [7]);
+    }
+
+    #[test]
+    fn control_one_finger_is_one_touch_point_and_no_mouse_event_is_made_of_it() {
+        let mut doc = document();
+        let seen = Rc::new(RefCell::new(Vec::new()));
+        let mut driver = EventDriver::new(doc.mutate(), Recorder(seen.clone()));
+        driver.handle_ui_event(touch(BlitzTouchPhase::Start, point(1, 5.0, 6.0), &[point(1, 5.0, 6.0)]));
+        let seen = seen.borrow();
+        assert_eq!(seen.len(), 1);
+        assert_eq!(seen[0].1.touches, [point(1, 5.0, 6.0)]);
+        assert_eq!(driver.doc().hover_node_id, None);
     }
 }

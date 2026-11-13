@@ -26,6 +26,7 @@ use dioxus_native::use_wgpu;
 use orbital_canvas::mappers::{learning, scene};
 use orbital_canvas::{SceneHost, SharedDeviceRenderer};
 use orbital_core::Value;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use web_time::Instant;
 
@@ -286,6 +287,7 @@ fn scene_presentation(props: &Value) -> (String, SceneA11y) {
 fn SceneCanvas(props: SceneCanvasProps) -> Element {
     let node_cell = use_hook(|| Arc::new(Mutex::new(props.node.clone())));
     let host = use_hook(|| Arc::new(Mutex::new(SceneHost::new())));
+    let held = use_hook(|| Arc::new(AtomicUsize::new(0)));
     // Feed the node every vdom render; the paint source re-maps when it changes.
     *node_cell.lock().expect("scene node poisoned") = props.node.clone();
     let id = use_wgpu({
@@ -360,11 +362,20 @@ fn SceneCanvas(props: SceneCanvasProps) -> Element {
             height: h,
             onmousedown: {
                 let host = host.clone();
-                move |evt: MouseEvent| pointer(&host, sink, "touch-down", &evt)
+                let held = held.clone();
+                move |evt: MouseEvent| {
+                    if held.load(Ordering::Relaxed) == 0 {
+                        pointer(&host, sink, "touch-down", &evt)
+                    }
+                }
             },
             onmousemove: {
                 let host = host.clone();
+                let held = held.clone();
                 move |evt: MouseEvent| {
+                    if held.load(Ordering::Relaxed) > 0 {
+                        return;
+                    }
                     let kind = if evt.held_buttons().is_empty() {
                         "hover"
                     } else {
@@ -375,11 +386,41 @@ fn SceneCanvas(props: SceneCanvasProps) -> Element {
             },
             onmouseleave: {
                 let host = host.clone();
-                move |evt: MouseEvent| pointer(&host, sink, "leave", &evt)
+                let held = held.clone();
+                move |evt: MouseEvent| {
+                    if held.load(Ordering::Relaxed) == 0 {
+                        pointer(&host, sink, "leave", &evt)
+                    }
+                }
             },
             onmouseup: {
                 let host = host.clone();
-                move |evt: MouseEvent| pointer(&host, sink, "touch-up", &evt)
+                let held = held.clone();
+                move |evt: MouseEvent| {
+                    if held.load(Ordering::Relaxed) == 0 {
+                        pointer(&host, sink, "touch-up", &evt)
+                    }
+                }
+            },
+            ontouchstart: {
+                let host = host.clone();
+                let held = held.clone();
+                move |evt: TouchEvent| touch(&host, sink, &held, "touch-down", &evt)
+            },
+            ontouchmove: {
+                let host = host.clone();
+                let held = held.clone();
+                move |evt: TouchEvent| touch(&host, sink, &held, "touch-move", &evt)
+            },
+            ontouchend: {
+                let host = host.clone();
+                let held = held.clone();
+                move |evt: TouchEvent| touch(&host, sink, &held, "touch-up", &evt)
+            },
+            ontouchcancel: {
+                let host = host.clone();
+                let held = held.clone();
+                move |evt: TouchEvent| touch(&host, sink, &held, "touch-cancel", &evt)
             },
             onwheel: move |evt: WheelEvent| {
                 let at = evt.element_coordinates();
@@ -440,6 +481,48 @@ fn pointer(
         host.take_scene_events()
     };
     deliver(sink, emits);
+}
+
+/// One touch event of the canvas: the finger that changed goes to the scene host as its own pointer, and the
+/// count of fingers still down is kept so the mouse events a platform emulates from the same finger are
+/// not read as a second pointer.
+fn touch(
+    host: &Mutex<SceneHost>,
+    sink: Option<crate::renderer::EventSink>,
+    held: &AtomicUsize,
+    kind: &str,
+    evt: &TouchEvent,
+) {
+    let data = evt.data();
+    let Some(native) = data.downcast::<dioxus_native::NativeTouchData>() else {
+        return;
+    };
+    let (id, at) = native.changed_in_element();
+    held.store(native.touches_in_element().len(), Ordering::Relaxed);
+    let emits = touch_points(host, kind, &[TouchPoint { id: pointer_id(id), x: at.x as f32, y: at.y as f32 }]);
+    deliver(sink, emits);
+}
+
+/// The scene host's pointer id for a platform touch id. The mouse is pointer 0, so a finger never shares it.
+pub(crate) fn pointer_id(touch_id: u64) -> i64 {
+    touch_id as i64 + 1
+}
+
+/// One finger of a touch event: the host's id for it and its element coordinates.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct TouchPoint {
+    pub(crate) id: i64,
+    pub(crate) x: f32,
+    pub(crate) y: f32,
+}
+
+/// Every finger of one touch event into the scene host as its own pointer; the events they queued, in order.
+pub(crate) fn touch_points(host: &Mutex<SceneHost>, kind: &str, points: &[TouchPoint]) -> Vec<scene::Emit> {
+    let mut host = host.lock().expect("scene host poisoned");
+    for point in points {
+        host.input_pointer(kind, point.x, point.y, 0, None, point.id);
+    }
+    host.take_scene_events()
 }
 
 /// Send the scene events a host queued to the sink, in queue order.
@@ -680,6 +763,52 @@ pub fn register_overrides(registry: &mut DioxusPatternRegistry) {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    fn touch_scene() -> Mutex<SceneHost> {
+        let mut host = SceneHost::new();
+        host.set_scene(json!({
+            "type": "canvas", "mode": "2d", "projection": "free", "camera": {"zoom": 1},
+            "pointerMoves": "all", "pointerMoveEvent": "MOVE", "pointerDownEvent": "DOWN", "pointerUpEvent": "UP",
+            "drawables": [{"type": "draw-shape", "id": "b", "shape": "rect", "anchor": "top-left",
+                "position": {"x": 0, "y": 0}, "width": 100, "height": 100, "fill": "#000000", "hit": true}]
+        }))
+        .unwrap();
+        Mutex::new(host)
+    }
+
+    fn touch_events(host: &Mutex<SceneHost>, kind: &str, points: &[TouchPoint]) -> Vec<scene::Emit> {
+        touch_points(host, kind, points)
+    }
+
+    #[test]
+    fn two_touch_points_reach_the_scene_host_as_two_pointers() {
+        let host = touch_scene();
+        touch_events(&host, "touch-down", &[TouchPoint { id: 1, x: 10.0, y: 10.0 }]);
+        touch_events(&host, "touch-down", &[TouchPoint { id: 2, x: 60.0, y: 50.0 }]);
+        let moved = touch_events(
+            &host,
+            "touch-move",
+            &[TouchPoint { id: 1, x: 10.0, y: 10.0 }, TouchPoint { id: 2, x: 70.0, y: 50.0 }],
+        );
+        let carried = moved.iter().filter_map(|e| e.payload.get("touches")).last().expect("touches payload");
+        let ids: Vec<_> = carried.as_array().unwrap().iter().map(|t| t["pointerId"].clone()).collect();
+        assert_eq!(ids, [json!(1), json!(2)], "{carried}");
+    }
+
+    #[test]
+    fn a_finger_never_takes_the_mouse_pointer_id() {
+        assert_ne!(pointer_id(0), 0);
+        assert_eq!(pointer_id(7), 8);
+    }
+
+    #[test]
+    fn control_one_touch_point_is_one_pointer_with_no_touches_payload() {
+        let host = touch_scene();
+        let down = touch_events(&host, "touch-down", &[TouchPoint { id: 1, x: 10.0, y: 10.0 }]);
+        let moved = touch_events(&host, "touch-move", &[TouchPoint { id: 1, x: 20.0, y: 10.0 }]);
+        assert!(!down.is_empty() && !moved.is_empty());
+        assert!(down.iter().chain(&moved).all(|e| e.payload.get("touches").is_none()));
+    }
 
     #[test]
     fn a_canvas_takes_its_scenes_own_size_and_carries_the_kernel_theme() {

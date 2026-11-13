@@ -58,6 +58,8 @@ pub enum UiEvent {
     Ime(BlitzImeEvent),
     // ORBITAL PATCH: wheel events (G-ORBITAL-SHELL-RUST-033)
     Wheel(BlitzWheelEvent),
+    // ORBITAL PATCH: multi-touch
+    Touch(BlitzTouchEvent),
 }
 impl UiEvent {
     pub fn discriminant(&self) -> u8 {
@@ -119,6 +121,11 @@ pub enum DomEventKind {
     DragEnd,
     // ORBITAL PATCH: wheel events (G-ORBITAL-SHELL-RUST-033)
     Wheel,
+    // ORBITAL PATCH: multi-touch
+    TouchStart,
+    TouchMove,
+    TouchEnd,
+    TouchCancel,
 }
 impl DomEventKind {
     pub fn discriminant(self) -> u8 {
@@ -147,6 +154,10 @@ impl FromStr for DomEventKind {
             "dragend" => Ok(Self::DragEnd),
             // ORBITAL PATCH: wheel events (G-ORBITAL-SHELL-RUST-033)
             "wheel" => Ok(Self::Wheel),
+            "touchstart" => Ok(Self::TouchStart),
+            "touchmove" => Ok(Self::TouchMove),
+            "touchend" => Ok(Self::TouchEnd),
+            "touchcancel" => Ok(Self::TouchCancel),
             _ => Err(()),
         }
     }
@@ -173,6 +184,11 @@ pub enum DomEventData {
     DragEnd(BlitzDragEvent),
     // ORBITAL PATCH: wheel events (G-ORBITAL-SHELL-RUST-033)
     Wheel(BlitzWheelEvent),
+    // ORBITAL PATCH: multi-touch
+    TouchStart(BlitzTouchEvent),
+    TouchMove(BlitzTouchEvent),
+    TouchEnd(BlitzTouchEvent),
+    TouchCancel(BlitzTouchEvent),
 }
 impl DomEventData {
     pub fn discriminant(&self) -> u8 {
@@ -205,6 +221,10 @@ impl DomEventData {
             Self::DragEnd { .. } => "dragend",
             // ORBITAL PATCH: wheel events (G-ORBITAL-SHELL-RUST-033)
             Self::Wheel { .. } => "wheel",
+            Self::TouchStart { .. } => "touchstart",
+            Self::TouchMove { .. } => "touchmove",
+            Self::TouchEnd { .. } => "touchend",
+            Self::TouchCancel { .. } => "touchcancel",
         }
     }
 
@@ -228,6 +248,10 @@ impl DomEventData {
             Self::DragEnd { .. } => DomEventKind::DragEnd,
             // ORBITAL PATCH: wheel events (G-ORBITAL-SHELL-RUST-033)
             Self::Wheel { .. } => DomEventKind::Wheel,
+            Self::TouchStart { .. } => DomEventKind::TouchStart,
+            Self::TouchMove { .. } => DomEventKind::TouchMove,
+            Self::TouchEnd { .. } => DomEventKind::TouchEnd,
+            Self::TouchCancel { .. } => DomEventKind::TouchCancel,
         }
     }
 
@@ -250,6 +274,8 @@ impl DomEventData {
             Self::DragLeave { .. } | Self::DragEnd { .. } => false,
             // ORBITAL PATCH: wheel events (G-ORBITAL-SHELL-RUST-033)
             Self::Wheel { .. } => true,
+            Self::TouchStart { .. } | Self::TouchMove { .. } | Self::TouchEnd { .. } => true,
+            Self::TouchCancel { .. } => false,
         }
     }
 
@@ -273,6 +299,10 @@ impl DomEventData {
             | Self::DragEnd { .. } => true,
             // ORBITAL PATCH: wheel events (G-ORBITAL-SHELL-RUST-033)
             Self::Wheel { .. } => true,
+            Self::TouchStart { .. }
+            | Self::TouchMove { .. }
+            | Self::TouchEnd { .. }
+            | Self::TouchCancel { .. } => true,
         }
     }
 }
@@ -377,6 +407,34 @@ pub struct BlitzWheelEvent {
     pub delta_y: f64,
     pub delta_mode: WheelDeltaMode,
     pub buttons: MouseEventButtons,
+    pub mods: Modifiers,
+}
+
+// ORBITAL PATCH: multi-touch
+/// One finger on the screen: the platform's id for it and its position in the viewport.
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub struct BlitzTouchPoint {
+    pub id: u64,
+    pub x: f32,
+    pub y: f32,
+}
+
+// ORBITAL PATCH: multi-touch
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum BlitzTouchPhase {
+    Start,
+    Move,
+    End,
+    Cancel,
+}
+
+// ORBITAL PATCH: multi-touch
+/// A touch event as the DOM has it: the finger that changed and every finger still on the screen after it.
+#[derive(Clone, Debug)]
+pub struct BlitzTouchEvent {
+    pub phase: BlitzTouchPhase,
+    pub changed: BlitzTouchPoint,
+    pub touches: Vec<BlitzTouchPoint>,
     pub mods: Modifiers,
 }
 

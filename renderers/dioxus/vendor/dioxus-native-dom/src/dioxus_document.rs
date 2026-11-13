@@ -1,7 +1,7 @@
 //! Integration between Dioxus and Blitz
 use crate::events::{
     BlitzKeyboardData, NativeClickData, NativeConverter, NativeFormData, NativeImageData,
-    NativeWheelData,
+    NativeTouchData, NativeWheelData,
 };
 use crate::mutation_writer::{DioxusState, MutationWriter};
 use crate::qual_name;
@@ -356,6 +356,22 @@ impl EventHandler for DioxusEventHandler<'_> {
                 Some(wrap_event_data(NativeWheelData {
                     event: wevent.clone(),
                     element: ((wevent.x - origin.x) as f64, (wevent.y - origin.y) as f64),
+                }))
+            }
+
+            // ORBITAL PATCH: multi-touch
+            DomEventData::TouchStart(tevent)
+            | DomEventData::TouchMove(tevent)
+            | DomEventData::TouchEnd(tevent)
+            | DomEventData::TouchCancel(tevent) => {
+                let origin = mutr
+                    .doc
+                    .get_node(event.target)
+                    .map(|node| node.absolute_position(0.0, 0.0))
+                    .unwrap_or_default();
+                Some(wrap_event_data(NativeTouchData {
+                    event: tevent.clone(),
+                    origin: (origin.x as f64, origin.y as f64),
                 }))
             }
 

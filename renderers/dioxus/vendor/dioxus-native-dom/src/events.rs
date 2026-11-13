@@ -1,6 +1,6 @@
 use blitz_traits::events::{
-    BlitzDragEvent, BlitzDragTransfer, BlitzKeyEvent, BlitzMouseButtonEvent, BlitzWheelEvent,
-    MouseEventButton, WheelDeltaMode,
+    BlitzDragEvent, BlitzDragTransfer, BlitzKeyEvent, BlitzMouseButtonEvent, BlitzTouchEvent,
+    BlitzTouchPoint, BlitzWheelEvent, MouseEventButton, WheelDeltaMode,
 };
 use dioxus_html::{
     geometry::{ClientPoint, ElementPoint, PagePoint, ScreenPoint, WheelDelta},
@@ -10,7 +10,8 @@ use dioxus_html::{
     },
     AnimationData, CancelData, ClipboardData, CompositionData, DataTransfer, DragData, FocusData,
     FormData, FormValue, HasDataTransferData, HasDragData, HasFileData, HasFocusData, HasFormData,
-    HasImageData, HasKeyboardData, HasMouseData, HasWheelData, HtmlEventConverter, ImageData, KeyboardData,
+    HasImageData, HasKeyboardData, HasMouseData, HasTouchData, HasTouchPointData, HasWheelData,
+    HtmlEventConverter, ImageData, KeyboardData,
     MediaData, MountedData, MouseData, NativeDataTransfer, PlatformEventData, PointerData,
     ResizeData, ScrollData, SelectionData, ToggleData, TouchData, TransitionData, VisibleData,
     WheelData,
@@ -89,8 +90,9 @@ impl HtmlEventConverter for NativeConverter {
         unimplemented!("todo: convert_toggle_data in dioxus-native. requires support in blitz")
     }
 
-    fn convert_touch_data(&self, _event: &PlatformEventData) -> TouchData {
-        unimplemented!("todo: convert_touch_data in dioxus-native. requires support in blitz")
+    // ORBITAL PATCH: multi-touch
+    fn convert_touch_data(&self, event: &PlatformEventData) -> TouchData {
+        event.downcast::<NativeTouchData>().unwrap().clone().into()
     }
 
     fn convert_transition_data(&self, _event: &PlatformEventData) -> TransitionData {
@@ -108,6 +110,159 @@ impl HtmlEventConverter for NativeConverter {
 
     fn convert_visible_data(&self, _event: &PlatformEventData) -> VisibleData {
         unimplemented!("todo: convert_visible_data in dioxus-native. requires support in blitz")
+    }
+}
+
+// ORBITAL PATCH: multi-touch
+/// A touch event plus where its target element sits, so a handler can read each finger inside the element.
+#[derive(Clone)]
+pub struct NativeTouchData {
+    pub(crate) event: BlitzTouchEvent,
+    pub(crate) origin: (f64, f64),
+}
+
+// ORBITAL PATCH: multi-touch
+#[derive(Clone)]
+pub struct NativeTouchPoint {
+    point: BlitzTouchPoint,
+    origin: (f64, f64),
+}
+
+impl NativeTouchPoint {
+    /// The platform's id for this finger (dioxus-html keeps `TouchPoint::identifier` private).
+    pub fn id(&self) -> u64 {
+        self.point.id
+    }
+}
+
+impl NativeTouchData {
+    /// The finger that changed, as `(id, offset inside the target element)`.
+    pub fn changed_in_element(&self) -> (u64, ElementPoint) {
+        (self.event.changed.id, self.element_point(&self.event.changed))
+    }
+
+    /// Every finger still on the screen after the event, as `(id, offset inside the target element)`.
+    pub fn touches_in_element(&self) -> Vec<(u64, ElementPoint)> {
+        self.event
+            .touches
+            .iter()
+            .map(|touch| (touch.id, self.element_point(touch)))
+            .collect()
+    }
+
+    fn element_point(&self, touch: &BlitzTouchPoint) -> ElementPoint {
+        ElementPoint::new(touch.x as f64 - self.origin.0, touch.y as f64 - self.origin.1)
+    }
+
+    fn points(&self, touches: &[BlitzTouchPoint]) -> Vec<dioxus_html::TouchPoint> {
+        touches
+            .iter()
+            .map(|point| NativeTouchPoint { point: *point, origin: self.origin }.into())
+            .collect()
+    }
+}
+
+impl ModifiersInteraction for NativeTouchData {
+    fn modifiers(&self) -> Modifiers {
+        self.event.mods
+    }
+}
+
+impl HasTouchData for NativeTouchData {
+    fn touches(&self) -> Vec<dioxus_html::TouchPoint> {
+        self.points(&self.event.touches)
+    }
+
+    fn touches_changed(&self) -> Vec<dioxus_html::TouchPoint> {
+        self.points(std::slice::from_ref(&self.event.changed))
+    }
+
+    fn target_touches(&self) -> Vec<dioxus_html::TouchPoint> {
+        self.points(&self.event.touches)
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+}
+
+impl InteractionLocation for NativeTouchPoint {
+    fn client_coordinates(&self) -> ClientPoint {
+        ClientPoint::new(self.point.x as _, self.point.y as _)
+    }
+
+    fn screen_coordinates(&self) -> ScreenPoint {
+        ScreenPoint::new(self.point.x as _, self.point.y as _)
+    }
+
+    fn page_coordinates(&self) -> PagePoint {
+        PagePoint::new(self.point.x as _, self.point.y as _)
+    }
+}
+
+impl HasTouchPointData for NativeTouchPoint {
+    fn identifier(&self) -> i32 {
+        self.point.id as i32
+    }
+
+    fn force(&self) -> f64 {
+        0.0
+    }
+
+    fn radius(&self) -> ScreenPoint {
+        ScreenPoint::new(0.0, 0.0)
+    }
+
+    fn rotation(&self) -> f64 {
+        0.0
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+}
+
+#[cfg(test)]
+mod touch_event_tests {
+    use super::*;
+    use blitz_traits::events::BlitzTouchPhase;
+
+    fn event(phase: BlitzTouchPhase, changed: (u64, f32, f32), held: &[(u64, f32, f32)]) -> PlatformEventData {
+        let point = |(id, x, y): (u64, f32, f32)| BlitzTouchPoint { id, x, y };
+        PlatformEventData::new(Box::new(NativeTouchData {
+            event: BlitzTouchEvent {
+                phase,
+                changed: point(changed),
+                touches: held.iter().copied().map(point).collect(),
+                mods: Default::default(),
+            },
+            origin: (100.0, 20.0),
+        }))
+    }
+
+    #[test]
+    fn two_fingers_reach_a_dioxus_touch_handler_with_their_ids_and_element_offsets() {
+        let data = NativeConverter {}.convert_touch_data(&event(
+            BlitzTouchPhase::Move,
+            (9, 170.0, 70.0),
+            &[(7, 110.0, 30.0), (9, 170.0, 70.0)],
+        ));
+        let ids: Vec<u64> = data.touches().iter().map(|t| t.downcast::<NativeTouchPoint>().unwrap().id()).collect();
+        assert_eq!(ids, [7, 9]);
+        assert_eq!(data.touches_changed().len(), 1);
+        assert_eq!(data.touches_changed()[0].downcast::<NativeTouchPoint>().unwrap().id(), 9);
+        let native = data.downcast::<NativeTouchData>().expect("native touch data");
+        let inside = native.touches_in_element();
+        assert_eq!((inside[1].1.x, inside[1].1.y), (70.0, 50.0));
+        let (id, at) = native.changed_in_element();
+        assert_eq!((id, at.x, at.y), (9, 70.0, 50.0));
+    }
+
+    #[test]
+    fn control_one_finger_is_one_touch_point() {
+        let data = NativeConverter {}.convert_touch_data(&event(BlitzTouchPhase::Start, (3, 105.0, 25.0), &[(3, 105.0, 25.0)]));
+        assert_eq!(data.touches().len(), 1);
+        assert_eq!(data.touches()[0].downcast::<NativeTouchPoint>().unwrap().id(), 3);
     }
 }
 

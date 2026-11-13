@@ -16,6 +16,8 @@ pub use blitz_dom::DocumentConfig;
 pub use dioxus_document::DioxusDocument;
 // ORBITAL PATCH: a mouse handler downcasts to read its target's laid-out size
 pub use events::NativeClickData;
+// ORBITAL PATCH: multi-touch
+pub use events::{NativeTouchData, NativeTouchPoint};
 
 use blitz_dom::{ns, LocalName, Namespace, QualName};
 type NodeId = usize;

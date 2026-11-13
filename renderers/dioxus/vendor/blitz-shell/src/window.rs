@@ -2,7 +2,7 @@
 use crate::convert_events::byte_to_utf16_index;
 use crate::convert_events::{
     color_scheme_to_theme, theme_to_color_scheme, winit_ime_to_blitz, winit_key_event_to_blitz,
-    winit_modifiers_to_kbt_modifiers,
+    track_touch, winit_modifiers_to_kbt_modifiers,
 };
 use crate::event::{create_waker, BlitzShellEvent};
 use crate::BlitzShellProvider;
@@ -13,8 +13,8 @@ use blitz_dom::Document;
 use blitz_paint::paint_scene;
 // ORBITAL PATCH: wheel events (G-ORBITAL-SHELL-RUST-033)
 use blitz_traits::events::{
-    BlitzMouseButtonEvent, BlitzWheelEvent, MouseEventButton, MouseEventButtons, UiEvent,
-    WheelDeltaMode,
+    BlitzMouseButtonEvent, BlitzTouchPoint, BlitzWheelEvent, MouseEventButton, MouseEventButtons,
+    UiEvent, WheelDeltaMode,
 };
 use blitz_traits::canvas_access::{
     canvas_access_host, canvas_focus, route_ime, route_key, CanvasAccessHost, CanvasFocus,
@@ -27,7 +27,6 @@ use std::cell::Cell;
 use std::sync::Arc;
 use std::task::Waker;
 use std::time::Instant;
-#[cfg(any(target_os = "android", target_os = "ios"))]
 use winit::event::TouchPhase;
 use winit::event::{ElementState, MouseButton};
 use winit::event_loop::{ActiveEventLoop, EventLoopProxy};
@@ -76,6 +75,8 @@ pub struct View<Rend: WindowRenderer> {
     pub keyboard_modifiers: Modifiers,
     pub buttons: MouseEventButtons,
     pub mouse_pos: (f32, f32),
+    /// ORBITAL PATCH: multi-touch. Every finger on the screen, by its winit id.
+    pub touches: Vec<BlitzTouchPoint>,
     #[cfg(target_os = "android")]
     pub ime_allowed: bool,
     #[cfg(any(target_os = "android", target_os = "ios"))]
@@ -142,6 +143,7 @@ impl<Rend: WindowRenderer> View<Rend> {
             theme_override: None,
             buttons: MouseEventButtons::None,
             mouse_pos: Default::default(),
+            touches: Vec::new(),
             #[cfg(target_os = "android")]
             ime_allowed: false,
             #[cfg(any(target_os = "android", target_os = "ios"))]
@@ -454,6 +456,69 @@ impl<Rend: WindowRenderer> View<Rend> {
         self.request_redraw();
     }
 
+    // ORBITAL PATCH: multi-touch. The mobile single-finger mouse emulation, moved out of the event match.
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    fn emulate_mouse_from_touch(&mut self, touch: winit::event::Touch) {
+                match touch.phase {
+                    TouchPhase::Started if self.active_touch_id.is_none() => {
+                        self.active_touch_id = Some(touch.id);
+                    }
+                    TouchPhase::Started => return,
+                    _ if self.active_touch_id != Some(touch.id) => return,
+                    _ => {}
+                }
+                let winit::dpi::LogicalPosition::<f32> { x, y } = touch.location.to_logical(self.window.scale_factor());
+                self.move_pointer(x, y);
+                match touch.phase {
+                    TouchPhase::Started => {
+                        self.touch_start = Some((x, y));
+                        self.touch_last = Some((x, y));
+                        self.touch_scrolling = false;
+                        self.button_pointer(MouseEventButton::Main, ElementState::Pressed);
+                    }
+                    TouchPhase::Moved => {
+                        if self.doc.is_dragging() {
+                            self.touch_last = Some((x, y));
+                            return;
+                        }
+                        if let (Some((start_x, start_y)), Some((last_x, last_y))) = (self.touch_start, self.touch_last) {
+                            if !self.touch_scrolling && (x - start_x).hypot(y - start_y) > 8.0 {
+                                self.touch_scrolling = true;
+                                self.leave_pointer();
+                            }
+                            if self.touch_scrolling {
+                                let changed = if let Some(node_id) = self.doc.get_hover_node_id() {
+                                    self.doc.scroll_node_by_has_changed(node_id, (x - last_x) as f64, (y - last_y) as f64)
+                                } else {
+                                    self.doc.scroll_viewport_by_has_changed((x - last_x) as f64, (y - last_y) as f64)
+                                };
+                                if changed {
+                                    self.request_redraw();
+                                }
+                            }
+                        }
+                        self.touch_last = Some((x, y));
+                    }
+                    TouchPhase::Ended => {
+                        if !self.touch_scrolling || self.doc.is_dragging() {
+                            self.button_pointer(MouseEventButton::Main, ElementState::Released);
+                        }
+                        self.active_touch_id = None;
+                        self.touch_start = None;
+                        self.touch_last = None;
+                        self.touch_scrolling = false;
+                    }
+                    TouchPhase::Cancelled => {
+                        self.leave_pointer();
+                        self.active_touch_id = None;
+                        self.touch_start = None;
+                        self.touch_last = None;
+                        self.touch_scrolling = false;
+                        self.request_redraw();
+                    }
+                }
+    }
+
     pub fn handle_winit_event(&mut self, event: WindowEvent) {
         match event {
             // Window lifecycle events
@@ -616,69 +681,29 @@ impl<Rend: WindowRenderer> View<Rend> {
             WindowEvent::Focused(false) => self.leave_pointer(),
 
             // Touch and motion events
-            #[cfg(any(target_os = "android", target_os = "ios"))]
+            // ORBITAL PATCH: multi-touch. Every finger reaches the DOM as a touch event on every platform; the
+            // single-finger mouse emulation below stays for mobile. The DOM event comes first when a finger lands
+            // or moves and last when it lifts, so a handler sees the whole touch around the emulated mouse events.
             WindowEvent::Touch(touch) => {
-                match touch.phase {
-                    TouchPhase::Started if self.active_touch_id.is_none() => {
-                        self.active_touch_id = Some(touch.id);
-                    }
-                    TouchPhase::Started => return,
-                    _ if self.active_touch_id != Some(touch.id) => return,
-                    _ => {}
+                let winit::dpi::LogicalPosition::<f32> { x, y } =
+                    touch.location.to_logical(self.window.scale_factor());
+                let event = track_touch(
+                    &mut self.touches,
+                    touch.phase,
+                    BlitzTouchPoint { id: touch.id, x, y },
+                    winit_modifiers_to_kbt_modifiers(self.keyboard_modifiers.state()),
+                );
+                let lifting = matches!(touch.phase, TouchPhase::Ended | TouchPhase::Cancelled);
+                if !lifting {
+                    self.doc.handle_ui_event(UiEvent::Touch(event.clone()));
                 }
-                let winit::dpi::LogicalPosition::<f32> { x, y } = touch.location.to_logical(self.window.scale_factor());
-                self.move_pointer(x, y);
-                match touch.phase {
-                    TouchPhase::Started => {
-                        self.touch_start = Some((x, y));
-                        self.touch_last = Some((x, y));
-                        self.touch_scrolling = false;
-                        self.button_pointer(MouseEventButton::Main, ElementState::Pressed);
-                    }
-                    TouchPhase::Moved => {
-                        if self.doc.is_dragging() {
-                            self.touch_last = Some((x, y));
-                            return;
-                        }
-                        if let (Some((start_x, start_y)), Some((last_x, last_y))) = (self.touch_start, self.touch_last) {
-                            if !self.touch_scrolling && (x - start_x).hypot(y - start_y) > 8.0 {
-                                self.touch_scrolling = true;
-                                self.leave_pointer();
-                            }
-                            if self.touch_scrolling {
-                                let changed = if let Some(node_id) = self.doc.get_hover_node_id() {
-                                    self.doc.scroll_node_by_has_changed(node_id, (x - last_x) as f64, (y - last_y) as f64)
-                                } else {
-                                    self.doc.scroll_viewport_by_has_changed((x - last_x) as f64, (y - last_y) as f64)
-                                };
-                                if changed {
-                                    self.request_redraw();
-                                }
-                            }
-                        }
-                        self.touch_last = Some((x, y));
-                    }
-                    TouchPhase::Ended => {
-                        if !self.touch_scrolling || self.doc.is_dragging() {
-                            self.button_pointer(MouseEventButton::Main, ElementState::Released);
-                        }
-                        self.active_touch_id = None;
-                        self.touch_start = None;
-                        self.touch_last = None;
-                        self.touch_scrolling = false;
-                    }
-                    TouchPhase::Cancelled => {
-                        self.leave_pointer();
-                        self.active_touch_id = None;
-                        self.touch_start = None;
-                        self.touch_last = None;
-                        self.touch_scrolling = false;
-                        self.request_redraw();
-                    }
+                #[cfg(any(target_os = "android", target_os = "ios"))]
+                self.emulate_mouse_from_touch(touch);
+                if lifting {
+                    self.doc.handle_ui_event(UiEvent::Touch(event));
                 }
+                self.request_redraw();
             }
-            #[cfg(not(any(target_os = "android", target_os = "ios")))]
-            WindowEvent::Touch(_) => {}
             WindowEvent::TouchpadPressure { .. } => {}
             WindowEvent::AxisMotion { .. } => {}
             WindowEvent::PinchGesture { .. } => {},

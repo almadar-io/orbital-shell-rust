@@ -63,6 +63,12 @@ pub(crate) fn handle_dom_event<F: FnMut(DomEvent)>(
         | DomEventData::DragLeave(_)
         | DomEventData::Drop(_)
         | DomEventData::DragEnd(_) => {}
+        // ORBITAL PATCH: multi-touch
+        DomEventData::TouchStart(_)
+        | DomEventData::TouchMove(_)
+        | DomEventData::TouchEnd(_)
+        | DomEventData::TouchCancel(_) => {}
+
         // ORBITAL PATCH: wheel events (G-ORBITAL-SHELL-RUST-033)
         DomEventData::Wheel(wheel) => {
             let px = match wheel.delta_mode {

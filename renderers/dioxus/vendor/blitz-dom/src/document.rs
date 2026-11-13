@@ -147,6 +147,8 @@ pub struct BaseDocument {
     /// The node which recieved a mousedown event (if any)
     pub(crate) mousedown_node_id: Option<usize>,
     pub(crate) drag_candidate: Option<(usize, f32, f32)>,
+    /// ORBITAL PATCH: multi-touch. The node each finger on the screen started on; its later events go there.
+    pub(crate) touch_targets: HashMap<u64, usize>,
     pub(crate) drag_active: Option<(usize, Option<usize>, BlitzDragTransfer, bool)>,
 
     /// Whether there are active CSS animations/transitions (so we should re-render every frame)
@@ -275,6 +277,7 @@ impl BaseDocument {
             active_node_id: None,
             mousedown_node_id: None,
             drag_candidate: None,
+            touch_targets: HashMap::new(),
             drag_active: None,
             has_active_animations: false,
             has_canvas: false,
