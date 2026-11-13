@@ -1124,7 +1124,6 @@ impl Host {
                 .and_then(serde_json::from_value)
                 .map_err(|e| (e.to_string(), "EVENT_PROCESSING_ERROR", 500));
         }
-        let entity_id = request.entity_id.clone().unwrap_or_else(|| orbital_core::RUNTIME_SINGLETON.to_string());
         let payload = request.payload.clone().unwrap_or(Value::Null);
         let failed = |e: HostError| (e.to_string(), "EVENT_PROCESSING_ERROR", e.status_code());
         let _origin = self.enter_origin(request.client_id.as_deref());
@@ -1152,6 +1151,7 @@ impl Host {
                 .map_err(|e| (e.to_string(), "EVENT_PROCESSING_ERROR", 500));
         }
         self.kernel.ensure_orbital_loaded(&orbital).map_err(|e| (e.to_string(), "EVENT_PROCESSING_ERROR", 500))?;
+        let entity_id = self.kernel.seed_carried_request(&request).unwrap_or_else(|| orbital_core::RUNTIME_SINGLETON.to_string());
         let Some(detail) = self.get_orbital(&orbital) else {
             return Err((format!("Orbital not found: {orbital}"), "ORBITAL_NOT_FOUND", 404));
         };
@@ -2746,6 +2746,75 @@ mod tests {
         assert_eq!(leg["success"], true, "control: a targeted leg is the delegated leg: {leg}");
         let plain = dispatch_request(&runtime, serde_json::json!({ "wire": true, "orbital": "Desk", "event": "ADD_NOTE" })).unwrap();
         assert_ne!(plain["rejections"][0]["code"], "client-circuit-state-refused", "control: a request carrying nothing is admitted: {plain}");
+    }
+
+    fn gate() -> Arc<Host> {
+        let runtime = Host::new(Arc::new(DriverAdapter::memory())).shared();
+        let schema = serde_json::from_value(serde_json::json!({
+            "name": "Gates", "typeContractVersion": 1,
+            "orbitals": [{ "name": "Gates",
+                "entity": { "name": "Run", "persistence": "runtime", "fields": [{ "name": "id", "type": "string" }, { "name": "queued", "type": "number" }] },
+                "traits": [{ "name": "Gate", "linkedEntity": "Run", "dispatch": "client",
+                    "stateMachine": { "states": [{ "name": "busy", "isInitial": true }, { "name": "open" }],
+                        "transitions": [{ "from": "open", "to": "busy", "event": "NEXT", "guard": ["=", "@entity.queued", 2] }] } }] }]
+        }))
+        .unwrap();
+        runtime.register_schema(schema).unwrap();
+        runtime
+    }
+
+    /// EXEC-DIST-11, twin of `exec_dist::server_leg_seed::a_carried_from_state_replaces_the_servers_held_state`: a delegated
+    /// leg replays from the client's state and row, so a `[client]` front the host last saw `busy` runs the step the client
+    /// took from `open`.
+    #[test]
+    fn a_native_delegated_leg_replays_from_the_carried_state_and_row() {
+        let runtime = gate();
+        let leg = dispatch_request(&runtime, serde_json::json!({ "wire": true, "orbital": "Gates", "targetTrait": "Gate", "event": "NEXT", "clientId": "c1",
+            "traits": [{ "trait": "Gate", "from": "open", "event": "NEXT" }], "entityByTrait": { "Gate": { "queued": 2 } } })).unwrap();
+        assert_eq!(leg["transitioned"], true, "{leg}");
+    }
+
+    /// A client's wire request that targets a trait mounted only on a `boot` page runs that trait's step (the guest
+    /// persona sign-in is one: std-guest-session sends PERSONA_ACT_AS for the viewer's `clientId`).
+    #[test]
+    fn a_wire_request_from_a_client_session_to_a_boot_only_trait_runs_its_step() {
+        let runtime = Host::new(Arc::new(DriverAdapter::memory())).shared();
+        let schema = serde_json::from_value(serde_json::json!({
+            "name": "Boots", "typeContractVersion": 1,
+            "orbitals": [{ "name": "Ui",
+                "entity": { "name": "Seen", "persistence": "runtime", "fields": [{ "name": "id", "type": "string" }] },
+                "traits": [{ "name": "Front", "linkedEntity": "Seen",
+                    "stateMachine": { "states": [{ "name": "idle", "isInitial": true }], "transitions": [{ "from": "idle", "to": "idle", "event": "INIT", "effects": [] }] } }],
+                "pages": [{ "name": "Home", "path": "/", "traits": [{ "ref": "Front" }] }] },
+              { "name": "Personas",
+                "entity": { "name": "Run", "persistence": "runtime", "fields": [{ "name": "id", "type": "string" }, { "name": "n", "type": "number" }] },
+                "traits": [{ "name": "P", "linkedEntity": "Run",
+                    "stateMachine": { "states": [{ "name": "ready", "isInitial": true }],
+                        "events": [{ "key": "ACT", "name": "Act", "input": true }],
+                        "transitions": [{ "from": "ready", "to": "ready", "event": "ACT", "effects": [["set", "@entity.n", 1]] }] } }],
+                "pages": [{ "name": "Boot", "path": "", "protocol": "boot", "traits": [{ "ref": "P" }] }] }]
+        }))
+        .unwrap();
+        runtime.register_schema(schema).unwrap();
+        let answer = dispatch_request(&runtime, serde_json::json!({ "wire": true, "orbital": "Ui", "targetTrait": "P", "event": "ACT", "clientId": "c1" })).unwrap();
+        assert_eq!(answer["transitioned"], true, "{answer}");
+    }
+
+    /// Twin of `exec_dist::client_wildcard_server_listen::a_leg_replays_its_target_from_the_entry_of_the_replayed_event`.
+    #[test]
+    fn a_native_leg_replays_its_target_from_the_entry_of_the_replayed_event() {
+        let runtime = gate();
+        let leg = dispatch_request(&runtime, serde_json::json!({ "wire": true, "orbital": "Gates", "targetTrait": "Gate", "event": "NEXT", "clientId": "c1",
+            "traits": [{ "trait": "Gate", "from": "open", "event": "NEXT" }, { "trait": "Gate", "from": "busy", "event": "LATER" }],
+            "entityByTrait": { "Gate": { "queued": 2 } } })).unwrap();
+        assert_eq!(leg["transitioned"], true, "{leg}");
+    }
+
+    #[test]
+    fn control_a_leg_carrying_no_state_runs_from_the_held_state() {
+        let runtime = gate();
+        let plain = dispatch_request(&runtime, serde_json::json!({ "wire": true, "orbital": "Gates", "targetTrait": "Gate", "event": "NEXT", "clientId": "c1" })).unwrap();
+        assert_ne!(plain["transitioned"], true, "{plain}");
     }
 
     struct OneLazy(std::sync::atomic::AtomicUsize);

@@ -292,6 +292,16 @@ fn SceneCanvas(props: SceneCanvasProps) -> Element {
         let (node_cell, host) = (node_cell.clone(), host.clone());
         move || GamePaintSource::new(node_cell, host)
     });
+    use_hook({
+        let host = host.clone();
+        move || {
+            blitz_traits::canvas_access::register_canvas_access(
+                id,
+                Arc::new(crate::canvas_access::SceneAccess::new(host)),
+            )
+        }
+    });
+    use_drop(move || blitz_traits::canvas_access::unregister_canvas_access(id));
     let (w, h) = if props.fill_parent {
         (1, 1)
     } else {
@@ -372,6 +382,24 @@ fn SceneCanvas(props: SceneCanvasProps) -> Element {
                 move |evt: MouseEvent| pointer(&host, sink, "touch-up", &evt)
             },
             onwheel: move |evt: WheelEvent| {
+                let at = evt.element_coordinates();
+                let (dx, dy) = match evt.delta() {
+                    dioxus::html::geometry::WheelDelta::Pixels(v) => (v.x, v.y),
+                    dioxus::html::geometry::WheelDelta::Lines(v) => (v.x * 16.0, v.y * 16.0),
+                    dioxus::html::geometry::WheelDelta::Pages(_) => {
+                        unreachable!("blitz delivers wheel deltas in pixels or lines")
+                    }
+                };
+                let owned = {
+                    let mut host = host.lock().expect("scene host poisoned");
+                    host.wheel(at.x as f32, at.y as f32, dx as f32, dy as f32)
+                        .then(|| host.take_scene_events())
+                };
+                if let Some(emits) = owned {
+                    evt.prevent_default();
+                    deliver(sink, emits);
+                    return;
+                }
                 let delta_y_pixels = match evt.delta() {
                     dioxus::html::geometry::WheelDelta::Pixels(v) => v.y,
                     dioxus::html::geometry::WheelDelta::Lines(v) => v.y * 20.0,
@@ -379,7 +407,6 @@ fn SceneCanvas(props: SceneCanvasProps) -> Element {
                         unreachable!("blitz delivers wheel deltas in pixels or lines")
                     }
                 };
-                let at = evt.element_coordinates();
                 let factor = 1.1f32.powf(-(delta_y_pixels as f32) / 100.0);
                 let zoomed = host
                     .lock()
