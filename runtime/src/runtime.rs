@@ -329,6 +329,13 @@ impl orbital_core::runtime::kernel::guest_hosting::GuestHost for GuestOf {
             .map_err(|e| e.to_string())
     }
 
+    fn request(&self, payload: &Value, options: &ValueMap) -> Result<Value, orbital_core::effects::executor::SubstrateFailure> {
+        self.0.request_answer(payload, options).map_err(|(message, code, status)| orbital_core::effects::executor::SubstrateFailure {
+            errors: vec![serde_json::from_value(serde_json::json!({ "code": code, "message": message, "status": status })).unwrap_or(Value::Null)],
+            message,
+        })
+    }
+
     fn tick_pass(&self) -> Result<DispatchOutcomes, String> {
         let host = &self.0;
         let mut outcomes: DispatchOutcomes = host.tick_pass_moving(host.monotonic_ms(), orbital_core::Calendar::local_now()).into_iter().flat_map(|(_, moved)| moved).collect();
@@ -2999,6 +3006,150 @@ mod tests {
             let _ = tx.send(answered);
         });
         rx.recv_timeout(std::time::Duration::from_secs(20)).expect("the open settles").unwrap()
+    }
+
+    /// A program whose page holds a `[client]` trait painting `face` and a server trait painting `back` on INIT, which
+    /// counts on STORE.
+    fn split_program() -> serde_json::Value {
+        let machine = |events: serde_json::Value, transitions: serde_json::Value| serde_json::json!({ "states": [{ "name": "idle", "isInitial": true }], "events": events, "transitions": transitions });
+        serde_json::json!({
+            "name": "Split", "typeContractVersion": 1,
+            "orbitals": [{
+                "name": "Split",
+                "entity": { "name": "Cell", "persistence": "runtime", "fields": [{ "name": "id", "type": "string" }, { "name": "n", "type": "number", "default": 0 }] },
+                "traits": [
+                    { "name": "Face", "linkedEntity": "Cell", "dispatch": "client", "stateMachine": machine(
+                        serde_json::json!([{ "key": "INIT", "name": "Init" }]),
+                        serde_json::json!([{ "from": "idle", "to": "idle", "event": "INIT", "effects": [["render-ui", "main", { "type": "typography", "content": "face" }]] }])) },
+                    { "name": "Back", "linkedEntity": "Cell", "stateMachine": machine(
+                        serde_json::json!([{ "key": "INIT", "name": "Init" }, { "key": "STORE", "name": "Store" }]),
+                        serde_json::json!([
+                            { "from": "idle", "to": "idle", "event": "INIT", "effects": [["render-ui", "aside", { "type": "typography", "content": "back" }]] },
+                            { "from": "idle", "to": "idle", "event": "STORE", "effects": [["set", "@entity.n", ["+", "@entity.n", 1]], ["render-ui", "aside", { "type": "typography", "content": ["str/concat", "back ", "@entity.n"] }]] }])) }
+                ],
+                "pages": [{ "name": "Home", "path": "/", "traits": [{ "ref": "Face" }, { "ref": "Back" }] }]
+            }]
+        })
+    }
+
+    /// The two legs a browser kernel posts for the split program: the page mount, then a STORE to the server trait.
+    fn split_legs() -> Vec<serde_json::Value> {
+        vec![
+            serde_json::json!({ "wire": true, "orbital": "Split", "event": "INIT", "clientId": "tab-split", "route": "/", "mount": [{ "trait": "Face", "event": "INIT" }, { "trait": "Back", "event": "INIT" }] }),
+            serde_json::json!({ "wire": true, "orbital": "Split", "targetTrait": "Back", "event": "STORE", "clientId": "tab-split" }),
+        ]
+    }
+
+    /// The open answer and each leg's answer of the split program opened as a hosted guest with `open`, every leg posted
+    /// into it as `program/dispatch address {} { guest, ...leg }`.
+    fn split_guest_answers(open: serde_json::Value) -> (serde_json::Value, Vec<serde_json::Value>, Vec<String>) {
+        let runtime = Host::new(Arc::new(DriverAdapter::memory())).shared();
+        let legs = split_legs()
+            .into_iter()
+            .map(|leg| {
+                let mut options = leg.clone();
+                options["guest"] = serde_json::json!("@payload.result.guest");
+                let address = format!("Split.{}.{}", leg["targetTrait"].as_str().unwrap_or("Back"), leg["event"].as_str().unwrap_or_default());
+                serde_json::json!(["program/dispatch", address, {}, options, { "emit": { "success": "LEGGED", "failure": "FAILED" } }])
+            })
+            .collect::<Vec<serde_json::Value>>();
+        let opened_effects: Vec<serde_json::Value> = std::iter::once(serde_json::json!(["set", "@entity.opened", ["json/stringify", "@payload"]])).chain(legs).collect();
+        let opener: orbital_core::OrbitalSchema = serde_json::from_value(serde_json::json!({
+            "name": "Opener",
+            "typeContractVersion": 1,
+            "orbitals": [{
+                "name": "Opener",
+                "entity": { "name": "Box", "persistence": "runtime", "fields": [{ "name": "id", "type": "string" }, { "name": "opened", "type": "string" }, { "name": "legs", "type": "array", "items": { "type": "string" }, "default": [] }, { "name": "failures", "type": "array", "items": { "type": "string" }, "default": [] }] },
+                "osGrants": { "kernel": [{ "target": "guest", "kinds": ["spawn"] }] },
+                "traits": [{
+                    "name": "Opener", "linkedEntity": "Box",
+                    "stateMachine": {
+                        "states": [{ "name": "idle", "isInitial": true }],
+                        "events": [{ "key": "OPEN", "name": "Open", "payloadSchema": [{ "name": "program", "type": "object", "required": true }] },
+                            { "key": "OPENED", "name": "Opened" }, { "key": "FAILED", "name": "Failed" }, { "key": "LEGGED", "name": "Legged" }],
+                        "transitions": [
+                            { "from": "idle", "to": "idle", "event": "OPEN", "effects": [["program/open", "@payload.program", open, { "emit": { "success": "OPENED", "failure": "FAILED" } }]] },
+                            { "from": "idle", "to": "idle", "event": "OPENED", "effects": opened_effects },
+                            { "from": "idle", "to": "idle", "event": "LEGGED", "effects": [["set", "@entity.legs", ["array/concat", "@entity.legs", [["json/stringify", "@payload.result"]]]]] },
+                            { "from": "idle", "to": "idle", "event": "FAILED", "effects": [["set", "@entity.failures", ["array/concat", "@entity.failures", [["json/stringify", "@payload"]]]]] }]
+                    }
+                }]
+            }]
+        }))
+        .unwrap();
+        runtime.register_schema(opener).unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let host = Arc::clone(&runtime);
+        std::thread::spawn(move || {
+            let args: Vec<Value> = [
+                serde_json::json!("Opener.Opener.OPEN"),
+                serde_json::json!({ "program": split_program() }),
+                serde_json::json!({ "wire": true, "orbital": "Opener", "targetTrait": "Opener", "event": "OPEN", "clientId": "tab-g" }),
+            ]
+            .iter()
+            .map(|a| serde_json::from_value(a.clone()).unwrap())
+            .collect();
+            let answered = orbital_core::effects::executor::SubstrateHandler::run(host.substrate.as_ref(), "program/dispatch", &args).map_err(|f| f.message).map(|_| {
+                let _tab = host.kernel.enter_session("tab-g");
+                serde_json::to_value(&host.kernel.snapshot_trait("Opener", Some(orbital_core::RUNTIME_SINGLETON)).entity).unwrap()
+            });
+            let _ = tx.send(answered);
+        });
+        let entity = rx.recv_timeout(std::time::Duration::from_secs(20)).expect("the open settles").unwrap();
+        let failures: Vec<String> = entity["failures"].as_array().cloned().unwrap_or_default().iter().map(|f| f.as_str().unwrap_or_default().to_string()).collect();
+        let opened = entity["opened"].as_str().unwrap_or_default().to_string();
+        assert!(!opened.is_empty(), "the open answered: {failures:?}");
+        let opened: serde_json::Value = serde_json::from_str(&opened).unwrap();
+        let legs = entity["legs"].as_array().cloned().unwrap_or_default().iter().map(|leg| serde_json::from_str(leg.as_str().unwrap()).unwrap()).collect();
+        (opened["result"].clone(), legs, failures)
+    }
+
+    /// Each leg's answer of the split program served by a host of its own.
+    fn split_served_answers() -> Vec<serde_json::Value> {
+        let runtime = Host::new(Arc::new(DriverAdapter::memory())).shared();
+        runtime.register_schema(serde_json::from_value(split_program()).unwrap()).unwrap();
+        split_legs()
+            .into_iter()
+            .map(|leg| {
+                let address = format!("Split.{}.{}", leg["targetTrait"].as_str().unwrap_or("Back"), leg["event"].as_str().unwrap_or_default());
+                let args: Vec<Value> = [serde_json::json!(address), serde_json::json!({}), leg].iter().map(|a| serde_json::from_value(a.clone()).unwrap()).collect();
+                orbital_core::json_value::value_to_json(&orbital_core::effects::executor::SubstrateHandler::run(runtime.substrate.as_ref(), "program/dispatch", &args).unwrap())
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_split_guest_answers_its_client_program_and_leaves_the_page_mount_to_its_viewer() {
+        let (opened, _, failures) = split_guest_answers(serde_json::json!({ "route": "/", "split": true }));
+        assert!(failures.is_empty(), "{failures:?}");
+        let client = opened["client"]["orbitals"][0]["traits"].as_array().cloned().unwrap_or_default();
+        assert!(client.iter().any(|t| t["name"] == "Face"), "the viewer's kernel is handed the client program: {opened}");
+        assert_eq!(opened["page"], serde_json::json!(["Face", "Back"]), "{opened}");
+        assert!(!opened["rendered"].to_string().contains("face") && !opened["rendered"].to_string().contains("back"), "the page is the viewer's to mount: {opened}");
+    }
+
+    #[test]
+    fn control_a_guest_that_is_not_split_mounts_and_paints_its_page_itself() {
+        let (opened, legs, failures) = split_guest_answers(serde_json::json!({ "route": "/" }));
+        assert!(opened.get("client").is_none(), "{opened}");
+        assert!(opened["rendered"].to_string().contains("face"), "the guest runs its [client] traits when no viewer does: {opened}");
+        assert!(legs.is_empty() && failures.len() == 2 && failures.iter().all(|f| f.contains("split: true")), "a wire leg is refused by a guest that is not split: {failures:?}");
+    }
+
+    #[test]
+    fn a_split_guests_wire_legs_answer_as_the_served_program_answers_them() {
+        let (_, legs, failures) = split_guest_answers(serde_json::json!({ "route": "/", "split": true }));
+        assert!(failures.is_empty(), "{failures:?}");
+        let served = split_served_answers();
+        assert_eq!(legs.len(), served.len(), "every leg answered: {legs:?}");
+        for (guest, served) in legs.iter().zip(&served) {
+            for field in ["success", "transitioned", "states", "clientEffectsByTrait", "guardFailed", "rejections"] {
+                assert_eq!(guest.get(field), served.get(field), "{field}: guest {guest} served {served}");
+            }
+            let events = |r: &serde_json::Value| r["emittedEvents"].as_array().cloned().unwrap_or_default().iter().map(|e| (e["event"].clone(), e["payload"].clone())).collect::<Vec<_>>();
+            assert_eq!(events(guest), events(served), "emitted: guest {guest} served {served}");
+        }
+        assert!(served[1].to_string().contains("back 1"), "control: the served STORE leg paints the count: {}", served[1]);
     }
 
     /// A guest whose page shows a `[client]` trait ticking every 20 ms, and a `[client]` trait on another page ticking too.
