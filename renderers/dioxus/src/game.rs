@@ -66,6 +66,12 @@ fn fills_container(node: &serde_json::Value) -> bool {
         && fields.get("fillContainer").and_then(serde_json::Value::as_bool) == Some(true)
 }
 
+/// The least height in px of a canvas that fills its parent (`minHeight`; 0 when none is declared).
+fn min_height(node: &serde_json::Value) -> f64 {
+    let fields = node.get("props").unwrap_or(node);
+    fields.get("minHeight").and_then(serde_json::Value::as_f64).filter(|h| h.is_finite() && *h > 0.0).unwrap_or(0.0)
+}
+
 /// Whether the scene is an orbital-painter canvas that takes its parent's width and its own
 /// height (`fillContainer: "width"`), so the page scrolls past a long scene.
 fn fills_width(node: &serde_json::Value) -> bool {
@@ -224,6 +230,8 @@ struct SceneCanvasProps {
     fill_parent: bool,
     #[props(default)]
     fill_width: bool,
+    #[props(default)]
+    min_height: f64,
     a11y: SceneA11y,
     class_name: String,
     inline_style: String,
@@ -329,8 +337,8 @@ fn SceneCanvas(props: SceneCanvasProps) -> Element {
     };
     let style = if props.fill_parent {
         format!(
-            "display:block;width:100%;height:100%;{}",
-            props.inline_style
+            "display:block;width:100%;height:100%;min-height:{}px;{}",
+            props.min_height, props.inline_style
         )
     } else if props.fill_width {
         format!("display:block;width:100%;height:{h}px;{}", props.inline_style)
@@ -626,7 +634,8 @@ impl DioxusPatternRenderer for SceneCanvasRenderer {
         let inline_style = style_with_props("", props);
         let fill_parent = fills_container(&node);
         let fill_width = fills_width(&node);
-        rsx! { SceneCanvas { node, sink: view.sink, fill_parent, fill_width, a11y, class_name, inline_style } }
+        let min_height = min_height(&node);
+        rsx! { SceneCanvas { node, sink: view.sink, fill_parent, fill_width, min_height, a11y, class_name, inline_style } }
     }
 }
 
@@ -872,6 +881,20 @@ mod tests {
             serde_json::from_value(json!({ "fillContainer": "width", "width": 640, "height": 360 }))
                 .unwrap();
         assert!(!fills_width(&scene_node("canvas", &other, None)), "only the orbital painter");
+    }
+
+    #[test]
+    fn a_filled_orbital_canvas_keeps_its_declared_min_height() {
+        let tall: Value = serde_json::from_value(
+            json!({ "painter": "orbital", "fillContainer": true, "minHeight": 600, "width": 640, "height": 360 }),
+        )
+        .unwrap();
+        assert_eq!(min_height(&scene_node("canvas", &tall, None)), 600.0);
+        let plain: Value = serde_json::from_value(
+            json!({ "painter": "orbital", "fillContainer": true, "width": 640, "height": 360 }),
+        )
+        .unwrap();
+        assert_eq!(min_height(&scene_node("canvas", &plain, None)), 0.0, "control: none declared");
     }
 
     #[test]

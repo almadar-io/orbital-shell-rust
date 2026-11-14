@@ -3281,6 +3281,10 @@ mod tests {
     }
 
     fn split_guest_answers_with(open: serde_json::Value, legs: Vec<serde_json::Value>) -> (serde_json::Value, Vec<serde_json::Value>, Vec<String>) {
+        split_guest_answers_of(split_program(), open, legs)
+    }
+
+    fn split_guest_answers_of(program: serde_json::Value, open: serde_json::Value, legs: Vec<serde_json::Value>) -> (serde_json::Value, Vec<serde_json::Value>, Vec<String>) {
         let runtime = Host::new(Arc::new(DriverAdapter::memory())).shared();
         let legs = legs
             .into_iter()
@@ -3321,7 +3325,7 @@ mod tests {
         std::thread::spawn(move || {
             let args: Vec<Value> = [
                 serde_json::json!("Opener.Opener.OPEN"),
-                serde_json::json!({ "program": split_program() }),
+                serde_json::json!({ "program": program }),
                 serde_json::json!({ "wire": true, "orbital": "Opener", "targetTrait": "Opener", "event": "OPEN", "clientId": "tab-g" }),
             ]
             .iter()
@@ -3368,6 +3372,43 @@ mod tests {
         assert!(client.iter().any(|t| t["name"] == "Face"), "the viewer's kernel is handed the client program: {opened}");
         assert_eq!(opened["page"], serde_json::json!(["Face", "Back"]), "{opened}");
         assert!(!opened["rendered"].to_string().contains("face") && !opened["rendered"].to_string().contains("back"), "the page is the viewer's to mount: {opened}");
+    }
+
+    /// The split program with one `uses lazy` child at `/late` carried in `lazyPrograms` by its file.
+    fn split_program_with_lazy_child() -> serde_json::Value {
+        let machine = |content: &str| serde_json::json!({ "states": [{ "name": "idle", "isInitial": true }], "events": [{ "key": "INIT", "name": "Init" }], "transitions": [{ "from": "idle", "to": "idle", "event": "INIT", "effects": [["render-ui", "main", { "type": "typography", "content": content }]] }] });
+        let mut program = split_program();
+        program["lazyPages"] = serde_json::json!([{ "path": "/late", "orbital": "Late", "orbRef": "lazy/Late.orb", "traits": [{ "name": "LateFace", "dispatchMode": "hybridClientOnly" }, { "name": "LateBack", "dispatchMode": "persistedAwaited" }] }]);
+        program["lazyPrograms"] = serde_json::json!({ "lazy/Late.orb": {
+            "name": "Late", "typeContractVersion": 1,
+            "orbitals": [{
+                "name": "Late",
+                "entity": { "name": "LateCell", "persistence": "runtime", "fields": [{ "name": "id", "type": "string" }] },
+                "traits": [
+                    { "name": "LateFace", "linkedEntity": "LateCell", "dispatch": "client", "stateMachine": machine("late face") },
+                    { "name": "LateBack", "linkedEntity": "LateCell", "stateMachine": machine("late back") }
+                ],
+                "pages": [{ "name": "LatePage", "path": "/late", "traits": [{ "ref": "LateFace" }, { "ref": "LateBack" }] }]
+            }]
+        } });
+        program
+    }
+
+    #[test]
+    fn a_split_guest_carrying_lazy_programs_hands_its_viewer_each_ones_client_program_by_file() {
+        let (opened, _, failures) = split_guest_answers_of(split_program_with_lazy_child(), serde_json::json!({ "route": "/", "split": true }), split_legs());
+        assert!(failures.is_empty(), "{failures:?}");
+        let late = &opened["client"]["lazyPrograms"]["lazy/Late.orb"];
+        let traits = late["orbitals"][0]["traits"].as_array().cloned().unwrap_or_default();
+        assert!(traits.iter().any(|t| t["name"] == "LateFace"), "the viewer loads the lazy page from the client program it was handed: {opened}");
+        assert_eq!(opened["client"]["lazyPages"][0]["orbRef"], "lazy/Late.orb", "the viewer's program still declares the lazy page: {opened}");
+    }
+
+    #[test]
+    fn control_a_split_guest_without_lazy_programs_hands_no_lazy_client_programs() {
+        let (opened, _, failures) = split_guest_answers(serde_json::json!({ "route": "/", "split": true }));
+        assert!(failures.is_empty(), "{failures:?}");
+        assert!(opened["client"].get("lazyPrograms").is_none(), "{opened}");
     }
 
     #[test]
