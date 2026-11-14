@@ -1183,6 +1183,11 @@ impl Host {
                 .and_then(serde_json::from_value)
                 .map_err(|e| (e.to_string(), "EVENT_PROCESSING_ERROR", 500));
         }
+        if let Some(released) = self.kernel.release_request(&orbital, &request) {
+            return serde_json::to_value(&released)
+                .and_then(serde_json::from_value)
+                .map_err(|e| (e.to_string(), "EVENT_PROCESSING_ERROR", 500));
+        }
         let payload = request.payload.clone().unwrap_or(Value::Null);
         let failed = |e: HostError| (e.to_string(), "EVENT_PROCESSING_ERROR", e.status_code());
         let _origin = self.enter_origin(request.client_id.as_deref());
@@ -2792,6 +2797,25 @@ mod tests {
 
     fn note_titles(runtime: &Host) -> Vec<String> {
         runtime.persistence.list("Note").unwrap().iter().filter_map(|r| serde_json::to_value(r).unwrap()["title"].as_str().map(str::to_string)).collect()
+    }
+
+    // EXEC-TICK-6 twin of `exec_tick::server_tick`: `$UNMOUNT` releases the traits it names and dispatches nothing.
+    #[test]
+    fn an_unmount_request_releases_the_traits_it_names_and_dispatches_nothing() {
+        let runtime = desk();
+        let answer = dispatch_request(&runtime, serde_json::json!({ "wire": true, "orbital": "Desk", "event": "$UNMOUNT", "unmount": ["Notes"], "clientId": "tab-1" })).unwrap();
+        assert_eq!(answer["success"], true, "{answer}");
+        assert_eq!(answer["transitioned"], false);
+        assert!(answer.get("rejections").is_none_or(serde_json::Value::is_null), "nothing was dispatched: {answer}");
+        assert_eq!(answer["states"], serde_json::json!({}), "nothing was dispatched: {answer}");
+    }
+
+    #[test]
+    fn control_an_unmount_naming_its_trait_as_the_target_is_refused_by_name() {
+        let runtime = desk();
+        let answer = dispatch_request(&runtime, serde_json::json!({ "wire": true, "orbital": "Desk", "targetTrait": "Notes", "event": "$UNMOUNT", "clientId": "tab-1" })).unwrap();
+        assert_eq!(answer["success"], false, "{answer}");
+        assert!(answer["error"].as_str().unwrap_or("").contains("`unmount`"), "{answer}");
     }
 
     #[test]
