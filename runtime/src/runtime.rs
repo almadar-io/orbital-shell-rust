@@ -4764,6 +4764,8 @@ mod tests {
     }
 
     /// The mount's answer, on a thread the test abandons after 20 s so a barrier that never settles fails instead of hanging.
+    /// The rows the mount's fetch listed, read from the in-process answer: a wire answer keeps only the rows a browser
+    /// can use (EXEC-DIST-8), and `Shelf` is server-run.
     fn mounted_cards(runtime: &Arc<Host>, request: serde_json::Value) -> Vec<String> {
         let (tx, rx) = std::sync::mpsc::channel();
         let host = Arc::clone(runtime);
@@ -4778,14 +4780,22 @@ mod tests {
     #[test]
     fn a_route_mount_runs_its_seeds_after_the_deferred_asks_its_mount_listener_made() {
         let runtime = shelf_seeded_by_a_deferred_write();
-        let cards = mounted_cards(&runtime, serde_json::json!({ "wire": true, "orbital": "Shelf", "event": "INIT", "clientId": "tab-s", "mount": [{ "trait": "Shelf", "event": "INIT" }], "route": "/shelf" }));
+        let cards = mounted_cards(&runtime, serde_json::json!({ "orbital": "Shelf", "event": "INIT", "clientId": "tab-s", "mount": [{ "trait": "Shelf", "event": "INIT" }], "route": "/shelf" }));
         assert_eq!(cards, ["c1"], "the page's INIT fetch sees the row the $MOUNT listener's deferred dispatch wrote (EXEC-SEED-7)");
+    }
+
+    #[test]
+    fn a_route_mount_runs_its_seeds_after_a_chain_of_deferred_dispatches_its_mount_listener_made() {
+        let runtime = Host::new(Arc::new(DriverAdapter::memory())).shared();
+        runtime.register_schema(serde_json::from_value(chained_shelf_program(false)).unwrap()).unwrap();
+        let cards = mounted_cards(&runtime, serde_json::json!({ "orbital": "Shelf", "event": "INIT", "clientId": "tab-c", "mount": [{ "trait": "Shelf", "event": "INIT" }], "route": "/shelf" }));
+        assert_eq!(cards, ["c1"], "the write the listener dispatched only after its sign-in answered is in before the page's INIT fetch (EXEC-SEED-7)");
     }
 
     #[test]
     fn control_a_route_less_mount_lists_before_any_seed() {
         let runtime = shelf_seeded_by_a_deferred_write();
-        let cards = mounted_cards(&runtime, serde_json::json!({ "wire": true, "orbital": "Shelf", "event": "INIT", "clientId": "tab-t", "mount": [{ "trait": "Shelf", "event": "INIT" }] }));
+        let cards = mounted_cards(&runtime, serde_json::json!({ "orbital": "Shelf", "event": "INIT", "clientId": "tab-t", "mount": [{ "trait": "Shelf", "event": "INIT" }] }));
         assert!(cards.is_empty(), "no route, no $MOUNT, nothing seeded: {cards:?}");
     }
 
