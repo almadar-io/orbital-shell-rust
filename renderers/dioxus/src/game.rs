@@ -66,6 +66,14 @@ fn fills_container(node: &serde_json::Value) -> bool {
         && fields.get("fillContainer").and_then(serde_json::Value::as_bool) == Some(true)
 }
 
+/// Whether the scene is an orbital-painter canvas that takes its parent's width and its own
+/// height (`fillContainer: "width"`), so the page scrolls past a long scene.
+fn fills_width(node: &serde_json::Value) -> bool {
+    let fields = node.get("props").unwrap_or(node);
+    fields.get("painter").and_then(serde_json::Value::as_str) == Some("orbital")
+        && fields.get("fillContainer").and_then(serde_json::Value::as_str) == Some("width")
+}
+
 /// Paints one scene into the Blitz scene via the shared wgpu device. The scene host is shared
 /// with the component, which feeds it taps; this side keeps its viewport, clock, assets and fonts
 /// current and draws its frame. Owns the offscreen target texture (recreated on size change).
@@ -214,6 +222,8 @@ struct SceneCanvasProps {
     node: serde_json::Value,
     sink: Option<crate::renderer::EventSink>,
     fill_parent: bool,
+    #[props(default)]
+    fill_width: bool,
     a11y: SceneA11y,
     class_name: String,
     inline_style: String,
@@ -306,6 +316,11 @@ fn SceneCanvas(props: SceneCanvasProps) -> Element {
     use_drop(move || blitz_traits::canvas_access::unregister_canvas_access(id));
     let (w, h) = if props.fill_parent {
         (1, 1)
+    } else if props.fill_width {
+        let Some((_, h)) = canvas_size(&props.node) else {
+            return rsx! {};
+        };
+        (1, h)
     } else {
         let Some(size) = canvas_size(&props.node) else {
             return rsx! {};
@@ -317,6 +332,8 @@ fn SceneCanvas(props: SceneCanvasProps) -> Element {
             "display:block;width:100%;height:100%;{}",
             props.inline_style
         )
+    } else if props.fill_width {
+        format!("display:block;width:100%;height:{h}px;{}", props.inline_style)
     } else {
         props.inline_style.clone()
     };
@@ -608,7 +625,8 @@ impl DioxusPatternRenderer for SceneCanvasRenderer {
         let (class_name, a11y) = scene_presentation(props);
         let inline_style = style_with_props("", props);
         let fill_parent = fills_container(&node);
-        rsx! { SceneCanvas { node, sink: view.sink, fill_parent, a11y, class_name, inline_style } }
+        let fill_width = fills_width(&node);
+        rsx! { SceneCanvas { node, sink: view.sink, fill_parent, fill_width, a11y, class_name, inline_style } }
     }
 }
 
@@ -834,6 +852,26 @@ mod tests {
             serde_json::from_value(json!({ "fillContainer": true, "width": 640, "height": 360 }))
                 .unwrap();
         assert!(!fills_container(&scene_node("canvas", &other, None)));
+    }
+
+    #[test]
+    fn an_orbital_canvas_takes_the_parent_width_and_its_own_height_when_it_asks_for_width() {
+        let width: Value = serde_json::from_value(
+            json!({ "painter": "orbital", "fillContainer": "width", "width": 640, "height": 1800 }),
+        )
+        .unwrap();
+        let node = scene_node("canvas", &width, None);
+        assert!(fills_width(&node));
+        assert!(!fills_container(&node), "width is not the whole box");
+        let fill: Value = serde_json::from_value(
+            json!({ "painter": "orbital", "fillContainer": true, "width": 640, "height": 360 }),
+        )
+        .unwrap();
+        assert!(!fills_width(&scene_node("canvas", &fill, None)));
+        let other: Value =
+            serde_json::from_value(json!({ "fillContainer": "width", "width": 640, "height": 360 }))
+                .unwrap();
+        assert!(!fills_width(&scene_node("canvas", &other, None)), "only the orbital painter");
     }
 
     #[test]

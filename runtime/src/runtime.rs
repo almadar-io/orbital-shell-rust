@@ -848,14 +848,17 @@ impl Host {
         let trace = Arc::new(TraceJournal::new(Arc::downgrade(&trace_lifetime)));
         let enabled_trace = Arc::downgrade(&trace);
         let observed_trace = Arc::downgrade(&trace);
+        let cost_trace = Arc::downgrade(&trace);
         kernel.set_dispatch_observer(Some(Arc::new(orbital_core::runtime::dispatch_trace::DispatchObserver {
             enabled: Box::new(move || enabled_trace.upgrade().is_some_and(|trace| trace.needs_completion())),
+            cost: Box::new(move || cost_trace.upgrade().is_some_and(|trace| trace.wants_cost())),
             completed: Box::new(move |observed| {
                 if let Some(trace) = observed_trace.upgrade() {
                     trace.record(observed);
                 }
             }),
         })));
+        kernel.set_cost_meter(orbital_core::alloc_meter::native_meter());
         let answer: Arc<CompletionAnswerer> = {
             let slot = Arc::downgrade(&host);
             let trace = trace.clone();
@@ -2213,6 +2216,56 @@ mod tests {
         assert_eq!(trace_poll(&mut wrong)["type"], "trace-disconnected");
         drop(source);
         assert!(!runtime.trace.enabled(), "disconnect removes subscriber and ends its recording lease");
+    }
+
+    struct StepMeter(std::sync::atomic::AtomicU64);
+
+    impl orbital_core::cost::CostMeter for StepMeter {
+        fn now_ns(&self) -> u64 {
+            self.0.fetch_add(100, std::sync::atomic::Ordering::SeqCst)
+        }
+        fn allocations(&self) -> (u64, u64) {
+            (0, 0)
+        }
+    }
+
+    #[test]
+    fn trace_stream_carries_cost_only_to_the_subscriber_that_asked_for_it() {
+        let runtime = Host::new(Arc::new(DriverAdapter::memory())).shared();
+        runtime.register_schema(live_program()).unwrap();
+        runtime.kernel.set_cost_meter(Some(Arc::new(StepMeter(std::sync::atomic::AtomicU64::new(0)))));
+        let mut plain = trace_source(&runtime, serde_json::json!({ "traits": ["Watch"] }));
+        let mut costed = trace_source(&runtime, serde_json::json!({ "traits": ["Watch"], "cost": true }));
+        trace_poll(&mut plain);
+        trace_poll(&mut costed);
+        runtime.dispatch_continuing("Watch", "default", "STOP", Value::Null, None, None).unwrap();
+        let plain_item = trace_poll(&mut plain);
+        let costed_item = trace_poll(&mut costed);
+        assert!(plain_item["dispatch"]["outcomes"][0].get("cost").is_none(), "{plain_item}");
+        assert!(costed_item["dispatch"]["outcomes"][0]["cost"]["ns"].as_f64().is_some_and(|ns| ns > 0.0), "{costed_item}");
+        assert_eq!(costed_item["dispatch"]["seq"], plain_item["dispatch"]["seq"], "one dispatch, two views");
+        assert!(runtime.trace().iter().all(|entry| entry.outcomes.iter().all(|o| o.cost.is_none())), "the journal keeps no cost");
+    }
+
+    #[test]
+    fn control_a_trace_stream_without_a_cost_subscriber_measures_nothing() {
+        let runtime = Host::new(Arc::new(DriverAdapter::memory())).shared();
+        runtime.register_schema(live_program()).unwrap();
+        runtime.kernel.set_cost_meter(Some(Arc::new(StepMeter(std::sync::atomic::AtomicU64::new(0)))));
+        let mut plain = trace_source(&runtime, serde_json::json!({ "traits": ["Watch"] }));
+        trace_poll(&mut plain);
+        runtime.dispatch_continuing("Watch", "default", "STOP", Value::Null, None, None).unwrap();
+        assert!(trace_poll(&mut plain)["dispatch"]["outcomes"][0].get("cost").is_none());
+    }
+
+    #[test]
+    fn a_trace_cost_option_that_is_not_a_boolean_is_refused_by_name() {
+        let runtime = Host::new(Arc::new(DriverAdapter::memory())).shared();
+        runtime.register_schema(live_program()).unwrap();
+        let mut source = trace_source(&runtime, serde_json::json!({ "traits": ["Watch"], "cost": "yes" }));
+        let refused = trace_poll(&mut source);
+        assert_eq!(refused["type"], "trace-disconnected");
+        assert_eq!(refused["reason"], "trace cost must be a boolean when supplied");
     }
 
     #[test]

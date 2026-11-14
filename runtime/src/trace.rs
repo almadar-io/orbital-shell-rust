@@ -14,6 +14,7 @@ static INSTANCE_SEQ: AtomicU64 = AtomicU64::new(0);
 struct Subscription {
     id: u64,
     traits: Vec<String>,
+    cost: bool,
     entity: Option<String>,
     sender: mpsc::Sender<Value>,
 }
@@ -67,6 +68,11 @@ impl TraceJournal {
         self.on.load(Ordering::SeqCst) || !self.subscribers.lock().is_empty()
     }
 
+    /// Whether a subscriber asked for each dispatch's cost (EXEC-COST-1).
+    pub fn wants_cost(&self) -> bool {
+        self.subscribers.lock().iter().any(|s| s.cost)
+    }
+
     pub fn needs_completion(&self) -> bool {
         self.enabled() || !self.pending_asks.lock().is_empty()
     }
@@ -118,6 +124,8 @@ impl TraceJournal {
                 .is_some_and(|v| v.as_str().is_none())
         {
             Some("trace instance and seedEntityId must be strings when supplied")
+        } else if options.get("cost").is_some_and(|v| v.as_bool().is_none()) {
+            Some("trace cost must be a boolean when supplied")
         } else if traits.is_empty() {
             Some("trace subscription requires explicit traits")
         } else if instance.is_some_and(|i| i != self.instance) {
@@ -139,6 +147,7 @@ impl TraceJournal {
         subscribers.push(Subscription {
             id,
             traits,
+            cost: options.get("cost").and_then(Value::as_bool).unwrap_or(false),
             entity: options
                 .get("seedEntityId")
                 .and_then(Value::as_str)
@@ -176,6 +185,8 @@ impl TraceJournal {
             return;
         }
         let (seed, seed_entity_id, seed_traits) = observed.seed_summary();
+        let costed = observed.outcomes.iter().any(|o| o.cost.is_some());
+        let plain_outcomes: Vec<_> = observed.outcomes.iter().map(|o| o.without_cost()).collect();
         let entry = TraceEntry {
             seq: self.seq.fetch_add(1, Ordering::SeqCst),
             dispatch_id: observed.dispatch_id,
@@ -185,13 +196,18 @@ impl TraceJournal {
             seed,
             seed_entity_id,
             seed_traits,
-            outcomes: observed.outcomes,
+            outcomes: plain_outcomes,
             asks,
             error: observed.error,
         };
         let envelope = wire(
             serde_json::json!({ "type": "trace", "instance": self.instance, "programVersion": entry.program_version, "dispatch": entry }),
         );
+        let cost_envelope = costed.then(|| {
+            let mut dispatch = serde_json::to_value(&entry).expect("trace entry serializes");
+            dispatch["outcomes"] = serde_json::to_value(&observed.outcomes).expect("trace outcomes serialize");
+            wire(serde_json::json!({ "type": "trace", "instance": self.instance, "programVersion": entry.program_version, "dispatch": dispatch }))
+        });
         subscribers.retain(|subscriber| {
             let selected = subscriber
                 .entity
@@ -206,7 +222,11 @@ impl TraceJournal {
                             .seed_traits
                             .iter()
                             .any(|t| subscriber.traits.contains(t))));
-            !selected || subscriber.sender.send(envelope.clone()).is_ok()
+            let item = match (&cost_envelope, subscriber.cost) {
+                (Some(costed), true) => costed.clone(),
+                _ => envelope.clone(),
+            };
+            !selected || subscriber.sender.send(item).is_ok()
         });
         if let Some((path, file)) = self.file.lock().as_mut() {
             use std::io::Write;
