@@ -292,6 +292,22 @@ impl orbital_core::runtime::kernel::guest_hosting::GuestHosting for HostGuests {
         let live = Mutex::new(host.subscribe_live());
         Arc::new(GuestOf(host, live))
     }
+
+    /// Answered by this host's program port (`behavior/resolve <behavior> { lazy: <file> }`), which resolves the one page.
+    fn lazy_program(&self, behavior: &str, file: &str) -> Result<orbital_core::OrbitalSchema, orbital_core::effects::executor::SubstrateFailure> {
+        let failure = |message: String| orbital_core::effects::executor::SubstrateFailure { message, errors: Vec::new() };
+        let Some(SubstratePort(port)) = &self.substrate else {
+            return Err(orbital_core::runtime::agent_ports::guest_failure(
+                orbital_core::runtime::os::OsErrorKind::Unsupported,
+                format!("program/open: this host has no program port to resolve the lazy pages of `{behavior}`"),
+            ));
+        };
+        let named: Value = serde_json::from_value(serde_json::json!({ "behavior": behavior })).map_err(|e| failure(e.to_string()))?;
+        let options: Value = serde_json::from_value(serde_json::json!({ "lazy": file })).map_err(|e| failure(e.to_string()))?;
+        let answer = port.run("behavior/resolve", &[named, options])?;
+        serde_json::from_value(orbital_core::json_value::value_to_json(&answer))
+            .map_err(|e| failure(format!("behavior/resolve: the lazy program `{file}` of `{behavior}` is not a resolved program: {e}")))
+    }
 }
 
 /// A guest's host, and its live stream: the dispatches it ran on its own for a viewer wait there for the next tick pass.
@@ -3309,10 +3325,18 @@ mod tests {
     }
 
     fn split_guest_answers_of(program: serde_json::Value, open: serde_json::Value, legs: Vec<serde_json::Value>) -> (serde_json::Value, Vec<serde_json::Value>, Vec<String>) {
-        let runtime = Host::new(Arc::new(DriverAdapter::memory())).shared();
+        split_guest_answers_hosted(program, open, legs, None)
+    }
+
+    /// [`split_guest_answers_of`] under a host whose program port is `substrate`.
+    fn split_guest_answers_hosted(program: serde_json::Value, open: serde_json::Value, legs: Vec<serde_json::Value>, substrate: Option<SubstratePort>) -> (serde_json::Value, Vec<serde_json::Value>, Vec<String>) {
+        let runtime = Host::with_config(Arc::new(DriverAdapter::memory()), HostConfig { substrate, ..HostConfig::default() }).shared();
         let legs = legs
             .into_iter()
             .map(|leg| {
+                if let Some(file) = leg.get("lazyFile") {
+                    return serde_json::json!(["program/lazy", { "guest": "@payload.result.guest", "file": file }, { "emit": { "success": "LEGGED", "failure": "FAILED" } }]);
+                }
                 let mut options = leg.clone();
                 options["guest"] = serde_json::json!("@payload.result.guest");
                 let address = format!("Split.{}.{}", leg["targetTrait"].as_str().unwrap_or("Back"), leg["event"].as_str().unwrap_or_default());
@@ -3419,13 +3443,98 @@ mod tests {
     }
 
     #[test]
-    fn a_split_guest_carrying_lazy_programs_hands_its_viewer_each_ones_client_program_by_file() {
+    fn a_split_guest_hands_its_viewer_no_lazy_program_when_it_opens() {
         let (opened, _, failures) = split_guest_answers_of(split_program_with_lazy_child(), serde_json::json!({ "route": "/", "split": true }), split_legs());
         assert!(failures.is_empty(), "{failures:?}");
-        let late = &opened["client"]["lazyPrograms"]["lazy/Late.orb"];
-        let traits = late["orbitals"][0]["traits"].as_array().cloned().unwrap_or_default();
-        assert!(traits.iter().any(|t| t["name"] == "LateFace"), "the viewer loads the lazy page from the client program it was handed: {opened}");
+        assert!(opened["client"].get("lazyPrograms").is_none(), "a lazy page loads when the viewer needs it, not at open: {opened}");
         assert_eq!(opened["client"]["lazyPages"][0]["orbRef"], "lazy/Late.orb", "the viewer's program still declares the lazy page: {opened}");
+    }
+
+    #[test]
+    fn a_split_guests_viewer_loads_one_lazy_page_by_its_file() {
+        let (_, answers, failures) = split_guest_answers_of(split_program_with_lazy_child(), serde_json::json!({ "route": "/", "split": true }), vec![serde_json::json!({ "lazyFile": "lazy/Late.orb" })]);
+        assert!(failures.is_empty(), "{failures:?}");
+        let answer = &answers[0];
+        assert_eq!(answer["file"], "lazy/Late.orb", "{answer}");
+        let traits = answer["program"]["orbitals"][0]["traits"].as_array().cloned().unwrap_or_default();
+        assert!(traits.iter().any(|t| t["name"] == "LateFace"), "the viewer gets the lazy page's client program: {answer}");
+    }
+
+    #[test]
+    fn edge_a_split_guest_refuses_a_lazy_file_it_does_not_carry_naming_it() {
+        let (_, answers, failures) = split_guest_answers_of(split_program_with_lazy_child(), serde_json::json!({ "route": "/", "split": true }), vec![serde_json::json!({ "lazyFile": "lazy/Nowhere.orb" })]);
+        assert!(answers.is_empty(), "{answers:?}");
+        assert!(failures.iter().any(|f| f.contains("lazy/Nowhere.orb") && f.contains("not-found")), "{failures:?}");
+    }
+
+    /// A program port that resolves the lazy page `lazy/Late.orb` of the installed behavior `pkg/site`, recording each ask.
+    struct ResolvesLate(Arc<Mutex<Vec<(String, String)>>>);
+
+    impl orbital_core::effects::executor::SubstrateHandler for ResolvesLate {
+        fn run(&self, op: &str, args: &[Value]) -> Result<Value, orbital_core::effects::executor::SubstrateFailure> {
+            // The real port reads the behavior a value names (`{ behavior }`), never a bare string.
+            let behavior = args.first().and_then(|v| v.get("behavior")).and_then(Value::as_str).unwrap_or_default().to_string();
+            let file = args.get(1).and_then(|o| o.get("lazy")).and_then(Value::as_str).unwrap_or_default().to_string();
+            self.0.lock().push((behavior.clone(), file.clone()));
+            match (op, behavior.as_str(), file.as_str()) {
+                ("behavior/resolve", "pkg/site", "lazy/Late.orb") => Ok(serde_json::from_value(split_program_with_lazy_child()["lazyPrograms"]["lazy/Late.orb"].clone()).unwrap()),
+                _ => Err(orbital_core::runtime::agent_ports::guest_failure(orbital_core::runtime::os::OsErrorKind::NotFound, format!("behavior/resolve: pkg/site has no lazy page whose file is `{file}`"))),
+            }
+        }
+    }
+
+    /// The split program with one lazy page, naming the installed behavior its lazy programs are read from.
+    fn split_program_with_lazy_source() -> serde_json::Value {
+        let mut program = split_program_with_lazy_child();
+        program.as_object_mut().unwrap().remove("lazyPrograms");
+        program["lazySource"] = serde_json::json!({ "behavior": "pkg/site" });
+        program
+    }
+
+    fn resolving_late() -> (SubstratePort, Arc<Mutex<Vec<(String, String)>>>) {
+        let asked = Arc::new(Mutex::new(Vec::new()));
+        (SubstratePort(Arc::new(ResolvesLate(Arc::clone(&asked)))), asked)
+    }
+
+    #[test]
+    fn a_split_guest_naming_its_lazy_source_reads_a_lazy_page_from_its_host_only_when_asked() {
+        let (port, asked) = resolving_late();
+        let (opened, answers, failures) = split_guest_answers_hosted(split_program_with_lazy_source(), serde_json::json!({ "route": "/", "split": true }), vec![serde_json::json!({ "lazyFile": "lazy/Late.orb" })], Some(port));
+        assert!(failures.is_empty(), "{failures:?}");
+        let traits = answers[0]["program"]["orbitals"][0]["traits"].as_array().cloned().unwrap_or_default();
+        assert!(traits.iter().any(|t| t["name"] == "LateFace"), "{}", answers[0]);
+        assert_eq!(*asked.lock(), vec![("pkg/site".to_string(), "lazy/Late.orb".to_string())], "the host resolved that one page, once");
+        assert!(opened["client"].get("lazySource").is_none() && opened["client"].get("lazyPrograms").is_none(), "{opened}");
+    }
+
+    #[test]
+    fn control_a_split_guest_naming_its_lazy_source_asks_its_host_for_nothing_when_it_opens() {
+        let (port, asked) = resolving_late();
+        let (_, _, failures) = split_guest_answers_hosted(split_program_with_lazy_source(), serde_json::json!({ "route": "/", "split": true }), vec![], Some(port));
+        assert!(failures.is_empty(), "{failures:?}");
+        assert!(asked.lock().is_empty(), "no lazy page is read until one is needed: {:?}", asked.lock());
+    }
+
+    #[test]
+    fn edge_a_lazy_file_its_host_has_no_page_for_is_refused_naming_it() {
+        let (port, _) = resolving_late();
+        let (_, answers, failures) = split_guest_answers_hosted(split_program_with_lazy_source(), serde_json::json!({ "route": "/", "split": true }), vec![serde_json::json!({ "lazyFile": "lazy/Nowhere.orb" })], Some(port));
+        assert!(answers.is_empty(), "{answers:?}");
+        assert!(failures.iter().any(|f| f.contains("lazy/Nowhere.orb") && f.contains("not-found")), "{failures:?}");
+    }
+
+    #[test]
+    fn edge_a_host_without_a_program_port_cannot_read_a_named_lazy_source() {
+        let (_, answers, failures) = split_guest_answers_hosted(split_program_with_lazy_source(), serde_json::json!({ "route": "/", "split": true }), vec![serde_json::json!({ "lazyFile": "lazy/Late.orb" })], None);
+        assert!(answers.is_empty(), "{answers:?}");
+        assert!(failures.iter().any(|f| f.contains("pkg/site") && f.contains("unsupported")), "{failures:?}");
+    }
+
+    #[test]
+    fn control_a_guest_that_is_not_split_refuses_a_lazy_page_ask() {
+        let (_, answers, failures) = split_guest_answers_of(split_program_with_lazy_child(), serde_json::json!({ "route": "/" }), vec![serde_json::json!({ "lazyFile": "lazy/Late.orb" })]);
+        assert!(answers.is_empty(), "{answers:?}");
+        assert!(failures.iter().any(|f| f.contains("program/lazy") && f.contains("invalid")), "its viewer runs nothing, so it loads nothing: {failures:?}");
     }
 
     #[test]
