@@ -53,7 +53,7 @@ impl DioxusPatternRenderer for AvlTransitionExplainerRenderer {
                 ),
                 Value::Object(_) => to_json(v).to_string(),
                 Value::Lambda(_) => String::new(),
-                Value::Sealed(_) => to_json(v).to_string(),
+                Value::Sealed(_) | Value::Blob(_) => to_json(v).to_string(),
             }
         }
         let tr = props

@@ -1247,6 +1247,16 @@ impl Host {
                 None
             };
             let response = if flag("wire") { self.kernel.client_view(response) } else { response };
+            if flag("framed") {
+                let (head, body) = self.kernel.framed_answer(&response).map_err(|e| (e, "EVENT_PROCESSING_ERROR", 500))?;
+                let mut answer = serde_json::to_value(&head)
+                    .and_then(serde_json::from_value::<Value>)
+                    .map_err(|e| (e.to_string(), "EVENT_PROCESSING_ERROR", 500))?;
+                if let Value::Object(fields) = &mut answer {
+                    fields.insert("framed".to_string().into(), Value::bytes(body));
+                }
+                return Ok(answer);
+            }
             let mut answer = serde_json::to_value(&response).map_err(|e| (e.to_string(), "EVENT_PROCESSING_ERROR", 500))?;
             if let (Some(items), serde_json::Value::Object(fields)) = (items, &mut answer) {
                 fields.insert("items".to_string(), items);
@@ -2832,6 +2842,21 @@ mod tests {
         let answer = dispatch_request(&runtime, serde_json::json!({ "wire": true, "orbital": "Desk", "targetTrait": "Notes", "event": "$UNMOUNT", "clientId": "tab-1" })).unwrap();
         assert_eq!(answer["success"], false, "{answer}");
         assert!(answer["error"].as_str().unwrap_or("").contains("`unmount`"), "{answer}");
+    }
+
+    // EXEC-DIST-16b: a framed request answers its head, and the framed body a browser host reads.
+    #[test]
+    fn a_framed_wire_request_answers_its_head_and_the_framed_body() {
+        let runtime = desk();
+        let mut answer = dispatch_request(&runtime, serde_json::json!({ "wire": true, "framed": true, "orbital": "Desk", "targetTrait": "Notes", "event": "ADD_NOTE", "viewer": { "id": "u1" } })).unwrap();
+        let body = orbital_core::codec::base64_decode(answer["framed"].as_str().expect("framed bytes")).unwrap();
+        let (head, blobs) = orbital_core::blobs::unframe(&body).unwrap();
+        assert!(blobs.is_empty(), "ADD_NOTE emits no SExpr-typed value");
+        answer.as_object_mut().unwrap().remove("framed");
+        assert_eq!(serde_json::from_slice::<serde_json::Value>(head).unwrap(), answer);
+        assert_eq!(answer["success"], true, "{answer}");
+        let plain = dispatch_request(&desk(), serde_json::json!({ "wire": true, "orbital": "Desk", "targetTrait": "Notes", "event": "ADD_NOTE", "viewer": { "id": "u1" } })).unwrap();
+        assert!(plain.get("framed").is_none(), "control: an unframed request answers no body: {plain}");
     }
 
     #[test]
