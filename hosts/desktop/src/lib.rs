@@ -49,8 +49,9 @@ impl Renderer {
 /// The program a client-role kernel runs against a server: the same projection the browser receives (EXEC-ENDPOINT-5),
 /// so the server's boot and protocol orbitals stay on the server.
 fn client_schema(schema: &OrbitalSchema) -> Result<OrbitalSchema, String> {
-    let program = serde_json::to_value(schema).map_err(|e| format!("client program: {e}"))?;
-    serde_json::from_value(orbital_core::effects::runs_on::client_program(&program)).map_err(|e| format!("client program: {e}"))
+    let program = orbital_core::value_serialize::to_value(schema).map_err(|e| format!("client program: {e}"))?;
+    let client = orbital_core::effects::runs_on::client_program(program);
+    serde_json::from_value(orbital_core::json_value::value_to_json(&client)).map_err(|e| format!("client program: {e}"))
 }
 
 /// An in-process kernel over the app's own rows.

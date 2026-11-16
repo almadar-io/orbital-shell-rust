@@ -118,15 +118,17 @@ fn main() {
     if let Some(path) = export_client {
         let mut program: serde_json::Value =
             serde_json::from_str(&schema_json).expect("resolved program JSON");
-        let metadata =
-            orbital_core::effects::runs_on::client_program_metadata(&program["orbitals"]);
+        let orbitals: orbital_core::Value = serde_json::from_value(program["orbitals"].clone()).expect("resolved orbitals");
+        let metadata = orbital_core::json_value::value_to_json(&orbital_core::Value::object(
+            orbital_core::effects::runs_on::client_program_metadata(&orbitals),
+        ));
         let root = program.as_object_mut().expect("resolved program object");
         let slot = root
             .entry("_metadata")
             .or_insert_with(|| serde_json::json!({}));
         slot.as_object_mut()
             .expect("metadata object")
-            .extend(metadata);
+            .extend(metadata.as_object().cloned().into_iter().flatten());
         let language =
             orbital_core::language_data::language_bundle_json().expect("installed language bundle");
         let language_path = std::path::Path::new(&path).with_file_name("language.json");
