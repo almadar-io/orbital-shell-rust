@@ -6,6 +6,7 @@ use crate::renderer::{
 };
 use dioxus::prelude::*;
 use orbital_core::client::helpers::*;
+use orbital_core::client::recurse::child_patterns;
 use orbital_core::Value;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -22,6 +23,7 @@ static NEXT_VIDEO: AtomicUsize = AtomicUsize::new(0);
 struct AnnotatedMediaProps {
     props: Value,
     view: OwnedDioxusView,
+    children: Element,
 }
 
 #[derive(Clone, PartialEq)]
@@ -80,7 +82,10 @@ fn AnnotatedMedia(input: AnnotatedMediaProps) -> Element {
     let view = input.view.as_view();
     let sink = view.sink;
     let src = get_string_or(props, "src", "");
-    let video = get_string_or(props, "mediaType", "image") == "video";
+    let media_type = get_string_or(props, "mediaType", "image");
+    let video = media_type == "video";
+    let content = media_type == "content";
+    let children = input.children.clone();
     let title = get_string_or(props, "title", "");
     let active = get_string(props, "activePinId");
     let placing = get_bool_or(props, "placing", true);
@@ -116,10 +121,13 @@ fn AnnotatedMedia(input: AnnotatedMediaProps) -> Element {
     } else {
         ""
     };
-    let frame_class = cn(&[
-        "relative w-full overflow-hidden rounded-md bg-muted",
-        crosshair,
-    ]);
+    let frame_base = if content {
+        "relative w-full"
+    } else {
+        "relative w-full overflow-hidden rounded-md bg-muted"
+    };
+    let frame_class = cn(&[frame_base, crosshair]);
+    let overlay = content && placing && place_event.is_some();
     let placed: Vec<PinSpec> = pins
         .iter()
         .filter(|pin| pin.x.is_some() && pin.y.is_some())
@@ -162,7 +170,15 @@ fn AnnotatedMedia(input: AnnotatedMediaProps) -> Element {
                                 return;
                             }
                         };
-                        if rect.size.width == 0.0 || rect.size.height == 0.0 {
+                        let (width, height) = if content {
+                            match element.get_scroll_size().await {
+                                Ok(size) if size.width > 0.0 && size.height > 0.0 => (size.width, size.height),
+                                _ => (rect.size.width, rect.size.height),
+                            }
+                        } else {
+                            (rect.size.width, rect.size.height)
+                        };
+                        if width == 0.0 || height == 0.0 {
                             return;
                         }
                         let time = if video {
@@ -177,14 +193,16 @@ fn AnnotatedMedia(input: AnnotatedMediaProps) -> Element {
                             sink,
                             &name,
                             object_value([
-                                ("x", number_value(round1(clamp((point.x - rect.origin.x) / rect.size.width * 100.0)))),
-                                ("y", number_value(round1(clamp((point.y - rect.origin.y) / rect.size.height * 100.0)))),
+                                ("x", number_value(round1(clamp((point.x - rect.origin.x) / width * 100.0)))),
+                                ("y", number_value(round1(clamp((point.y - rect.origin.y) / height * 100.0)))),
                                 ("time", number_value(time)),
                             ]),
                         );
                     });
                 },
-                if video {
+                if content {
+                    {children}
+                } else if video {
                     video {
                         id: "{video_id}",
                         src: "{src}",
@@ -204,13 +222,18 @@ fn AnnotatedMedia(input: AnnotatedMediaProps) -> Element {
                 } else {
                     img { src: "{src}", alt: "{title}", draggable: "false", style: "display:block;width:100%;user-select:none" }
                 }
+                if overlay {
+                    div { style: "position:absolute;inset:0;z-index:10;cursor:crosshair" }
+                }
                 for pin in placed.iter() {
                     {
                         let class = format!("absolute {}", pin_class(pin, active.as_deref()));
+                        let layer = if content { ";z-index:20" } else { "" };
                         let style = format!(
-                            "left:{}%;top:{}%;transform:translate(-50%,-50%)",
+                            "left:{}%;top:{}%;transform:translate(-50%,-50%){}",
                             pin.x.unwrap_or(0.0),
-                            pin.y.unwrap_or(0.0)
+                            pin.y.unwrap_or(0.0),
+                            layer
                         );
                         let label = pin.label.clone().unwrap_or_default();
                         let aria = pin.label.clone().unwrap_or_else(|| pin.number.to_string());
@@ -294,8 +317,12 @@ impl DioxusPatternRenderer for AnnotatedMediaRenderer {
         props: &Value,
         _entity: Option<&Value>,
         view: &DioxusView<'_>,
-        _registry: &DioxusPatternRegistry,
+        registry: &DioxusPatternRegistry,
     ) -> Element {
-        rsx! { AnnotatedMedia { props: props.clone(), view: view.to_owned() } }
+        let children = child_patterns(props, view.trait_content);
+        let children_node = rsx! {
+            for (child, src) in children.iter() { {view.render_child(registry, child, src.as_deref())} }
+        };
+        rsx! { AnnotatedMedia { props: props.clone(), view: view.to_owned(), children: children_node } }
     }
 }
