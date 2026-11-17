@@ -1236,6 +1236,8 @@ impl Host {
             return Err((format!("Orbital not found: {orbital}"), "ORBITAL_NOT_FOUND", 404));
         };
         let respond = |outcomes: &[(String, ProcessEventResult)], mut response: EventResponse| -> Result<Value, (String, &'static str, u16)> {
+            let hops = orbital_core::effects::response::TransitionHop::of_outcomes(outcomes);
+            response.transitions = (!hops.is_empty()).then_some(hops);
             self.kernel.stamp_emitted_sources(&mut response);
             let items = if flag("stream") {
                 {
@@ -2872,6 +2874,23 @@ mod tests {
         let outcome = dispatch_request(&runtime, serde_json::json!({ "orbital": "Desk", "targetTrait": "Notes", "event": "ADD_NOTE", "viewer": { "id": "u1" } })).unwrap();
         assert_eq!(outcome["success"], true, "without wire the host still answers the raw EventResponse; the kernel shapes the model's outcome: {outcome}");
         assert!(outcome.get("ok").is_none(), "control: the host shapes nothing: {outcome}");
+    }
+
+    // Host twin of the embedded server's `dispatch_wire` (embed.rs): a browser folds a `[optimistic]` trait's host
+    // report only when `transitions` shows the host passing through the state it holds (`host_report_continues`).
+    #[test]
+    fn a_wire_answer_lists_the_hops_the_host_ran_as_the_embedded_hosts_do() {
+        let runtime = desk();
+        let answer = dispatch_request(&runtime, serde_json::json!({ "wire": true, "orbital": "Desk", "targetTrait": "Notes", "event": "ADD_NOTE", "viewer": { "id": "u1" } })).unwrap();
+        let hops = answer["transitions"].as_array().unwrap_or_else(|| panic!("no transitions: {answer}"));
+        assert!(hops.iter().any(|hop| hop["trait"] == "Notes" && hop["event"] == "ADD_NOTE"), "{answer}");
+    }
+
+    #[test]
+    fn control_a_wire_answer_whose_guard_refused_lists_no_hop() {
+        let runtime = desk();
+        let refused = dispatch_request(&runtime, serde_json::json!({ "wire": true, "orbital": "Desk", "targetTrait": "Notes", "event": "ADD_NOTE", "viewer": { "id": "u2" } })).unwrap();
+        assert!(refused.get("transitions").is_none(), "{refused}");
     }
 
     #[test]
