@@ -120,10 +120,8 @@ impl SelfSubstrate {
         })
     }
 
-    /// `program/live { clientId? }`: this host's live broadcast, as `orb serve`'s `/api/events` carries it. An item goes
-    /// to the stream when it would go to that connection (`LiveBroadcastItem::delivered_to`): a peer's row only when the
-    /// identity bound to the `clientId` session (the anonymous viewer when none is) may read it, never the stream's own
-    /// `clientId`'s.
+    /// `program/live { clientId?, guest? }`: this host's live broadcast for the connection `clientId` ([`host_live_stream`]),
+    /// or, naming a hosted `guest`, that guest's host's.
     fn live_source(&self, op: &str, args: &[Value]) -> Option<orbital_core::runtime::native_host::SubstrateSource> {
         use orbital_core::runtime::os_host::completion::StreamPoll;
         if op != "program/live" {
@@ -151,30 +149,42 @@ impl SelfSubstrate {
             }));
         }
         let client_id = options.get("clientId").and_then(Value::as_str).map(str::to_string);
-        let mut receiver = runtime.subscribe_live();
-        let host = Arc::downgrade(&runtime);
-        let _stream = client_id.as_deref().map(|session| runtime.kernel.open_session_stream(session));
-        Some(Box::new(move || loop {
-            let _held = &_stream;
-            let Some(runtime) = host.upgrade() else { return StreamPoll::Ended };
-            let item = match receiver.try_recv() {
-                Ok(item) => item,
-                Err(broadcast::error::TryRecvError::Empty) => return StreamPoll::Idle,
-                Err(broadcast::error::TryRecvError::Lagged(skipped)) => {
-                    tracing::error!(target: orbital_core::logging::ns::SERVER_DATA, skipped, session = client_id.as_deref().unwrap_or(""), "session live stream lagged: items were dropped");
-                    continue;
-                }
-                Err(broadcast::error::TryRecvError::Closed) => return StreamPoll::Ended,
-            };
-            let readable = |item: &LiveBroadcastItem| {
-                let _session = client_id.as_deref().map(|session| runtime.kernel.enter_session(session));
-                runtime.kernel.session_viewer().is_ok_and(|viewer| runtime.live_item_visible_to(item, &viewer))
-            };
-            if item.delivered_to(client_id.as_deref(), readable) {
-                return StreamPoll::Item(live_item_value(&item));
-            }
-        }))
+        // A hosted guest runs on a host of its own: its viewer's items are on that host's stream, never on this one (EXEC-CONC-7).
+        if let Some(guest) = options.get("guest").and_then(Value::as_str) {
+            return Some(runtime.kernel.guest_live_source(guest, &options).unwrap_or_else(|| Box::new(|| StreamPoll::Ended)));
+        }
+        Some(host_live_stream(&runtime, client_id))
     }
+}
+
+/// `host`'s live broadcast for the connection `client_id`, as `orb serve`'s `/api/events` carries it: an item goes to the
+/// stream when it would go to that connection (`LiveBroadcastItem::delivered_to`), a peer's row only when the identity bound to
+/// the `client_id` session (the anonymous viewer when none is) may read it, never the stream's own `client_id`'s.
+fn host_live_stream(runtime: &Arc<Host>, client_id: Option<String>) -> orbital_core::runtime::native_host::SubstrateSource {
+    use orbital_core::runtime::os_host::completion::StreamPoll;
+    let mut receiver = runtime.subscribe_live();
+    let host = Arc::downgrade(runtime);
+    let _stream = client_id.as_deref().map(|session| runtime.kernel.open_session_stream(session));
+    Box::new(move || loop {
+        let _held = &_stream;
+        let Some(runtime) = host.upgrade() else { return StreamPoll::Ended };
+        let item = match receiver.try_recv() {
+            Ok(item) => item,
+            Err(broadcast::error::TryRecvError::Empty) => return StreamPoll::Idle,
+            Err(broadcast::error::TryRecvError::Lagged(skipped)) => {
+                tracing::error!(target: orbital_core::logging::ns::SERVER_DATA, skipped, session = client_id.as_deref().unwrap_or(""), "session live stream lagged: items were dropped");
+                continue;
+            }
+            Err(broadcast::error::TryRecvError::Closed) => return StreamPoll::Ended,
+        };
+        let readable = |item: &LiveBroadcastItem| {
+            let _session = client_id.as_deref().map(|session| runtime.kernel.enter_session(session));
+            runtime.kernel.session_viewer().is_ok_and(|viewer| runtime.live_item_visible_to(item, &viewer))
+        };
+        if item.delivered_to(client_id.as_deref(), readable) {
+            return StreamPoll::Item(live_item_value(&item));
+        }
+    })
 }
 
 /// One live item as a `program/live` stream event: `{ event, payload?, source }`, the `/api/events` frame without its
@@ -384,6 +394,11 @@ impl orbital_core::runtime::kernel::guest_hosting::GuestHost for GuestOf {
 
     fn inbound(&self, ask: &ValueMap) -> Result<Value, orbital_core::effects::executor::SubstrateFailure> {
         self.0.inbound_answer(ask).map_err(|message| orbital_core::effects::executor::SubstrateFailure { message, errors: Vec::new() })
+    }
+
+    fn live_source(&self, options: &ValueMap) -> Option<orbital_core::runtime::native_host::SubstrateSource> {
+        let client_id = options.get("clientId").and_then(Value::as_str).map(str::to_string);
+        Some(host_live_stream(&self.0, client_id))
     }
 
     fn take_host_dispatches(&self) -> Vec<Value> {
@@ -1788,6 +1803,140 @@ impl std::fmt::Debug for Host {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A hosted guest whose `PRESENT` starts nothing and whose later `FINISH` emits `BOUND { requestId }`; the opener presents
+    /// with `present_options` (the dispatch options besides `guest`), then finishes with `finish_id`, and answers its row.
+    fn reply_guest(present_payload: serde_json::Value, present_options: serde_json::Value, finish_id: Option<i64>) -> serde_json::Value {
+        let runtime = Host::new(Arc::new(DriverAdapter::memory())).shared();
+        let guest = serde_json::json!({
+            "name": "BindGuest", "typeContractVersion": 1,
+            "orbitals": [{
+                "name": "Binds",
+                "entity": { "name": "Doc", "persistence": "runtime", "fields": [{ "name": "id", "type": "string" }] },
+                "traits": [{
+                    "name": "Binder", "linkedEntity": "Doc",
+                    "emits": [{ "event": "BOUND", "payloadSchema": [{ "name": "requestId", "type": "number", "required": true }] }],
+                    "stateMachine": {
+                        "states": [{ "name": "idle", "isInitial": true }],
+                        "events": [{ "key": "INIT", "name": "Init" }, { "key": "PRESENT", "name": "Present" }, { "key": "FINISH", "name": "Finish", "payloadSchema": [{ "name": "requestId", "type": "number", "required": true }] }],
+                        "transitions": [
+                            { "from": "idle", "to": "idle", "event": "INIT", "effects": [] },
+                            { "from": "idle", "to": "idle", "event": "PRESENT", "effects": [] },
+                            { "from": "idle", "to": "idle", "event": "FINISH", "effects": [["emit", "BOUND", { "requestId": "@payload.requestId" }]] }
+                        ]
+                    }
+                }],
+                "pages": [{ "name": "Home", "path": "/", "traits": [{ "ref": "Binder" }] }]
+            }]
+        });
+        let mut options = serde_json::json!({ "guest": "@payload.result.guest" });
+        if let (Some(into), Some(extra)) = (options.as_object_mut(), present_options.as_object()) {
+            into.extend(extra.clone());
+        }
+        let opener: orbital_core::OrbitalSchema = serde_json::from_value(serde_json::json!({
+            "name": "Opener", "typeContractVersion": 1,
+            "orbitals": [{
+                "name": "Opener",
+                "entity": { "name": "Box", "persistence": "runtime", "fields": [{ "name": "id", "type": "string" }, { "name": "guest", "type": "string" }, { "name": "reply", "type": "string" }, { "name": "failed", "type": "string" }] },
+                "osGrants": { "kernel": [{ "target": "guest", "kinds": ["spawn", "declared"] }] },
+                "traits": [{
+                    "name": "Opener", "linkedEntity": "Box",
+                    "stateMachine": {
+                        "states": [{ "name": "idle", "isInitial": true }],
+                        "events": [{ "key": "OPEN", "name": "Open", "payloadSchema": [{ "name": "program", "type": "object", "required": true }] },
+                            { "key": "OPENED", "name": "Opened" }, { "key": "ANSWERED", "name": "Answered" }, { "key": "FAILED", "name": "Failed" },
+                            { "key": "FIN", "name": "Fin", "payloadSchema": [{ "name": "n", "type": "number", "required": true }] }, { "key": "FINISHED", "name": "Finished" }],
+                        "transitions": [
+                            { "from": "idle", "to": "idle", "event": "OPEN", "effects": [["program/open", "@payload.program", { "route": "/", "declared": true }, { "emit": { "success": "OPENED", "failure": "FAILED" } }]] },
+                            { "from": "idle", "to": "idle", "event": "OPENED", "effects": [
+                                ["set", "@entity.guest", "@payload.result.guest"],
+                                ["program/dispatch", "Binds.Binder.PRESENT", present_payload, options, { "key": "present", "emit": { "success": "ANSWERED", "failure": "FAILED" } }]] },
+                            { "from": "idle", "to": "idle", "event": "FIN", "effects": [["program/dispatch", "Binds.Binder.FINISH", { "requestId": "@payload.n" }, { "guest": "@entity.guest" }, { "key": "finish", "emit": { "success": "FINISHED", "failure": "FAILED" } }]] },
+                            { "from": "idle", "to": "idle", "event": "FINISHED", "effects": [] },
+                            { "from": "idle", "to": "idle", "event": "ANSWERED", "effects": [["set", "@entity.reply", ["object/get", "@payload.result.reply", "event", "none"]]] },
+                            { "from": "idle", "to": "idle", "event": "FAILED", "effects": [["set", "@entity.failed", ["json/stringify", "@payload"]]] }]
+                    }
+                }]
+            }]
+        }))
+        .unwrap();
+        runtime.register_schema(opener).unwrap();
+        runtime.dispatch("Opener", "default", "OPEN", serde_json::from_value(serde_json::json!({ "program": guest })).unwrap()).unwrap();
+        let snapshot = || serde_json::to_value(&runtime.kernel.snapshot_trait("Opener", Some("default")).entity).unwrap();
+        let settled = |e: &serde_json::Value| e["reply"].is_string() || e["failed"].as_str().is_some_and(|f| !f.is_empty());
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        if let Some(n) = finish_id {
+            runtime.dispatch("Opener", "default", "FIN", serde_json::from_value(serde_json::json!({ "n": n })).unwrap()).unwrap();
+        }
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            let entity = snapshot();
+            if settled(&entity) || std::time::Instant::now() > deadline {
+                return entity;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+    }
+
+    #[test]
+    fn a_guest_dispatch_waiting_on_a_reply_answers_when_a_later_dispatch_emits_it_for_the_same_request() {
+        let entity = reply_guest(serde_json::json!({ "requestId": 7 }), serde_json::json!({ "reply": { "events": ["BOUND"], "match": "requestId", "timeoutMs": 3000 } }), Some(7));
+        assert_eq!(entity["reply"], "BOUND", "the later BOUND for request 7 answered the presentation: {entity}");
+    }
+
+    #[test]
+    fn control_a_reply_for_another_request_does_not_answer_and_the_wait_fails_at_its_timeout() {
+        let entity = reply_guest(serde_json::json!({ "requestId": 7 }), serde_json::json!({ "reply": { "events": ["BOUND"], "match": "requestId", "timeoutMs": 600 } }), Some(8));
+        assert!(entity["reply"].is_null(), "BOUND for request 8 is not the reply to request 7: {entity}");
+        assert!(entity["failed"].as_str().unwrap_or_default().contains("no BOUND"), "the wait ends at its timeout and says so: {entity}");
+    }
+
+    #[test]
+    fn edge_a_reply_wait_whose_payload_lacks_the_match_field_is_refused() {
+        let entity = reply_guest(serde_json::json!({}), serde_json::json!({ "reply": { "events": ["BOUND"], "match": "requestId", "timeoutMs": 3000 } }), None);
+        assert!(entity["failed"].as_str().unwrap_or_default().contains("requestId"), "{entity}");
+    }
+
+    fn live_options(pairs: serde_json::Value) -> Value {
+        serde_json::from_value(pairs).unwrap()
+    }
+
+    fn poll_item(source: &mut orbital_core::runtime::native_host::SubstrateSource) -> Option<serde_json::Value> {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        loop {
+            match source() {
+                orbital_core::runtime::os_host::completion::StreamPoll::Item(item) => return Some(serde_json::to_value(item).unwrap()),
+                orbital_core::runtime::os_host::completion::StreamPoll::Idle if std::time::Instant::now() < deadline => std::thread::sleep(std::time::Duration::from_millis(10)),
+                _ => return None,
+            }
+        }
+    }
+
+    #[test]
+    fn a_guest_hosts_live_stream_for_a_viewer_carries_that_viewers_items_and_not_another_viewers() {
+        use orbital_core::runtime::kernel::guest_hosting::GuestHost as _;
+        let host = Host::new(Arc::new(DriverAdapter::memory())).shared();
+        let guest = GuestOf(Arc::clone(&host), Mutex::new(host.subscribe_live()));
+        let Value::Object(options) = live_options(serde_json::json!({ "clientId": "c1" })) else { panic!("options") };
+        let mut source = guest.live_source(&options).expect("a guest host streams its viewers' items");
+        host.broadcast_live(LiveBroadcastItem::call_message("OTHER_TAB".to_string(), Value::Null, "Conversation".to_string(), Some("c2".to_string())));
+        host.broadcast_live(LiveBroadcastItem::call_message("REPLIED".to_string(), Value::Null, "Conversation".to_string(), Some("c1".to_string())));
+        let item = poll_item(&mut source).expect("the viewer's item arrives");
+        assert_eq!(item["event"], "REPLIED", "control: another viewer's item is not this viewer's: {item}");
+    }
+
+    #[test]
+    fn a_live_stream_naming_a_guest_follows_the_guest_not_the_openers_own_broadcast() {
+        let runtime = Host::new(Arc::new(DriverAdapter::memory())).shared();
+        let options = live_options(serde_json::json!({ "clientId": "c1", "guest": "no-such-guest" }));
+        let mut source = runtime.substrate.live_source("program/live", &[options]).expect("program/live has a source");
+        runtime.broadcast_live(LiveBroadcastItem::call_message("OPENER_ITEM".to_string(), Value::Null, "Opener".to_string(), Some("c1".to_string())));
+        assert!(poll_item(&mut source).is_none(), "the opener's own item never reaches a stream that names a guest");
+        let Value::Object(plain) = live_options(serde_json::json!({ "clientId": "c1" })) else { panic!("options") };
+        let mut own = runtime.substrate.live_source("program/live", &[Value::Object(plain)]).expect("program/live has a source");
+        runtime.broadcast_live(LiveBroadcastItem::call_message("OPENER_ITEM".to_string(), Value::Null, "Opener".to_string(), Some("c1".to_string())));
+        assert_eq!(poll_item(&mut own).map(|i| i["event"].clone()), Some(serde_json::json!("OPENER_ITEM")), "control: with no guest the opener's stream carries it");
+    }
     use super::super::store::DriverAdapter;
     use orbital_core::Value;
 
