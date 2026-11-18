@@ -39,7 +39,9 @@ use tokio::sync::broadcast;
 /// subscriber drops the oldest items rather than blocking dispatch (`broadcast_live`
 /// never awaits a slow reader) — mirrors the TS live-push channel's fire-and-forget
 /// fan-out (`Host.ts` `liveBroadcastSink`).
-const LIVE_BROADCAST_CAPACITY: usize = 256;
+// A streamed lesson pushes thousands of items in seconds while each one is stepped as its own delivery: the buffer holds a
+// whole burst so a session stream that falls behind catches up instead of skipping items.
+const LIVE_BROADCAST_CAPACITY: usize = 4096;
 
 use super::error::HostError;
 use super::store::PersistenceAdapter;
@@ -158,7 +160,10 @@ impl SelfSubstrate {
             let item = match receiver.try_recv() {
                 Ok(item) => item,
                 Err(broadcast::error::TryRecvError::Empty) => return StreamPoll::Idle,
-                Err(broadcast::error::TryRecvError::Lagged(_)) => continue,
+                Err(broadcast::error::TryRecvError::Lagged(skipped)) => {
+                    tracing::error!(target: orbital_core::logging::ns::SERVER_DATA, skipped, session = client_id.as_deref().unwrap_or(""), "session live stream lagged: items were dropped");
+                    continue;
+                }
                 Err(broadcast::error::TryRecvError::Closed) => return StreamPoll::Ended,
             };
             let readable = |item: &LiveBroadcastItem| {
@@ -270,15 +275,7 @@ impl orbital_core::runtime::kernel::guest_hosting::GuestHosting for HostGuests {
         if program {
             config.substrate = self.substrate.clone();
         }
-        if let Some(dir) = cwd {
-            let mut anchors = orbital_core::runtime::os_host::OsAnchors::of_process();
-            let home = anchors.home.clone();
-            anchors.start = Some(match (dir.strip_prefix("~/"), home) {
-                (Some(rest), Some(home)) => home.join(rest),
-                _ => std::path::PathBuf::from(dir),
-            });
-            config.anchors = Some(anchors);
-        }
+        config.anchors = guest_anchors(cwd, env);
         let host = Host::with_config(Arc::new(super::store::DriverAdapter::memory()), config);
         let host = match integrations {
             GuestIntegrations::Live => host,
@@ -308,6 +305,24 @@ impl orbital_core::runtime::kernel::guest_hosting::GuestHosting for HostGuests {
         serde_json::from_value(orbital_core::json_value::value_to_json(&answer))
             .map_err(|e| failure(format!("behavior/resolve: the lazy program `{file}` of `{behavior}` is not a resolved program: {e}")))
     }
+}
+
+/// The anchors of a guest opened with `cwd` or `env`: the process's, with `cwd` as its start directory and `env` set
+/// over its environment, since an env-anchored grant resolves from them. Neither given keeps the host default.
+fn guest_anchors(cwd: Option<&str>, env: &[(String, Option<String>)]) -> Option<orbital_core::runtime::os_host::OsAnchors> {
+    if cwd.is_none() && env.is_empty() {
+        return None;
+    }
+    let mut anchors = orbital_core::runtime::os_host::OsAnchors::of_process();
+    if let Some(dir) = cwd {
+        let home = anchors.home.clone();
+        anchors.start = Some(match (dir.strip_prefix("~/"), home) {
+            (Some(rest), Some(home)) => home.join(rest),
+            _ => std::path::PathBuf::from(dir),
+        });
+    }
+    anchors.env = anchors.env.overlaid(env);
+    Some(anchors)
 }
 
 /// A guest's host, and its live stream: the dispatches it ran on its own for a viewer wait there for the next tick pass.
@@ -365,6 +380,10 @@ impl orbital_core::runtime::kernel::guest_hosting::GuestHost for GuestOf {
             errors: vec![serde_json::from_value(serde_json::json!({ "code": code, "message": message, "status": status })).unwrap_or(Value::Null)],
             message,
         })
+    }
+
+    fn inbound(&self, ask: &ValueMap) -> Result<Value, orbital_core::effects::executor::SubstrateFailure> {
+        self.0.inbound_answer(ask).map_err(|message| orbital_core::effects::executor::SubstrateFailure { message, errors: Vec::new() })
     }
 
     fn take_host_dispatches(&self) -> Vec<Value> {
@@ -3384,6 +3403,9 @@ mod tests {
                 if let Some(file) = leg.get("lazyFile") {
                     return serde_json::json!(["program/lazy", { "guest": "@payload.result.guest", "file": file }, { "emit": { "success": "LEGGED", "failure": "FAILED" } }]);
                 }
+                if leg.get("inbound").is_some() {
+                    return serde_json::json!(["program/dispatch", leg, {}, { "guest": "@payload.result.guest" }, { "emit": { "success": "LEGGED", "failure": "FAILED" } }]);
+                }
                 let mut options = leg.clone();
                 options["guest"] = serde_json::json!("@payload.result.guest");
                 let address = format!("Split.{}.{}", leg["targetTrait"].as_str().unwrap_or("Back"), leg["event"].as_str().unwrap_or_default());
@@ -3457,6 +3479,57 @@ mod tests {
                 orbital_core::json_value::value_to_json(&orbital_core::effects::executor::SubstrateHandler::run(runtime.substrate.as_ref(), "program/dispatch", &args).unwrap())
             })
             .collect()
+    }
+
+    #[test]
+    fn a_guest_opened_with_env_has_it_in_the_anchors_its_env_anchored_grants_resolve_from() {
+        let anchors = super::guest_anchors(None, &[("ORB_T_GUEST_HOST".to_string(), Some("store.local".to_string())), ("HOME".to_string(), None)]).expect("env gives anchors");
+        assert_eq!(anchors.env.get("ORB_T_GUEST_HOST"), Some("store.local"));
+        assert_eq!(anchors.env.get("HOME"), None, "a null value unsets the variable");
+    }
+
+    #[test]
+    fn control_a_guest_opened_without_cwd_or_env_keeps_the_host_default_anchors() {
+        assert!(super::guest_anchors(None, &[]).is_none());
+    }
+
+    /// The split program declaring the inbound hook `ping`, answered by Back with `{ status: 200, body: "pong" }`.
+    fn split_program_with_hook() -> serde_json::Value {
+        let mut program = split_program();
+        program["inbound"] = serde_json::json!(["ping"]);
+        let back = &mut program["orbitals"][0]["traits"][1];
+        back["emits"] = serde_json::json!([{ "event": "PING_ANSWERED" }]);
+        back["stateMachine"]["events"].as_array_mut().unwrap().push(serde_json::json!({ "key": "PINGED", "inbound": { "name": "ping", "answers": "PING_ANSWERED" } }));
+        back["stateMachine"]["transitions"].as_array_mut().unwrap().push(serde_json::json!(
+            { "from": "idle", "to": "idle", "event": "PINGED", "effects": [["emit", "PING_ANSWERED", { "status": 200, "body": "pong" }]] }
+        ));
+        program
+    }
+
+    fn hook_answer(open: serde_json::Value, name: &str) -> (serde_json::Value, Vec<String>) {
+        let (_, legs, failures) = split_guest_answers_of(split_program_with_hook(), open, vec![serde_json::json!({ "inbound": name, "body": "{}" })]);
+        (legs.first().cloned().unwrap_or(serde_json::Value::Null), failures)
+    }
+
+    #[test]
+    fn a_hook_posted_into_a_hosted_guest_reaches_its_inbound_route_and_answers_its_status_and_body() {
+        let (answer, failures) = hook_answer(serde_json::json!({ "split": true }), "ping");
+        assert!(failures.is_empty(), "{failures:?}");
+        assert_eq!((answer["status"].as_i64(), answer["body"].as_str()), (Some(200), Some("pong")), "{answer}");
+    }
+
+    #[test]
+    fn a_hook_posted_into_a_guest_holding_its_declared_grants_is_delivered_the_same() {
+        let (answer, failures) = hook_answer(serde_json::json!({ "split": true, "declared": true }), "ping");
+        assert!(failures.is_empty(), "{failures:?}");
+        assert_eq!((answer["status"].as_i64(), answer["body"].as_str()), (Some(200), Some("pong")), "{answer}");
+    }
+
+    #[test]
+    fn control_a_hook_the_guest_does_not_declare_answers_the_kernels_not_found() {
+        let (answer, failures) = hook_answer(serde_json::json!({ "split": true }), "nope");
+        assert!(failures.is_empty(), "an undeclared name is the kernel's answer, not a failure: {failures:?}");
+        assert_eq!(answer["status"].as_i64(), Some(404), "{answer}");
     }
 
     #[test]
