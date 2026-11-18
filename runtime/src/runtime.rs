@@ -831,6 +831,9 @@ impl Host {
         ));
         kernel.set_stateful(true);
         kernel.set_guest_hosting(Arc::new(HostGuests { substrate: config.substrate.clone() }));
+        kernel.set_memory_settler(Arc::new(|| {
+            orbital_core::runtime::memory_release::release_freed_memory();
+        }));
         let (live_tx, _) = broadcast::channel(LIVE_BROADCAST_CAPACITY);
         let rows = persistence.durable().then(|| {
             Arc::new(orbital_core::runtime::credential_store::StoreCredentialRows(persistence.clone()))
