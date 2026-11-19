@@ -300,6 +300,40 @@ impl orbital_core::runtime::kernel::guest_hosting::GuestHosting for HostGuests {
         Arc::new(GuestOf(host, live))
     }
 
+    /// Answered by this host's program port (`program/read "" { resolve, path }`): the resolved program, and each lazy
+    /// program it resolved under the file (`orbRef`) its lazy page names.
+    fn read_program(&self, path: &str) -> Result<(orbital_core::OrbitalSchema, std::collections::HashMap<String, orbital_core::OrbitalSchema>), orbital_core::effects::executor::SubstrateFailure> {
+        let failure = |message: String| orbital_core::effects::executor::SubstrateFailure { message, errors: Vec::new() };
+        let Some(SubstratePort(port)) = &self.substrate else {
+            return Err(orbital_core::runtime::agent_ports::guest_failure(
+                orbital_core::runtime::os::OsErrorKind::Unsupported,
+                format!("program/open: this host has no program port to read {path}"),
+            ));
+        };
+        let options: Value = serde_json::from_value(serde_json::json!({ "resolve": true, "text": false, "path": path })).map_err(|e| failure(e.to_string()))?;
+        let mut read = orbital_core::json_value::value_to_json(&port.run("program/read", &[Value::string(""), options])?);
+        let lazy = read.get_mut("lazy").map(serde_json::Value::take).unwrap_or(serde_json::Value::Null);
+        let program_json = read.get_mut("program").map(serde_json::Value::take).unwrap_or(serde_json::Value::Null);
+        let refs: std::collections::HashMap<String, String> = program_json
+            .get("lazyPages")
+            .and_then(serde_json::Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|page| Some((page.get("orbital")?.as_str()?.to_string(), page.get("orbRef")?.as_str()?.to_string())))
+            .collect();
+        let program: orbital_core::OrbitalSchema = serde_json::from_value(program_json)
+            .map_err(|e| failure(format!("program/open: {path} is not a resolved program: {e}")))?;
+        let mut programs = std::collections::HashMap::new();
+        for entry in lazy.as_array().into_iter().flatten() {
+            let orbital = entry.get("orbital").and_then(serde_json::Value::as_str).unwrap_or_default();
+            let file = refs.get(orbital).ok_or_else(|| failure(format!("program/open: {path} resolved a lazy program for `{orbital}`, which no lazy page names")))?;
+            let lazy_program: orbital_core::OrbitalSchema = serde_json::from_value(entry.get("program").cloned().unwrap_or_default())
+                .map_err(|e| failure(format!("program/open: the lazy program of `{orbital}` in {path} is not a resolved program: {e}")))?;
+            programs.insert(file.clone(), lazy_program);
+        }
+        Ok((program, programs))
+    }
+
     /// Answered by this host's program port (`behavior/resolve <behavior> { lazy: <file> }`), which resolves the one page.
     fn lazy_program(&self, behavior: &str, file: &str) -> Result<orbital_core::OrbitalSchema, orbital_core::effects::executor::SubstrateFailure> {
         let failure = |message: String| orbital_core::effects::executor::SubstrateFailure { message, errors: Vec::new() };
@@ -3562,6 +3596,15 @@ mod tests {
             })
             .collect::<Vec<serde_json::Value>>();
         let opened_effects: Vec<serde_json::Value> = std::iter::once(serde_json::json!(["set", "@entity.opened", ["json/stringify", "@payload"]])).chain(legs).collect();
+        let opened_program = if program.is_null() { serde_json::Value::Null } else { serde_json::json!("@payload.program") };
+        let open_routes = match open.get("key").cloned() {
+            Some(key) => serde_json::json!({ "key": key, "emit": { "success": "OPENED", "failure": "FAILED" } }),
+            None => serde_json::json!({ "emit": { "success": "OPENED", "failure": "FAILED" } }),
+        };
+        let mut open = open;
+        if let Some(options) = open.as_object_mut() {
+            options.remove("key");
+        }
         let opener: orbital_core::OrbitalSchema = serde_json::from_value(serde_json::json!({
             "name": "Opener",
             "typeContractVersion": 1,
@@ -3576,7 +3619,7 @@ mod tests {
                         "events": [{ "key": "OPEN", "name": "Open", "payloadSchema": [{ "name": "program", "type": "object", "required": true }] },
                             { "key": "OPENED", "name": "Opened" }, { "key": "FAILED", "name": "Failed" }, { "key": "LEGGED", "name": "Legged" }],
                         "transitions": [
-                            { "from": "idle", "to": "idle", "event": "OPEN", "effects": [["program/open", "@payload.program", open, { "emit": { "success": "OPENED", "failure": "FAILED" } }]] },
+                            { "from": "idle", "to": "idle", "event": "OPEN", "effects": [["program/open", opened_program, open, open_routes]] },
                             { "from": "idle", "to": "idle", "event": "OPENED", "effects": opened_effects },
                             { "from": "idle", "to": "idle", "event": "LEGGED", "effects": [["set", "@entity.legs", ["array/concat", "@entity.legs", [["json/stringify", "@payload.result"]]]]] },
                             { "from": "idle", "to": "idle", "event": "FAILED", "effects": [["set", "@entity.failures", ["array/concat", "@entity.failures", [["json/stringify", "@payload"]]]]] }]
@@ -3591,15 +3634,26 @@ mod tests {
         std::thread::spawn(move || {
             let args: Vec<Value> = [
                 serde_json::json!("Opener.Opener.OPEN"),
-                serde_json::json!({ "program": program }),
+                serde_json::json!({ "program": if program.is_null() { serde_json::json!({}) } else { program } }),
                 serde_json::json!({ "wire": true, "orbital": "Opener", "targetTrait": "Opener", "event": "OPEN", "clientId": "tab-g" }),
             ]
             .iter()
             .map(|a| serde_json::from_value(a.clone()).unwrap())
             .collect();
             let answered = orbital_core::effects::executor::SubstrateHandler::run(host.substrate.as_ref(), "program/dispatch", &args).map_err(|f| f.message).map(|_| {
-                let _tab = host.kernel.enter_session("tab-g");
-                serde_json::to_value(&host.kernel.snapshot_trait("Opener", Some(orbital_core::RUNTIME_SINGLETON)).entity).unwrap()
+                let settled = || {
+                    let _tab = host.kernel.enter_session("tab-g");
+                    serde_json::to_value(&host.kernel.snapshot_trait("Opener", Some(orbital_core::RUNTIME_SINGLETON)).entity).unwrap()
+                };
+                let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+                loop {
+                    let entity = settled();
+                    let done = entity["opened"].as_str().is_some_and(|o| !o.is_empty()) || entity["failures"].as_array().is_some_and(|f| !f.is_empty());
+                    if done || std::time::Instant::now() > deadline {
+                        break entity;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
             });
             let _ = tx.send(answered);
         });
@@ -3763,6 +3817,88 @@ mod tests {
     fn resolving_late() -> (SubstratePort, Arc<Mutex<Vec<(String, String)>>>) {
         let asked = Arc::new(Mutex::new(Vec::new()));
         (SubstratePort(Arc::new(ResolvesLate(Arc::clone(&asked)))), asked)
+    }
+
+    /// A program port that reads the split program at `apps/split/app.orb` (`program/read "" { resolve, path }`).
+    struct ReadsSplit(Arc<Mutex<Vec<String>>>);
+
+    impl orbital_core::effects::executor::SubstrateHandler for ReadsSplit {
+        fn run(&self, op: &str, args: &[Value]) -> Result<Value, orbital_core::effects::executor::SubstrateFailure> {
+            let path = args.get(1).and_then(|o| o.get("path")).and_then(Value::as_str).unwrap_or_default().to_string();
+            self.0.lock().push(format!("{op} {path}"));
+            match (op, path.as_str()) {
+                ("program/read", "apps/split/app.orb") => Ok(serde_json::from_value(serde_json::json!({ "program": split_program(), "lazy": [] })).unwrap()),
+                _ => Err(orbital_core::runtime::agent_ports::guest_failure(orbital_core::runtime::os::OsErrorKind::NotFound, format!("{op}: no program at {path}"))),
+            }
+        }
+    }
+
+    fn reading_split() -> (SubstratePort, Arc<Mutex<Vec<String>>>) {
+        let asked = Arc::new(Mutex::new(Vec::new()));
+        (SubstratePort(Arc::new(ReadsSplit(Arc::clone(&asked)))), asked)
+    }
+
+    fn open_failure(program: serde_json::Value, open: serde_json::Value, port: SubstratePort) -> String {
+        let failed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| split_guest_answers_hosted(program, open, vec![], Some(port))));
+        match failed {
+            Ok((opened, _, failures)) => format!("opened {opened} failures {failures:?}"),
+            Err(panic) => panic.downcast_ref::<String>().cloned().unwrap_or_default(),
+        }
+    }
+
+    #[test]
+    fn a_split_guest_opened_by_path_off_the_lane_answers_its_legs_as_one_opened_by_value() {
+        let (port, asked) = reading_split();
+        let (_, legs, failures) = split_guest_answers_hosted(serde_json::Value::Null, serde_json::json!({ "path": "apps/split/app.orb", "route": "/", "split": true, "key": "open" }), split_legs(), Some(port));
+        assert!(failures.is_empty(), "{failures:?}");
+        assert_eq!(*asked.lock(), vec!["program/read apps/split/app.orb".to_string()], "the host read the program once");
+        let (_, by_value, _) = split_guest_answers(serde_json::json!({ "route": "/", "split": true }));
+        assert_eq!(legs.len(), by_value.len(), "{legs:?}");
+        for (path, value) in legs.iter().zip(&by_value) {
+            for field in ["success", "transitioned", "states", "clientEffectsByTrait"] {
+                assert_eq!(path.get(field), value.get(field), "{field}: path {path} value {value}");
+            }
+        }
+    }
+
+    #[test]
+    fn control_an_unkeyed_open_by_path_answers_in_place_as_one_by_value() {
+        let (port, _) = reading_split();
+        let (_, legs, failures) = split_guest_answers_hosted(serde_json::Value::Null, serde_json::json!({ "path": "apps/split/app.orb", "route": "/", "split": true }), split_legs(), Some(port));
+        assert!(failures.is_empty(), "{failures:?}");
+        assert_eq!(legs.len(), split_legs().len(), "{legs:?}");
+    }
+
+    /// A program port that answers `program/read` with the split program and counts every other op it is asked.
+    #[test]
+    fn a_path_open_with_program_declared_gives_no_program_port_to_a_guest_that_declares_none() {
+        let (port, asked) = reading_split();
+        let (_, legs, failures) = split_guest_answers_hosted(serde_json::Value::Null, serde_json::json!({ "path": "apps/split/app.orb", "route": "/", "split": true, "key": "open", "program": "declared" }), split_legs(), Some(port));
+        assert!(failures.is_empty(), "{failures:?}");
+        assert_eq!(legs.len(), split_legs().len(), "{legs:?}");
+        assert_eq!(*asked.lock(), vec!["program/read apps/split/app.orb".to_string()], "only the open read the program: the guest got no program port");
+    }
+
+    #[test]
+    fn edge_program_is_true_false_or_declared() {
+        let (port, _) = reading_split();
+        let message = open_failure(serde_json::Value::Null, serde_json::json!({ "path": "apps/split/app.orb", "split": true, "program": "yes" }), port);
+        assert!(message.contains("`program` is true, false or"), "{message}");
+    }
+
+    #[test]
+    fn edge_a_path_the_host_cannot_read_fails_the_open_naming_it() {
+        let (port, _) = reading_split();
+        let message = open_failure(serde_json::Value::Null, serde_json::json!({ "path": "apps/none/app.orb", "split": true, "key": "open" }), port);
+        assert!(message.contains("apps/none/app.orb"), "{message}");
+    }
+
+    #[test]
+    fn edge_a_program_value_and_a_path_together_are_refused() {
+        let (port, asked) = reading_split();
+        let message = open_failure(split_program(), serde_json::json!({ "path": "apps/split/app.orb", "split": true }), port);
+        assert!(message.contains("not both"), "{message}");
+        assert!(asked.lock().is_empty(), "nothing was read");
     }
 
     #[test]
