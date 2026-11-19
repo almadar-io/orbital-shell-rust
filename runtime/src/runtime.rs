@@ -300,38 +300,16 @@ impl orbital_core::runtime::kernel::guest_hosting::GuestHosting for HostGuests {
         Arc::new(GuestOf(host, live))
     }
 
-    /// Answered by this host's program port (`program/read "" { resolve, path }`): the resolved program, and each lazy
-    /// program it resolved under the file (`orbRef`) its lazy page names.
+    /// Answered by this host's program port (`SubstrateHandler::resolved_program`): the resolved program, and each lazy
+    /// program it resolved under the file (`orbRef`) its lazy page names, typed from the file with no value between.
     fn read_program(&self, path: &str) -> Result<(orbital_core::OrbitalSchema, std::collections::HashMap<String, orbital_core::OrbitalSchema>), orbital_core::effects::executor::SubstrateFailure> {
-        let failure = |message: String| orbital_core::effects::executor::SubstrateFailure { message, errors: Vec::new() };
         let Some(SubstratePort(port)) = &self.substrate else {
             return Err(orbital_core::runtime::agent_ports::guest_failure(
                 orbital_core::runtime::os::OsErrorKind::Unsupported,
                 format!("program/open: this host has no program port to read {path}"),
             ));
         };
-        let options: Value = serde_json::from_value(serde_json::json!({ "resolve": true, "text": false, "path": path })).map_err(|e| failure(e.to_string()))?;
-        let mut read = orbital_core::json_value::value_to_json(&port.run("program/read", &[Value::string(""), options])?);
-        let lazy = read.get_mut("lazy").map(serde_json::Value::take).unwrap_or(serde_json::Value::Null);
-        let program_json = read.get_mut("program").map(serde_json::Value::take).unwrap_or(serde_json::Value::Null);
-        let refs: std::collections::HashMap<String, String> = program_json
-            .get("lazyPages")
-            .and_then(serde_json::Value::as_array)
-            .into_iter()
-            .flatten()
-            .filter_map(|page| Some((page.get("orbital")?.as_str()?.to_string(), page.get("orbRef")?.as_str()?.to_string())))
-            .collect();
-        let program: orbital_core::OrbitalSchema = serde_json::from_value(program_json)
-            .map_err(|e| failure(format!("program/open: {path} is not a resolved program: {e}")))?;
-        let mut programs = std::collections::HashMap::new();
-        for entry in lazy.as_array().into_iter().flatten() {
-            let orbital = entry.get("orbital").and_then(serde_json::Value::as_str).unwrap_or_default();
-            let file = refs.get(orbital).ok_or_else(|| failure(format!("program/open: {path} resolved a lazy program for `{orbital}`, which no lazy page names")))?;
-            let lazy_program: orbital_core::OrbitalSchema = serde_json::from_value(entry.get("program").cloned().unwrap_or_default())
-                .map_err(|e| failure(format!("program/open: the lazy program of `{orbital}` in {path} is not a resolved program: {e}")))?;
-            programs.insert(file.clone(), lazy_program);
-        }
-        Ok((program, programs))
+        port.resolved_program(path)
     }
 
     /// Answered by this host's program port (`behavior/resolve <behavior> { lazy: <file> }`), which resolves the one page.
@@ -3822,16 +3800,21 @@ mod tests {
         (SubstratePort(Arc::new(ResolvesLate(Arc::clone(&asked)))), asked)
     }
 
-    /// A program port that reads the split program at `apps/split/app.orb` (`program/read "" { resolve, path }`).
+    /// A program port that reads the split program at `apps/split/app.orb` (`resolved_program`) and answers no op.
     struct ReadsSplit(Arc<Mutex<Vec<String>>>);
 
     impl orbital_core::effects::executor::SubstrateHandler for ReadsSplit {
         fn run(&self, op: &str, args: &[Value]) -> Result<Value, orbital_core::effects::executor::SubstrateFailure> {
             let path = args.get(1).and_then(|o| o.get("path")).and_then(Value::as_str).unwrap_or_default().to_string();
             self.0.lock().push(format!("{op} {path}"));
-            match (op, path.as_str()) {
-                ("program/read", "apps/split/app.orb") => Ok(serde_json::from_value(serde_json::json!({ "program": split_program(), "lazy": [] })).unwrap()),
-                _ => Err(orbital_core::runtime::agent_ports::guest_failure(orbital_core::runtime::os::OsErrorKind::NotFound, format!("{op}: no program at {path}"))),
+            Err(orbital_core::runtime::agent_ports::guest_failure(orbital_core::runtime::os::OsErrorKind::NotFound, format!("{op}: no program at {path}")))
+        }
+
+        fn resolved_program(&self, path: &str) -> Result<(orbital_core::OrbitalSchema, std::collections::HashMap<String, orbital_core::OrbitalSchema>), orbital_core::effects::executor::SubstrateFailure> {
+            self.0.lock().push(format!("program/read {path}"));
+            match path {
+                "apps/split/app.orb" => Ok((serde_json::from_value(split_program()).unwrap(), std::collections::HashMap::new())),
+                _ => Err(orbital_core::runtime::agent_ports::guest_failure(orbital_core::runtime::os::OsErrorKind::NotFound, format!("program/read: no program at {path}"))),
             }
         }
     }
