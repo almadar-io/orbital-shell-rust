@@ -1114,6 +1114,9 @@ impl Host {
 
     pub fn register_schema(&self, schema: orbital_core::OrbitalSchema) -> Result<(), HostError> {
         self.declare_capabilities(&schema);
+        if let Some(locale) = schema.locales.as_ref().and_then(|locales| locales.first()) {
+            self.handles.kv.name(&schema.name, locale);
+        }
         self.kernel
             .register_schema(schema)
             .map_err(|e| HostError::Internal(e.to_string()))?;
@@ -6353,4 +6356,33 @@ mod tests {
         assert_eq!(again["transitioned"], false, "{again}");
     }
 
+
+    fn locale_program(name: &str, locales: Option<&[&str]>) -> orbital_core::OrbitalSchema {
+        let mut program = serde_json::json!({
+            "name": name, "typeContractVersion": 1,
+            "orbitals": [{ "name": "Notes", "entity": { "name": "Note", "persistence": "runtime", "fields": [{ "name": "id", "type": "string" }] },
+                "traits": [{ "name": "Noter", "linkedEntity": "Note", "stateMachine": { "states": [{ "name": "idle", "isInitial": true }], "transitions": [] } }], "pages": [] }]
+        });
+        if let Some(locales) = locales {
+            program["locales"] = serde_json::json!(locales);
+        }
+        serde_json::from_value(program).unwrap()
+    }
+
+    #[test]
+    fn a_registered_program_names_the_hosts_kv_by_its_name_and_first_declared_locale() {
+        let host = Host::new(Arc::new(DriverAdapter::memory())).shared();
+        assert_eq!(host.handles.kv.namespace(), None, "control: a host with no program answers no kv");
+        host.register_schema(locale_program("kv-notes", Some(&["ar", "en"]))).unwrap();
+        assert_eq!(host.handles.kv.namespace(), Some(("kv-notes".to_string(), "ar".to_string())));
+        host.register_schema(locale_program("kv-other", Some(&["en"]))).unwrap();
+        assert_eq!(host.handles.kv.namespace(), Some(("kv-notes".to_string(), "ar".to_string())), "the first program's name stands");
+    }
+
+    #[test]
+    fn control_a_program_declaring_no_locale_leaves_kv_unnamed() {
+        let host = Host::new(Arc::new(DriverAdapter::memory())).shared();
+        host.register_schema(locale_program("kv-plain", None)).unwrap();
+        assert_eq!(host.handles.kv.namespace(), None);
+    }
 }
