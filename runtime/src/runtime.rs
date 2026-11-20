@@ -4017,7 +4017,7 @@ mod tests {
     }
 
     /// The keeper program opened as a `.lolo`-kernel split guest by an opener that runs it through the operators a
-    /// `.lolo` kernel uses: INIT stepped with `commit` (the boot), then a viewer's READ leg (begin, one step in the leg,
+    /// `.lolo` kernel uses: INIT kept with `kernel/commit` (the boot), then a viewer's READ leg (begin, one step in the leg,
     /// finish). The events the leg answers.
     fn keeper_through_the_operators() -> Vec<String> {
         let runtime = Host::new(Arc::new(DriverAdapter::memory())).shared();
@@ -4035,10 +4035,10 @@ mod tests {
                         { "from": "idle", "to": "idle", "event": "OPEN", "effects": [["program/open", "@payload.program", { "split": true, "mount": false, "kernel": "lolo" }, { "emit": { "success": "OPENED", "failure": "FAILED" } }]] },
                         { "from": "idle", "to": "idle", "event": "OPENED", "effects": [
                             ["set", "@entity.guest", "@payload.result.guest"],
-                            ["set", "@entity.boot", ["json/stringify", ["kernel/step", "@payload.result.guest", { "trait": "Keeper", "from": "idle", "event": "INIT", "payload": {}, "commit": true }]]],
+                            ["kernel/commit", "@payload.result.guest", { "trait": "Keeper", "from": "idle", "event": "INIT", "payload": {} }, { "emit": { "failure": "FAILED" } }],
                             ["program/dispatch", "", {}, { "guest": "@payload.result.guest", "wire": true, "orbital": "Keep", "targetTrait": "Keeper", "event": "READ", "clientId": "tab-k", "lolo": "begin", "emit": { "success": "BEGUN", "failure": "FAILED" } }]] },
                         { "from": "idle", "to": "idle", "event": "BEGUN", "effects": [
-                            ["set", "@entity.stepped", ["json/stringify", ["kernel/step", "@entity.guest", { "trait": "Keeper", "from": "idle", "event": "READ", "payload": {}, "leg": "@payload.result.leg", "entityId": "@payload.result.run.entityId" }]]],
+                            ["kernel/commit", "@entity.guest", { "trait": "Keeper", "from": "idle", "event": "READ", "payload": {}, "leg": "@payload.result.leg", "entityId": "@payload.result.run.entityId" }, { "emit": { "failure": "FAILED" } }],
                             ["program/dispatch", "", {}, { "guest": "@entity.guest", "lolo": "finish", "leg": "@payload.result.leg", "emit": { "success": "FINISHED", "failure": "FAILED" } }]] },
                         { "from": "idle", "to": "idle", "event": "FINISHED", "effects": [["set", "@entity.answer", ["json/stringify", "@payload.result"]]] },
                         { "from": "idle", "to": "idle", "event": "FAILED", "effects": [["set", "@entity.failures", ["array/concat", "@entity.failures", [["json/stringify", "@payload"]]]]] }]
@@ -4104,15 +4104,15 @@ mod tests {
     }
 
     /// The `(trait, event)` steps of a viewer's mount leg of `/` after BOOT ran in the guest's program session: natively,
-    /// or through the operators a `.lolo` kernel uses (BOOT stepped with `commit`; in the leg, the `$MOUNT` delivery
+    /// or through the operators a `.lolo` kernel uses (BOOT kept with `kernel/commit`; in the leg, the `$MOUNT` delivery
     /// and then the INIT seed, each one committed step).
     fn mount_keeper_steps(lolo: bool) -> Vec<(String, String)> {
         let runtime = Host::new(Arc::new(DriverAdapter::memory())).shared();
-        let step = |guest: &str, request: serde_json::Value| serde_json::json!(["set", "@entity.boot", ["json/stringify", ["kernel/step", guest, request]]]);
+        let step = |guest: &str, request: serde_json::Value| serde_json::json!(["kernel/commit", guest, request, { "emit": { "failure": "FAILED" } }]);
         let effects = if lolo {
             serde_json::json!([
                 ["set", "@entity.guest", "@payload.result.guest"],
-                step("@payload.result.guest", serde_json::json!({ "trait": "Keeper", "from": "idle", "event": "INIT", "payload": {}, "commit": true })),
+                step("@payload.result.guest", serde_json::json!({ "trait": "Keeper", "from": "idle", "event": "INIT", "payload": {} })),
                 ["program/dispatch", "", {}, { "guest": "@payload.result.guest", "wire": true, "orbital": "Keep", "event": "INIT", "route": "/", "mount": [{ "trait": "Viewer", "event": "INIT" }], "clientId": "tab-k", "lolo": "begin", "emit": { "success": "BEGUN", "failure": "FAILED" } }]])
         } else {
             serde_json::json!([
@@ -4214,7 +4214,7 @@ mod tests {
     /// The delivered keeper's mount leg steps after its boot: native, or the boot and the leg through the operators.
     fn delivered_keeper_steps(lolo: bool) -> Vec<(String, String)> {
         let runtime = Host::new(Arc::new(DriverAdapter::memory())).shared();
-        let step = |guest: &str, request: serde_json::Value| serde_json::json!(["set", "@entity.boot", ["json/stringify", ["kernel/step", guest, request]]]);
+        let step = |guest: &str, request: serde_json::Value| serde_json::json!(["kernel/commit", guest, request, { "emit": { "failure": "FAILED" } }]);
         let leg = serde_json::json!({ "guest": "@payload.result.guest", "wire": true, "orbital": "Keep", "event": "INIT", "route": "/", "mount": [{ "trait": "Viewer", "event": "INIT" }], "clientId": "tab-k" });
         let opened = if lolo {
             let mut begin = leg.clone();
@@ -4222,10 +4222,10 @@ mod tests {
             begin["emit"] = serde_json::json!({ "success": "BEGUN", "failure": "FAILED" });
             serde_json::json!([
                 ["set", "@entity.guest", "@payload.result.guest"],
-                step("@payload.result.guest", serde_json::json!({ "trait": "Asker", "from": "idle", "event": "INIT", "payload": {}, "commit": true })),
-                step("@payload.result.guest", serde_json::json!({ "trait": "Answerer", "from": "idle", "event": "INIT", "payload": {}, "commit": true })),
-                step("@payload.result.guest", serde_json::json!({ "trait": "Answerer", "from": "idle", "delivery": { "at": 0 }, "emitter": "Asker", "payload": {}, "commit": true })),
-                step("@payload.result.guest", serde_json::json!({ "trait": "Asker", "from": "idle", "delivery": { "at": 1 }, "emitter": "Answerer", "payload": {}, "commit": true })),
+                step("@payload.result.guest", serde_json::json!({ "trait": "Asker", "from": "idle", "event": "INIT", "payload": {} })),
+                step("@payload.result.guest", serde_json::json!({ "trait": "Answerer", "from": "idle", "event": "INIT", "payload": {} })),
+                step("@payload.result.guest", serde_json::json!({ "trait": "Answerer", "from": "idle", "delivery": { "at": 0 }, "emitter": "Asker", "payload": {} })),
+                step("@payload.result.guest", serde_json::json!({ "trait": "Asker", "from": "idle", "delivery": { "at": 1 }, "emitter": "Answerer", "payload": {} })),
                 ["program/dispatch", "", {}, begin]])
         } else {
             let mut native = leg.clone();
