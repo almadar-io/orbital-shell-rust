@@ -379,6 +379,75 @@ impl orbital_core::runtime::kernel::guest_hosting::GuestHost for GuestOf {
             .map_err(|e| e.to_string())
     }
 
+    fn step(&self, trait_name: &str, row: Option<&str>, event: &str, payload: Value, tick: Option<&str>, leg: Option<&str>) -> Result<DispatchOutcomes, String> {
+        let host = &self.0;
+        let outcomes = host.finish(host.kernel.start_isolated_step(trait_name, row, event, payload, tick)).map_err(|e| e.to_string())?;
+        if let Some(leg) = leg {
+            let mut legs = host.legs.lock();
+            let open = legs.get_mut(leg).ok_or_else(|| format!("no open leg {leg}"))?;
+            open.outcomes.extend(outcomes.iter().cloned());
+        }
+        Ok(outcomes)
+    }
+
+    fn begin_leg(&self, payload: &Value, options: &ValueMap) -> Result<Value, orbital_core::effects::executor::SubstrateFailure> {
+        let failure = |(message, code, status): LegFailure| orbital_core::effects::executor::SubstrateFailure {
+            errors: vec![serde_json::from_value(serde_json::json!({ "code": code, "message": message, "status": status })).unwrap_or(Value::Null)],
+            message,
+        };
+        let begun = match self.0.begin_leg(payload, options).map_err(failure)? {
+            LegStart::Answered(answered) => return Ok(serde_json::from_value(serde_json::json!({ "answered": orbital_core::json_value::value_to_json(&answered) })).unwrap_or(Value::Null)),
+            LegStart::Begun(begun) => begun,
+        };
+        if begun.session.is_none() {
+            return Err(failure(("program/dispatch: a .lolo leg names its client (clientId)".to_string(), "INVALID_REQUEST", 400)));
+        }
+        let request = &begun.request;
+        let payload = orbital_core::json_value::value_to_json(&begun.payload);
+        let run = match &begun.run {
+            LegRun::Targeted { delivery: Some(_), .. } | LegRun::Targeted { log: Some(_), .. } => {
+                return Err(failure(("program/dispatch: a leg continuing a delivered dispatch does not run on the .lolo kernel yet".to_string(), "UNSUPPORTED", 400)))
+            }
+            LegRun::Input { trait_name } | LegRun::Targeted { trait_name, .. } => serde_json::json!({
+                "kind": "targeted", "trait": trait_name, "event": request.event, "payload": payload, "entityId": begun.entity_id }),
+            LegRun::Mount { unseeded, .. } => serde_json::json!({
+                "kind": "mount", "seeds": unseeded, "route": request.route, "payload": payload, "entityId": begun.entity_id }),
+            LegRun::Discover { handlers, .. } => serde_json::json!({
+                "kind": "discover", "traits": handlers, "event": request.event, "payload": payload, "entityId": begun.entity_id }),
+        };
+        let traits = self.0.get_orbital(&begun.orbital).map(|detail| detail.traits).unwrap_or_default();
+        let states = {
+            let _scope = self.0.enter_leg(&begun).map_err(failure)?;
+            self.0.held_states(&traits, &begun.entity_id)
+        };
+        let leg = format!("leg-{}", self.0.leg_count.fetch_add(1, Ordering::SeqCst));
+        self.0.legs.lock().insert(leg.clone(), OpenLeg { begun, outcomes: Vec::new() });
+        serde_json::from_value(serde_json::json!({ "leg": leg, "run": run, "states": states }))
+            .map_err(|e| failure((e.to_string(), "EVENT_PROCESSING_ERROR", 500)))
+    }
+
+    fn in_leg(&self, leg: &str, run: Box<dyn FnOnce() -> Result<Value, String> + '_>) -> Result<Value, String> {
+        let scope = {
+            let legs = self.0.legs.lock();
+            let open = legs.get(leg).ok_or_else(|| format!("no open leg {leg}"))?;
+            self.0.enter_leg(&open.begun).map_err(|(message, _, _)| message)?
+        };
+        let answered = run();
+        drop(scope);
+        answered
+    }
+
+    fn finish_leg(&self, leg: &str) -> Result<Value, orbital_core::effects::executor::SubstrateFailure> {
+        let failure = |(message, code, status): LegFailure| orbital_core::effects::executor::SubstrateFailure {
+            errors: vec![serde_json::from_value(serde_json::json!({ "code": code, "message": message, "status": status })).unwrap_or(Value::Null)],
+            message,
+        };
+        let open = self.0.legs.lock().remove(leg).ok_or_else(|| failure((format!("program/dispatch: no open leg {leg}"), "INVALID_REQUEST", 400)))?;
+        let _scope = self.0.enter_leg(&open.begun).map_err(failure)?;
+        self.0.finish_leg(&open.begun, open.outcomes)
+            .map_err(failure)
+    }
+
     fn dispatch(&self, trait_name: &str, event: &str, payload: Value) -> Result<DispatchOutcomes, String> {
         let host = &self.0;
         host.finish(host.kernel.start_dispatch(trait_name, None, event, payload, None, None))
@@ -497,6 +566,56 @@ impl From<HostConfig> for KernelConfig {
 }
 
 /// Forgets the tab a request thread served.
+/// A leg's failure: its message, code and HTTP status.
+pub type LegFailure = (String, &'static str, u16);
+
+/// How a leg's answer is shaped: the browser's view, stream items, framed bytes.
+#[derive(Clone, Copy, Debug)]
+pub struct LegFlags {
+    wire: bool,
+    stream: bool,
+    framed: bool,
+}
+
+/// What a leg's dispatch runs (EXEC-DIST): [`Host::begin_leg`] finds it, [`Host::run_leg`] runs it natively (a `.lolo`
+/// kernel may run it instead, stepping the guest), and [`Host::finish_leg`] answers it.
+pub enum LegRun {
+    /// A declared external input of the trait.
+    Input { trait_name: String },
+    /// The event to the trait the request names.
+    Targeted { trait_name: String, delivery: Option<DeliveryRecord>, log: Option<DispatchLog> },
+    /// A mount batch: the seeds asked for, those the session has not already seeded, and the rows it restored.
+    Mount { seeds: Vec<orbital_core::effects::MountSeed>, unseeded: Vec<orbital_core::effects::MountSeed>, restored_rows: ValueMap },
+    /// The event to each trait of the orbital whose held state handles it.
+    Discover { handlers: Vec<String>, held: std::collections::HashMap<String, String> },
+}
+
+/// A leg begun: its request admitted, its carried states and rows seeded, and what its dispatch runs.
+pub struct LegBegun {
+    pub orbital: String,
+    pub request: orbital_core::EventRequest,
+    pub entity_id: String,
+    pub payload: Value,
+    pub run: LegRun,
+    session: Option<String>,
+    flags: LegFlags,
+    /// The admitted session, held for the leg's life: a scratch session's frames go when it drops.
+    _admitted: orbital_core::runtime::kernel::RequestSession,
+}
+
+/// An events request answered before any dispatch, or begun.
+pub enum LegStart {
+    Answered(Value),
+    Begun(Box<LegBegun>),
+}
+
+/// The origin, session and locale a begun leg runs in, held while it runs.
+pub struct LegScope {
+    _origin: OriginGuard,
+    _session: Option<orbital_core::runtime::kernel::SessionGuard>,
+    _locale: Option<orbital_core::runtime::kernel::LocaleGuard>,
+}
+
 pub struct OriginGuard {
     slot: Arc<RwLock<std::collections::HashMap<std::thread::ThreadId, String>>>,
     thread: std::thread::ThreadId,
@@ -769,6 +888,15 @@ pub struct Host {
     started: std::time::Instant,
     /// The completions delivered since [`Self::tap_completions`], for a host that reports them (`program/step` live).
     completion_tap: Arc<Mutex<Option<Vec<orbital_core::step_replay::StepCompletion>>>>,
+    /// Server legs a `.lolo` kernel is running (`program/dispatch { lolo: "begin" }`), with the outcomes its steps made.
+    legs: Mutex<std::collections::HashMap<String, OpenLeg>>,
+    leg_count: std::sync::atomic::AtomicU64,
+}
+
+/// A server leg open for a `.lolo` kernel's steps.
+struct OpenLeg {
+    begun: Box<LegBegun>,
+    outcomes: Vec<(String, ProcessEventResult)>,
 }
 
 /// Hand a later dispatch's outcomes to the hook deliveries waiting for an answer: a delivery the outcomes answer
@@ -1029,6 +1157,8 @@ impl Host {
             ticks: Mutex::new(orbital_core::TickClock::from_orbitals(&[])),
             started: std::time::Instant::now(),
             completion_tap,
+            legs: Mutex::default(),
+            leg_count: std::sync::atomic::AtomicU64::new(0),
         }
     }
 
@@ -1232,11 +1362,25 @@ impl Host {
     /// only a declared external input; `mount` runs the lifecycle seeds, no `targetTrait`
     /// discovers the handlers; the host holds the circuit state, so the kernel refuses carried `traits` outside a delegated leg (EXEC-DIST-11); `delivery`/`dispatchLog` continue a client-begun dispatch. The host answers the raw
     /// `EventResponse` (plus `items` for `stream`); the kernel shapes what a model is told. An empty text, record or mount list is absent.
-    fn request_answer(&self, payload: &Value, options: &ValueMap) -> Result<Value, (String, &'static str, u16)> {
+    fn request_answer(&self, payload: &Value, options: &ValueMap) -> Result<Value, LegFailure> {
+        match self.begin_leg(payload, options)? {
+            LegStart::Answered(answer) => Ok(answer),
+            LegStart::Begun(begun) => {
+                let _scope = self.enter_leg(&begun)?;
+                let outcomes = self.run_leg(&begun)?;
+                self.finish_leg(&begun, outcomes)
+            }
+        }
+    }
+
+    /// An events request up to its dispatch: parsed, refused or released, its session admitted and its carried states
+    /// and rows seeded, and what its dispatch runs (EXEC-DIST); a request answered before any dispatch is `Answered`.
+    pub fn begin_leg(&self, payload: &Value, options: &ValueMap) -> Result<LegStart, LegFailure> {
         use orbital_core::EventResponse;
         let json = |key: &str| options.get(key).map(orbital_core::json_value::value_to_json);
         let text = |key: &str| json(key).and_then(|v| v.as_str().filter(|s| !s.is_empty()).map(str::to_string));
         let flag = |key: &str| json(key).and_then(|v| v.as_bool()).unwrap_or(false);
+        let flags = LegFlags { wire: flag("wire"), stream: flag("stream"), framed: flag("framed") };
         let request = orbital_core::EventRequest::from_dispatch(orbital_core::json_value::value_to_json(payload), &json)
             .map_err(|message| (message, "INVALID_REQUEST", 400))?;
         let Some(orbital) = text("orbital") else {
@@ -1249,37 +1393,40 @@ impl Host {
             }
             return serde_json::to_value(&refused)
                 .and_then(serde_json::from_value)
+                .map(LegStart::Answered)
                 .map_err(|e| (e.to_string(), "EVENT_PROCESSING_ERROR", 500));
         }
         if let Some(released) = self.kernel.release_request(&orbital, &request) {
             return serde_json::to_value(&released)
                 .and_then(serde_json::from_value)
+                .map(LegStart::Answered)
                 .map_err(|e| (e.to_string(), "EVENT_PROCESSING_ERROR", 500));
         }
         let payload = request.payload.clone().unwrap_or(Value::Null);
-        let failed = |e: HostError| (e.to_string(), "EVENT_PROCESSING_ERROR", e.status_code());
         let _origin = self.enter_origin(request.client_id.as_deref());
         let mounting = request.mount.as_deref().is_some_and(|seeds| !seeds.is_empty());
         let admitted = self
             .kernel
-            .admit_request(request.client_id.as_deref(), mounting, flag("wire"))
+            .admit_request(request.client_id.as_deref(), mounting, flags.wire)
             .map_err(|ended| (ended.to_string(), "SESSION_ENDED", 409))?;
         let restored = match &admitted {
             orbital_core::runtime::kernel::RequestSession::Client { restored, .. } => restored.clone(),
             _ => Default::default(),
         };
-        let _session = match &admitted {
-            orbital_core::runtime::kernel::RequestSession::Client { active, .. } => Some(self.kernel.enter_session(active.session())),
+        let session = match &admitted {
+            orbital_core::runtime::kernel::RequestSession::Client { active, .. } => Some(active.session().to_string()),
             _ => None,
         };
+        let _session = session.as_deref().map(|session| self.kernel.enter_session(session));
         if let Some(since) = request.frames_since {
             let answer = match self.kernel.frames_since(since) {
                 Some(frames) => EventResponse { success: true, frames: Some(frames), ..Default::default() },
                 None => EventResponse::error("this host keeps no frames for the session: mount again"),
             };
-            let answer = if flag("wire") { self.kernel.client_view(answer) } else { answer };
+            let answer = if flags.wire { self.kernel.client_view(answer) } else { answer };
             return serde_json::to_value(&answer)
                 .and_then(serde_json::from_value)
+                .map(LegStart::Answered)
                 .map_err(|e| (e.to_string(), "EVENT_PROCESSING_ERROR", 500));
         }
         self.kernel.ensure_orbital_loaded(&orbital).map_err(|e| (e.to_string(), "EVENT_PROCESSING_ERROR", 500))?;
@@ -1287,84 +1434,127 @@ impl Host {
         let Some(detail) = self.get_orbital(&orbital) else {
             return Err((format!("Orbital not found: {orbital}"), "ORBITAL_NOT_FOUND", 404));
         };
-        let respond = |outcomes: &[(String, ProcessEventResult)], mut response: EventResponse| -> Result<Value, (String, &'static str, u16)> {
-            let hops = orbital_core::effects::response::TransitionHop::of_outcomes(outcomes);
-            response.transitions = (!hops.is_empty()).then_some(hops);
-            self.kernel.stamp_emitted_sources(&mut response);
-            let items = if flag("stream") {
-                {
-                let mut items = stream_items(outcomes, &response);
-                self.kernel.redact_stream_items(&mut items);
-                Some(serde_json::to_value(items).map_err(|e| (e.to_string(), "EVENT_PROCESSING_ERROR", 500))?)
-            }
-            } else {
-                None
-            };
-            let response = if flag("wire") { self.kernel.client_view(response) } else { response };
-            if flag("framed") {
-                let (head, body) = self.kernel.framed_answer(&response).map_err(|e| (e, "EVENT_PROCESSING_ERROR", 500))?;
-                let mut answer = serde_json::to_value(&head)
-                    .and_then(serde_json::from_value::<Value>)
-                    .map_err(|e| (e.to_string(), "EVENT_PROCESSING_ERROR", 500))?;
-                if let Value::Object(fields) = &mut answer {
-                    fields.insert("framed".to_string().into(), Value::bytes(body));
-                }
-                return Ok(answer);
-            }
-            let mut answer = serde_json::to_value(&response).map_err(|e| (e.to_string(), "EVENT_PROCESSING_ERROR", 500))?;
-            if let (Some(items), serde_json::Value::Object(fields)) = (items, &mut answer) {
-                fields.insert("items".to_string(), items);
-            }
-            serde_json::from_value(answer).map_err(|e| (e.to_string(), "EVENT_PROCESSING_ERROR", 500))
-        };
-        type Ran = (Vec<(String, ProcessEventResult)>, EventResponse);
-        let targeted = |trait_name: &str, delivery: Option<&DeliveryRecord>, log: Option<&DispatchLog>| -> Result<Ran, (String, &'static str, u16)> {
-            let outcomes = self.dispatch_continuing(trait_name, &entity_id, &request.event, payload.clone(), delivery, log).map_err(failed)?;
-            let mut response = EventResponse::from_process_results(&outcomes, trait_name, &request.event);
-            self.kernel.seal_outcomes(&mut response, &outcomes, Some(&entity_id), false);
-            self.echo_held_states(&mut response, trait_name, &entity_id);
-            Ok((outcomes, response))
-        };
-        if flag("input") {
-            let Some(trait_name) = request.target_trait.as_deref() else {
+        let run = if flag("input") {
+            let Some(trait_name) = request.target_trait.clone() else {
                 return Err(("program/dispatch: an input request names its trait".to_string(), "NO_TRAIT", 400));
             };
             let declared = self.external_inputs().iter().any(|i| i.orbital == orbital && i.trait_name == trait_name && i.event == request.event);
             if !declared {
-                return respond(&[], EventResponse::not_an_external_input(trait_name, &request.event));
+                return self.respond_leg(&[], EventResponse::not_an_external_input(&trait_name, &request.event), flags).map(LegStart::Answered);
             }
-            let (outcomes, response) = targeted(trait_name, None, None)?;
-            self.broadcast_persisted(&response, None);
-            return respond(&outcomes, response);
-        }
-        if let Some(trait_name) = self.inbound_only_trait(&orbital, request.target_trait.as_deref(), &request.event) {
-            return respond(&[], EventResponse::inbound_only(&trait_name, &request.event));
-        }
-        let _locale = self.enter_locale(request.locale.as_deref()).map_err(failed)?;
-        let client_id = request.client_id.as_deref();
-        let (outcomes, response): Ran = if let Some(seeds) = request.mount.as_deref().filter(|seeds| !seeds.is_empty()) {
-            let plan = self.kernel.prepare_mount(&restored, seeds, request.traits.as_deref(), request.entity_by_trait.as_ref(), Some(&entity_id));
-            let outcomes = if plan.unseeded.is_empty() { Vec::new() } else { self.dispatch_mount(request.route.as_deref(), &plan.unseeded, &entity_id, payload.clone()).map_err(failed)? };
-            let mut response = EventResponse::from_process_results(&outcomes, &seeds[0].r#trait, seeds[0].event.as_str());
-            let mut writes = self.kernel.frame_writes(&outcomes, Some(&entity_id), true);
-            writes.extend(plan.restored_rows.iter().filter_map(|(trait_name, row)| {
-                Some((self.kernel.trait_frame_key(trait_name), orbital_core::runtime::kernel::FrameWrite::Fields(row.as_object()?.clone())))
-            }));
-            self.kernel.seal_frames(&mut response, writes);
-            self.echo_held_states(&mut response, &seeds[0].r#trait, &entity_id);
-            (outcomes, response)
-        } else if let Some(trait_name) = request.target_trait.as_deref() {
-            targeted(trait_name, request.delivery.as_ref(), request.dispatch_log.as_ref())?
+            LegRun::Input { trait_name }
         } else {
-            let handlers = self.discover_handlers(&detail.traits, &entity_id, &request.event);
-            let held = self.held_states(&detail.traits, &entity_id);
-            let outcomes = if handlers.is_empty() { Vec::new() } else { self.dispatch_each(&handlers, &entity_id, &request.event, payload.clone()).map_err(failed)? };
-            let mut response = EventResponse::from_discovery(&outcomes, &handlers, &request.event, held);
-            self.kernel.seal_outcomes(&mut response, &outcomes, Some(&entity_id), false);
-            (outcomes, response)
+            if let Some(trait_name) = self.inbound_only_trait(&orbital, request.target_trait.as_deref(), &request.event) {
+                return self.respond_leg(&[], EventResponse::inbound_only(&trait_name, &request.event), flags).map(LegStart::Answered);
+            }
+            if let Some(seeds) = request.mount.as_deref().filter(|seeds| !seeds.is_empty()) {
+                let plan = self.kernel.prepare_mount(&restored, seeds, request.traits.as_deref(), request.entity_by_trait.as_ref(), Some(&entity_id));
+                LegRun::Mount { seeds: seeds.to_vec(), unseeded: plan.unseeded, restored_rows: plan.restored_rows }
+            } else if let Some(trait_name) = request.target_trait.clone() {
+                LegRun::Targeted { trait_name, delivery: request.delivery.clone(), log: request.dispatch_log.clone() }
+            } else {
+                let handlers = self.discover_handlers(&detail.traits, &entity_id, &request.event);
+                let held = self.held_states(&detail.traits, &entity_id);
+                LegRun::Discover { handlers, held }
+            }
         };
-        self.broadcast_persisted(&response, client_id);
-        respond(&outcomes, response)
+        drop(_session);
+        Ok(LegStart::Begun(Box::new(LegBegun { orbital, request, entity_id, payload, run, session, flags, _admitted: admitted })))
+    }
+
+    /// The origin, session and locale a begun leg's dispatch and answer run in.
+    pub fn enter_leg(&self, begun: &LegBegun) -> Result<LegScope, LegFailure> {
+        let origin = self.enter_origin(begun.request.client_id.as_deref());
+        let session = begun.session.as_deref().map(|session| self.kernel.enter_session(session));
+        let locale = match begun.run {
+            LegRun::Input { .. } => None,
+            _ => Some(self.enter_locale(begun.request.locale.as_deref()).map_err(|e| (e.to_string(), "EVENT_PROCESSING_ERROR", e.status_code()))?),
+        };
+        Ok(LegScope { _origin: origin, _session: session, _locale: locale })
+    }
+
+    /// A begun leg's dispatch, run natively.
+    pub fn run_leg(&self, begun: &LegBegun) -> Result<Vec<(String, ProcessEventResult)>, LegFailure> {
+        let failed = |e: HostError| (e.to_string(), "EVENT_PROCESSING_ERROR", e.status_code());
+        let LegBegun { request, entity_id, payload, run, .. } = begun;
+        match run {
+            LegRun::Input { trait_name } => self.dispatch_continuing(trait_name, entity_id, &request.event, payload.clone(), None, None).map_err(failed),
+            LegRun::Targeted { trait_name, delivery, log } => {
+                self.dispatch_continuing(trait_name, entity_id, &request.event, payload.clone(), delivery.as_ref(), log.as_ref()).map_err(failed)
+            }
+            LegRun::Mount { unseeded, .. } if unseeded.is_empty() => Ok(Vec::new()),
+            LegRun::Mount { unseeded, .. } => self.dispatch_mount(request.route.as_deref(), unseeded, entity_id, payload.clone()).map_err(failed),
+            LegRun::Discover { handlers, .. } if handlers.is_empty() => Ok(Vec::new()),
+            LegRun::Discover { handlers, .. } => self.dispatch_each(handlers, entity_id, &request.event, payload.clone()).map_err(failed),
+        }
+    }
+
+    /// A begun leg's answer, from the outcomes its dispatch made (run natively or stepped by a `.lolo` kernel).
+    pub fn finish_leg(&self, begun: &LegBegun, outcomes: Vec<(String, ProcessEventResult)>) -> Result<Value, LegFailure> {
+        use orbital_core::EventResponse;
+        let LegBegun { request, entity_id, run, flags, .. } = begun;
+        let targeted = |trait_name: &str| {
+            let mut response = EventResponse::from_process_results(&outcomes, trait_name, &request.event);
+            self.kernel.seal_outcomes(&mut response, &outcomes, Some(entity_id), false);
+            self.echo_held_states(&mut response, trait_name, entity_id);
+            response
+        };
+        let response = match run {
+            LegRun::Input { trait_name } => {
+                let response = targeted(trait_name);
+                self.broadcast_persisted(&response, None);
+                return self.respond_leg(&outcomes, response, *flags);
+            }
+            LegRun::Targeted { trait_name, .. } => targeted(trait_name),
+            LegRun::Mount { seeds, restored_rows, .. } => {
+                let mut response = EventResponse::from_process_results(&outcomes, &seeds[0].r#trait, seeds[0].event.as_str());
+                let mut writes = self.kernel.frame_writes(&outcomes, Some(entity_id), true);
+                writes.extend(restored_rows.iter().filter_map(|(trait_name, row)| {
+                    Some((self.kernel.trait_frame_key(trait_name), orbital_core::runtime::kernel::FrameWrite::Fields(row.as_object()?.clone())))
+                }));
+                self.kernel.seal_frames(&mut response, writes);
+                self.echo_held_states(&mut response, &seeds[0].r#trait, entity_id);
+                response
+            }
+            LegRun::Discover { handlers, held } => {
+                let mut response = EventResponse::from_discovery(&outcomes, handlers, &request.event, held.clone());
+                self.kernel.seal_outcomes(&mut response, &outcomes, Some(entity_id), false);
+                response
+            }
+        };
+        self.broadcast_persisted(&response, request.client_id.as_deref());
+        self.respond_leg(&outcomes, response, *flags)
+    }
+
+    /// A leg's response as its options ask for it: transitions and emit sources stamped, stream items, the browser's
+    /// client view (`wire`), and framed bytes (`framed`).
+    fn respond_leg(&self, outcomes: &[(String, ProcessEventResult)], mut response: orbital_core::EventResponse, flags: LegFlags) -> Result<Value, LegFailure> {
+        let hops = orbital_core::effects::response::TransitionHop::of_outcomes(outcomes);
+        response.transitions = (!hops.is_empty()).then_some(hops);
+        self.kernel.stamp_emitted_sources(&mut response);
+        let items = if flags.stream {
+            let mut items = stream_items(outcomes, &response);
+            self.kernel.redact_stream_items(&mut items);
+            Some(serde_json::to_value(items).map_err(|e| (e.to_string(), "EVENT_PROCESSING_ERROR", 500))?)
+        } else {
+            None
+        };
+        let response = if flags.wire { self.kernel.client_view(response) } else { response };
+        if flags.framed {
+            let (head, body) = self.kernel.framed_answer(&response).map_err(|e| (e, "EVENT_PROCESSING_ERROR", 500))?;
+            let mut answer = serde_json::to_value(&head)
+                .and_then(serde_json::from_value::<Value>)
+                .map_err(|e| (e.to_string(), "EVENT_PROCESSING_ERROR", 500))?;
+            if let Value::Object(fields) = &mut answer {
+                fields.insert("framed".to_string().into(), Value::bytes(body));
+            }
+            return Ok(answer);
+        }
+        let mut answer = serde_json::to_value(&response).map_err(|e| (e.to_string(), "EVENT_PROCESSING_ERROR", 500))?;
+        if let (Some(items), serde_json::Value::Object(fields)) = (items, &mut answer) {
+            fields.insert("items".to_string(), items);
+        }
+        serde_json::from_value(answer).map_err(|e| (e.to_string(), "EVENT_PROCESSING_ERROR", 500))
     }
 
     /// `program/resolve-rows`: a row-set reference resolved for the identity bound to the asking session, `@read`
@@ -3534,6 +3724,78 @@ mod tests {
                 "pages": [{ "name": "Home", "path": "/", "traits": [{ "ref": "Face" }, { "ref": "Back" }] }]
             }]
         })
+    }
+
+    /// Each of `legs` answered by a fresh host running `program`: natively, or through a `.lolo` leg (`begin_leg`, one
+    /// committed step per trait the run names, inside the leg, then `finish_leg`).
+    fn leg_answers(program: &serde_json::Value, legs: &[serde_json::Value], lolo: bool) -> Vec<serde_json::Value> {
+        use orbital_core::runtime::kernel::guest_hosting::GuestHost as _;
+        let host = Host::new(Arc::new(DriverAdapter::memory())).shared();
+        host.register_schema(serde_json::from_value(program.clone()).unwrap()).unwrap();
+        let guest = GuestOf(Arc::clone(&host), Mutex::new(host.subscribe_live()));
+        let value = |json: serde_json::Value| -> Value { serde_json::from_value(json).unwrap() };
+        legs.iter()
+            .map(|leg| {
+                let Value::Object(options) = value(leg.clone()) else { panic!("a leg's options are a record") };
+                let payload = value(serde_json::json!({}));
+                let answer = if !lolo {
+                    host.request_answer(&payload, &options).expect("the native leg answers")
+                } else {
+                    let begun = orbital_core::json_value::value_to_json(&guest.begin_leg(&payload, &options).map_err(|f| f.message).expect("the leg begins"));
+                    let id = begun["leg"].as_str().expect("a leg handle").to_string();
+                    let run = &begun["run"];
+                    let steps: Vec<(String, String)> = match run["kind"].as_str() {
+                        Some("mount") => run["seeds"].as_array().unwrap().iter().map(|s| (s["trait"].as_str().unwrap().to_string(), s["event"].as_str().unwrap().to_string())).collect(),
+                        Some("targeted") => vec![(run["trait"].as_str().unwrap().to_string(), run["event"].as_str().unwrap().to_string())],
+                        other => panic!("run kind {other:?}"),
+                    };
+                    let row = run["entityId"].as_str().map(str::to_string);
+                    for (trait_name, event) in steps {
+                        let payload = value(run["payload"].clone());
+                        guest.in_leg(&id, Box::new(|| guest.step(&trait_name, row.as_deref(), &event, payload, None, Some(&id)).map(|_| Value::Null))).expect("the step commits");
+                    }
+                    guest.finish_leg(&id).map_err(|f| f.message).expect("the leg finishes")
+                };
+                orbital_core::json_value::value_to_json(&answer)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_lolo_leg_answers_the_same_wire_value_as_the_native_leg() {
+        let native = leg_answers(&split_program(), &split_legs(), false);
+        let lolo = leg_answers(&split_program(), &split_legs(), true);
+        assert_eq!(native.len(), 2);
+        assert!(native[1]["success"] == true, "control: the native STORE leg succeeds: {}", native[1]);
+        for (n, l) in native.iter().zip(&lolo) {
+            assert_eq!(n, l, "a .lolo leg answers what the native leg answers");
+        }
+    }
+
+    #[test]
+    fn a_lolo_leg_naming_no_client_is_refused() {
+        use orbital_core::runtime::kernel::guest_hosting::GuestHost as _;
+        let host = Host::new(Arc::new(DriverAdapter::memory())).shared();
+        host.register_schema(serde_json::from_value(split_program()).unwrap()).unwrap();
+        let guest = GuestOf(Arc::clone(&host), Mutex::new(host.subscribe_live()));
+        let Value::Object(options) = serde_json::from_value::<Value>(serde_json::json!({ "wire": true, "orbital": "Split", "targetTrait": "Back", "event": "STORE" })).unwrap() else { panic!() };
+        let refused = guest.begin_leg(&serde_json::from_value(serde_json::json!({})).unwrap(), &options).expect_err("a leg with no client is refused");
+        assert!(refused.message.contains("clientId"), "{}", refused.message);
+        let Value::Object(control) = serde_json::from_value::<Value>(serde_json::json!({ "wire": true, "orbital": "Split", "targetTrait": "Back", "event": "STORE", "clientId": "t" })).unwrap() else { panic!() };
+        assert!(guest.begin_leg(&serde_json::from_value(serde_json::json!({})).unwrap(), &control).is_ok(), "control: with its client the leg begins");
+    }
+
+    #[test]
+    fn finishing_a_leg_twice_is_refused() {
+        use orbital_core::runtime::kernel::guest_hosting::GuestHost as _;
+        let host = Host::new(Arc::new(DriverAdapter::memory())).shared();
+        host.register_schema(serde_json::from_value(split_program()).unwrap()).unwrap();
+        let guest = GuestOf(Arc::clone(&host), Mutex::new(host.subscribe_live()));
+        let Value::Object(options) = serde_json::from_value::<Value>(serde_json::json!({ "wire": true, "orbital": "Split", "targetTrait": "Back", "event": "STORE", "clientId": "t" })).unwrap() else { panic!() };
+        let begun = orbital_core::json_value::value_to_json(&guest.begin_leg(&serde_json::from_value(serde_json::json!({})).unwrap(), &options).unwrap());
+        let id = begun["leg"].as_str().unwrap();
+        assert!(guest.finish_leg(id).is_ok(), "control: the first finish answers");
+        assert!(guest.finish_leg(id).is_err(), "a closed leg is not finished again");
     }
 
     /// The two legs a browser kernel posts for the split program: the page mount, then a STORE to the server trait.
