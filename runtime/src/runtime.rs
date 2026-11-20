@@ -264,6 +264,7 @@ impl orbital_core::effects::executor::SubstrateHandler for SelfSubstrate {
         let mut pushed = response.clone();
         runtime.kernel.stamp_emitted_sources(&mut pushed);
         runtime.kernel.seal_outcomes(&mut pushed, &outcomes, None, false);
+        stamp_hops(&mut pushed, &outcomes);
         let ran = HostRan { orbital: None, trait_name, event, payload, entity_id: orbital_core::RUNTIME_SINGLETON };
         push_host_dispatch(&runtime.live_tx, Some(&runtime.kernel), &ran, pushed, asker.as_deref());
         serde_json::to_value(&response)
@@ -771,6 +772,13 @@ struct HostRan<'a> {
     entity_id: &'a str,
 }
 
+/// The steps the host ran, on a response a tab folds: a tab adopts a client-run trait's state only from a step the host
+/// ran from the state it holds (EXEC-DIST-4).
+fn stamp_hops(response: &mut orbital_core::EventResponse, outcomes: &[(String, ProcessEventResult)]) {
+    let hops = orbital_core::effects::response::TransitionHop::of_outcomes(outcomes);
+    response.transitions = (!hops.is_empty()).then_some(hops);
+}
+
 /// Send the tab whose request caused `ran` the client view of its sealed `response`, as a dispatch it folds
 /// (EXEC-QUEUE-10, EXEC-AGENT-1). With no asking tab, a trait of no orbital, or a trait no browser runs, nothing is sent.
 fn push_host_dispatch(
@@ -1211,6 +1219,7 @@ impl Host {
                                 let _ = tx.send(item);
                             }
                         }
+                        stamp_hops(&mut response, &outcomes);
                         let ran = HostRan { orbital: site.orbital.clone(), trait_name: &site.trait_name, event, payload, entity_id: &site.entity_id };
                         push_host_dispatch(&tx, kernel.as_deref(), &ran, response, client_id);
                     }
@@ -1646,8 +1655,7 @@ impl Host {
     /// A leg's response as its options ask for it: transitions and emit sources stamped, stream items, the browser's
     /// client view (`wire`), and framed bytes (`framed`).
     fn respond_leg(&self, outcomes: &[(String, ProcessEventResult)], mut response: orbital_core::EventResponse, flags: LegFlags) -> Result<Value, LegFailure> {
-        let hops = orbital_core::effects::response::TransitionHop::of_outcomes(outcomes);
-        response.transitions = (!hops.is_empty()).then_some(hops);
+        stamp_hops(&mut response, outcomes);
         self.kernel.stamp_emitted_sources(&mut response);
         let items = if flags.stream {
             let mut items = stream_items(outcomes, &response);
@@ -6224,6 +6232,25 @@ mod tests {
         assert_eq!(frame["request"]["targetTrait"], "Files");
         assert_eq!(frame["request"]["event"], "READ_DONE");
         assert_eq!(frame["response"]["states"]["Files"], "idle", "the completion's states fold on the tab: {frame}");
+    }
+
+    #[test]
+    fn a_deferred_completion_pushed_to_its_tab_lists_the_steps_the_host_ran() {
+        let dir = scratch_dir();
+        let runtime = Host::new(Arc::new(DriverAdapter::memory())).shared();
+        runtime.register_schema(deferred_reader(&dir)).unwrap();
+        let mut live = runtime.subscribe_live();
+        let answer = dispatch_request(&runtime, serde_json::json!({ "orbital": "Reader", "targetTrait": "Files", "event": "READ", "clientId": "tab-1" })).unwrap();
+        let ran = |response: &serde_json::Value| -> Vec<(String, String, String)> {
+            response["transitions"].as_array().into_iter().flatten()
+                .map(|hop| (hop["trait"].as_str().unwrap_or_default().to_string(), hop["from"].as_str().unwrap_or_default().to_string(), hop["event"].as_str().unwrap_or_default().to_string()))
+                .collect()
+        };
+        assert_eq!(ran(&answer), vec![("Files".to_string(), "idle".to_string(), "READ".to_string())], "control: the request's own answer lists its step: {answer}");
+        let items = items_of(&mut live, "READ_DONE");
+        assert_eq!(items.len(), 1, "{items:?}");
+        let frame = serde_json::to_value(live_item_value(&items[0])).unwrap();
+        assert_eq!(ran(&frame["response"]), vec![("Files".to_string(), "idle".to_string(), "READ_DONE".to_string())], "a tab adopts an optimistic trait's state only from a step the host ran from the state it holds (EXEC-DIST-4): {frame}");
     }
 
     #[test]
