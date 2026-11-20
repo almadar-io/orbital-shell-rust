@@ -390,11 +390,61 @@ impl orbital_core::runtime::kernel::guest_hosting::GuestHost for GuestOf {
         Ok(outcomes)
     }
 
+    fn drive_by_lolo(&self) -> Result<(), String> {
+        self.0.sink.park_completions();
+        Ok(())
+    }
+
+    fn take_parked_runs(&self) -> Vec<Value> {
+        let host = &self.0;
+        host.sink
+            .take_parked()
+            .into_iter()
+            .map(|parked| {
+                let run = format!("run-{}", host.leg_count.fetch_add(1, Ordering::SeqCst));
+                let described = serde_json::json!({
+                    "run": run,
+                    "trait": parked.site.trait_name,
+                    "event": parked.event,
+                    "payload": orbital_core::json_value::value_to_json(&parked.payload),
+                    "entityId": parked.site.entity_id,
+                    "failure": parked.site.emit.failure.clone().filter(|failure| !parked.failed && *failure != parked.event),
+                    "key": orbital_core::runtime::resumable::program_call_key(&parked.key),
+                    "clientId": parked.requester.client_id,
+                });
+                host.parked_runs.lock().insert(run, parked);
+                serde_json::from_value(described).unwrap_or(Value::Null)
+            })
+            .collect()
+    }
+
     fn begin_leg(&self, payload: &Value, options: &ValueMap) -> Result<Value, orbital_core::effects::executor::SubstrateFailure> {
         let failure = |(message, code, status): LegFailure| orbital_core::effects::executor::SubstrateFailure {
             errors: vec![serde_json::from_value(serde_json::json!({ "code": code, "message": message, "status": status })).unwrap_or(Value::Null)],
             message,
         };
+        if let Some(run) = options.get("run").and_then(Value::as_str) {
+            let host = &self.0;
+            let parked = host.parked_runs.lock().remove(run).ok_or_else(|| failure((format!("program/dispatch: no held completion {run}"), "INVALID_REQUEST", 400)))?;
+            let states = {
+                let _scope = host.sink.enter_parked(&parked);
+                let traits = host.kernel.orbital_of_trait(&parked.site.trait_name).and_then(|orbital| host.kernel.get_orbital(&orbital)).map(|detail| detail.traits).unwrap_or_default();
+                host.held_states(&traits, &parked.site.entity_id)
+            };
+            let described = serde_json::json!({
+                "kind": "completion",
+                "trait": parked.site.trait_name,
+                "event": parked.event,
+                "payload": orbital_core::json_value::value_to_json(&parked.payload),
+                "entityId": parked.site.entity_id,
+                "failure": parked.site.emit.failure.clone().filter(|failure| !parked.failed && *failure != parked.event),
+                "key": orbital_core::runtime::resumable::program_call_key(&parked.key),
+            });
+            let leg = format!("leg-{}", host.leg_count.fetch_add(1, Ordering::SeqCst));
+            host.legs.lock().insert(leg.clone(), OpenLeg { begun: LegOf::Completion(parked), outcomes: Vec::new() });
+            return serde_json::from_value(serde_json::json!({ "leg": leg, "run": described, "states": states }))
+                .map_err(|e| failure((e.to_string(), "EVENT_PROCESSING_ERROR", 500)));
+        }
         let begun = match self.0.begin_leg(payload, options).map_err(failure)? {
             LegStart::Answered(answered) => return Ok(serde_json::from_value(serde_json::json!({ "answered": orbital_core::json_value::value_to_json(&answered) })).unwrap_or(Value::Null)),
             LegStart::Begun(begun) => begun,
@@ -421,16 +471,46 @@ impl orbital_core::runtime::kernel::guest_hosting::GuestHost for GuestOf {
             self.0.held_states(&traits, &begun.entity_id)
         };
         let leg = format!("leg-{}", self.0.leg_count.fetch_add(1, Ordering::SeqCst));
-        self.0.legs.lock().insert(leg.clone(), OpenLeg { begun, outcomes: Vec::new() });
+        self.0.legs.lock().insert(leg.clone(), OpenLeg { begun: LegOf::Request(begun), outcomes: Vec::new() });
         serde_json::from_value(serde_json::json!({ "leg": leg, "run": run, "states": states }))
             .map_err(|e| failure((e.to_string(), "EVENT_PROCESSING_ERROR", 500)))
+    }
+
+    fn begin_plain(&self, targets: &[String], event: &str, payload: Value) -> Result<Value, String> {
+        let host = &self.0;
+        let traits: Vec<String> = targets
+            .iter()
+            .filter_map(|name| host.kernel.orbital_of_trait(name))
+            .filter_map(|orbital| host.kernel.get_orbital(&orbital))
+            .flat_map(|detail| detail.traits)
+            .collect();
+        let states = host.held_states(&traits, orbital_core::RUNTIME_SINGLETON);
+        let leg = format!("leg-{}", host.leg_count.fetch_add(1, Ordering::SeqCst));
+        let run = serde_json::json!({
+            "kind": "discover", "traits": targets, "event": event,
+            "payload": orbital_core::json_value::value_to_json(&payload), "entityId": orbital_core::RUNTIME_SINGLETON,
+        });
+        host.legs.lock().insert(leg.clone(), OpenLeg { begun: LegOf::Plain { targets: targets.to_vec(), event: event.to_string() }, outcomes: Vec::new() });
+        serde_json::from_value(serde_json::json!({ "leg": leg, "run": run, "states": states })).map_err(|e| e.to_string())
+    }
+
+    fn finish_plain(&self, leg: &str) -> Result<(DispatchOutcomes, String, String), String> {
+        let mut legs = self.0.legs.lock();
+        match legs.remove(leg) {
+            Some(OpenLeg { begun: LegOf::Plain { targets, event }, outcomes }) => Ok((outcomes, targets.first().cloned().unwrap_or_default(), event)),
+            Some(other) => {
+                legs.insert(leg.to_string(), other);
+                Err(format!("leg {leg} is not a plain dispatch"))
+            }
+            None => Err(format!("no open leg {leg}")),
+        }
     }
 
     fn in_leg(&self, leg: &str, run: Box<dyn FnOnce() -> Result<Value, String> + '_>) -> Result<Value, String> {
         let scope = {
             let legs = self.0.legs.lock();
             let open = legs.get(leg).ok_or_else(|| format!("no open leg {leg}"))?;
-            self.0.enter_leg(&open.begun).map_err(|(message, _, _)| message)?
+            self.0.enter_open_leg(&open.begun).map_err(|(message, _, _)| message)?
         };
         let answered = run();
         drop(scope);
@@ -443,9 +523,15 @@ impl orbital_core::runtime::kernel::guest_hosting::GuestHost for GuestOf {
             message,
         };
         let open = self.0.legs.lock().remove(leg).ok_or_else(|| failure((format!("program/dispatch: no open leg {leg}"), "INVALID_REQUEST", 400)))?;
-        let _scope = self.0.enter_leg(&open.begun).map_err(failure)?;
-        self.0.finish_leg(&open.begun, open.outcomes)
-            .map_err(failure)
+        let _scope = self.0.enter_open_leg(&open.begun).map_err(failure)?;
+        match &open.begun {
+            LegOf::Request(begun) => self.0.finish_leg(begun, open.outcomes).map_err(failure),
+            LegOf::Completion(parked) => {
+                self.0.sink.finish_parked(parked, Ok(open.outcomes));
+                Ok(serde_json::from_value(serde_json::json!({ "completed": true })).unwrap_or(Value::Null))
+            }
+            LegOf::Plain { .. } => Err(failure((format!("program/dispatch: leg {leg} is a plain dispatch; finish it with plain: true"), "INVALID_REQUEST", 400))),
+        }
     }
 
     fn dispatch(&self, trait_name: &str, event: &str, payload: Value) -> Result<DispatchOutcomes, String> {
@@ -607,6 +693,13 @@ pub struct LegBegun {
 pub enum LegStart {
     Answered(Value),
     Begun(Box<LegBegun>),
+}
+
+/// The scope an open `.lolo` leg runs in, held while its steps and answer run.
+enum OpenLegScope {
+    Request { _scope: LegScope },
+    Completion { _origin: OriginGuard, _parked: Option<orbital_core::runtime::os_host::completion::ParkedScope> },
+    Plain,
 }
 
 /// The origin, session and locale a begun leg runs in, held while it runs.
@@ -891,12 +984,22 @@ pub struct Host {
     /// Server legs a `.lolo` kernel is running (`program/dispatch { lolo: "begin" }`), with the outcomes its steps made.
     legs: Mutex<std::collections::HashMap<String, OpenLeg>>,
     leg_count: std::sync::atomic::AtomicU64,
+    /// Completions the sink held for a `.lolo` kernel, by the run handle they were handed out under.
+    parked_runs: Mutex<std::collections::HashMap<String, orbital_core::runtime::os_host::completion::ParkedCompletion>>,
 }
 
 /// A server leg open for a `.lolo` kernel's steps.
 struct OpenLeg {
-    begun: Box<LegBegun>,
+    begun: LegOf,
     outcomes: Vec<(String, ProcessEventResult)>,
+}
+
+/// What a `.lolo` leg answers: a viewer's events request, or a completion the guest's sink held for the kernel.
+enum LegOf {
+    Request(Box<LegBegun>),
+    Completion(orbital_core::runtime::os_host::completion::ParkedCompletion),
+    /// A plain guest dispatch of `event` to each of `targets`, in the guest's program session.
+    Plain { targets: Vec<String>, event: String },
 }
 
 /// Hand a later dispatch's outcomes to the hook deliveries waiting for an answer: a delivery the outcomes answer
@@ -1159,6 +1262,7 @@ impl Host {
             completion_tap,
             legs: Mutex::default(),
             leg_count: std::sync::atomic::AtomicU64::new(0),
+            parked_runs: Mutex::default(),
         }
     }
 
@@ -1471,6 +1575,19 @@ impl Host {
             _ => Some(self.enter_locale(begun.request.locale.as_deref()).map_err(|e| (e.to_string(), "EVENT_PROCESSING_ERROR", e.status_code()))?),
         };
         Ok(LegScope { _origin: origin, _session: session, _locale: locale })
+    }
+
+    /// The scope an open `.lolo` leg's steps and answer run in: a request's origin, session and locale, or the session
+    /// and asker of the held completion.
+    fn enter_open_leg(&self, open: &LegOf) -> Result<OpenLegScope, LegFailure> {
+        match open {
+            LegOf::Request(begun) => self.enter_leg(begun).map(|scope| OpenLegScope::Request { _scope: scope }),
+            LegOf::Completion(parked) => {
+                let origin = self.enter_origin(parked.requester.client_id.as_deref());
+                Ok(OpenLegScope::Completion { _origin: origin, _parked: self.sink.enter_parked(parked) })
+            }
+            LegOf::Plain { .. } => Ok(OpenLegScope::Plain),
+        }
     }
 
     /// A begun leg's dispatch, run natively.
@@ -3770,6 +3887,407 @@ mod tests {
         for (n, l) in native.iter().zip(&lolo) {
             assert_eq!(n, l, "a .lolo leg answers what the native leg answers");
         }
+    }
+
+    /// The Back trait's row and every live item after a STORE completion reaches a fresh split host: run by its sink,
+    /// or held, handed out on a tick pass, and run by a `.lolo` leg (begin { run }, one committed step, finish).
+    fn completion_answers(lolo: bool) -> (serde_json::Value, String, Vec<String>) {
+        use orbital_core::runtime::kernel::guest_hosting::GuestHost as _;
+        use orbital_core::runtime::os_host::completion::OsCompletionSink as _;
+        let host = Host::new(Arc::new(DriverAdapter::memory())).shared();
+        host.register_schema(serde_json::from_value(split_program()).unwrap()).unwrap();
+        let guest = GuestOf(Arc::clone(&host), Mutex::new(host.subscribe_live()));
+        let mut live = host.subscribe_live();
+        let site = orbital_core::runtime::resumable::CallSite {
+            orbital: Some("Split".to_string()),
+            trait_name: "Back".to_string(),
+            follow_on: false,
+            entity_id: orbital_core::RUNTIME_SINGLETON.to_string(),
+            emit: orbital_core::runtime::resumable::CallRoutes { success: Some("STORE".to_string()), ..Default::default() },
+        };
+        if lolo {
+            guest.drive_by_lolo().unwrap();
+        }
+        host.sink.complete(&site, "k1", Ok(Value::Null));
+        if lolo {
+            let runs: Vec<serde_json::Value> = guest.take_parked_runs().iter().map(orbital_core::json_value::value_to_json).collect();
+            assert_eq!(runs.len(), 1, "the held completion is handed out");
+            assert_eq!(runs[0]["event"], "STORE");
+            let Value::Object(options) = serde_json::from_value::<Value>(serde_json::json!({ "run": runs[0]["run"] })).unwrap() else { panic!() };
+            let begun = orbital_core::json_value::value_to_json(&guest.begin_leg(&Value::Null, &options).map_err(|f| f.message).unwrap());
+            assert_eq!(begun["run"]["kind"], "completion");
+            let id = begun["leg"].as_str().unwrap().to_string();
+            let row = begun["run"]["entityId"].as_str().map(str::to_string);
+            guest.in_leg(&id, Box::new(|| guest.step("Back", row.as_deref(), "STORE", Value::Null, None, Some(&id)).map(|_| Value::Null))).unwrap();
+            guest.finish_leg(&id).map_err(|f| f.message).unwrap();
+        }
+        let snapshot = host.kernel.snapshot_trait("Back", None);
+        let mut items = Vec::new();
+        while let Ok(item) = live.try_recv() {
+            items.push(format!("{:?}", item.event));
+        }
+        (serde_json::to_value(&snapshot.entity).unwrap(), snapshot.state, items)
+    }
+
+    #[test]
+    fn a_completion_run_by_a_lolo_leg_leaves_what_its_native_run_leaves() {
+        let native = completion_answers(false);
+        assert_eq!(native.0["n"], serde_json::json!(1.0), "control: the native completion ran STORE");
+        assert_eq!(completion_answers(true), native);
+    }
+
+    /// A plain STORE dispatch into a fresh split guest: its outcomes (trait, from, to, fired) and the Back row, run by
+    /// the host, or as a plain `.lolo` leg (begin_plain, one committed step per target, finish_plain).
+    fn plain_answers(lolo: bool) -> (Vec<(String, String, String, bool)>, serde_json::Value) {
+        use orbital_core::runtime::kernel::guest_hosting::GuestHost as _;
+        let host = Host::new(Arc::new(DriverAdapter::memory())).shared();
+        host.register_schema(serde_json::from_value(split_program()).unwrap()).unwrap();
+        let guest = GuestOf(Arc::clone(&host), Mutex::new(host.subscribe_live()));
+        let outcomes = if lolo {
+            let begun = orbital_core::json_value::value_to_json(&guest.begin_plain(&["Back".to_string()], "STORE", Value::Null).unwrap());
+            assert_eq!(begun["run"]["kind"], "discover");
+            assert_eq!(begun["states"]["Back"], "idle", "the leg names the held states: {begun}");
+            let id = begun["leg"].as_str().unwrap().to_string();
+            guest.in_leg(&id, Box::new(|| guest.step("Back", Some(orbital_core::RUNTIME_SINGLETON), "STORE", Value::Null, None, Some(&id)).map(|_| Value::Null))).unwrap();
+            let (outcomes, seed, event) = guest.finish_plain(&id).unwrap();
+            assert_eq!((seed.as_str(), event.as_str()), ("Back", "STORE"));
+            assert!(guest.finish_plain(&id).is_err(), "a finished plain leg is closed");
+            outcomes
+        } else {
+            guest.dispatch("Back", "STORE", Value::Null).unwrap()
+        };
+        let moved = outcomes.iter().map(|(t, r)| (t.clone(), r.previous_state.clone(), r.new_state.clone(), r.executed)).collect();
+        (moved, serde_json::to_value(&host.kernel.snapshot_trait("Back", None).entity).unwrap())
+    }
+
+    #[test]
+    fn a_plain_dispatch_run_by_a_lolo_leg_moves_and_writes_what_the_native_one_does() {
+        let native = plain_answers(false);
+        assert_eq!(native.1["n"], serde_json::json!(1.0), "control: the native STORE ran");
+        assert_eq!(plain_answers(true), native);
+    }
+
+    fn keeper_program() -> serde_json::Value {
+        serde_json::json!({
+            "name": "Keep", "typeContractVersion": 1,
+            "orbitals": [{
+                "name": "Keep",
+                "entity": { "name": "Cell", "persistence": "runtime", "fields": [{ "name": "id", "type": "string" }, { "name": "words", "type": "number", "default": 0 }] },
+                "traits": [{ "name": "Keeper", "linkedEntity": "Cell", "stateMachine": {
+                    "states": [{ "name": "idle", "isInitial": true }],
+                    "events": [{ "key": "INIT", "name": "Init" }, { "key": "READ", "name": "Read" }, { "key": "ASKED", "name": "Asked" }],
+                    "transitions": [
+                        { "from": "idle", "to": "idle", "event": "INIT", "effects": [["set", "@entity.words", 3]] },
+                        { "from": "idle", "to": "idle", "event": "READ", "effects": [["when", ["=", "@entity.words", 0], ["emit", "ASKED", {}]]] },
+                        { "from": "idle", "to": "idle", "event": "ASKED" }] } }],
+                "pages": [{ "name": "Home", "path": "/", "traits": [{ "ref": "Keeper" }] }]
+            }]
+        })
+    }
+
+    /// The events a viewer's READ leg emits after the guest's INIT ran in its program session: natively (dispatched
+    /// by the host), or as a `.lolo` kernel runs them (INIT stepped with no leg, READ as a leg).
+    fn keeper_leg_emits(lolo: bool) -> Vec<String> {
+        use orbital_core::runtime::kernel::guest_hosting::GuestHost as _;
+        let host = Host::new(Arc::new(DriverAdapter::memory())).shared();
+        host.register_schema(serde_json::from_value(keeper_program()).unwrap()).unwrap();
+        let guest = GuestOf(Arc::clone(&host), Mutex::new(host.subscribe_live()));
+        let Value::Object(options) = serde_json::from_value::<Value>(serde_json::json!({ "wire": true, "orbital": "Keep", "targetTrait": "Keeper", "event": "READ", "clientId": "tab-k" })).unwrap() else { panic!() };
+        let payload: Value = serde_json::from_value(serde_json::json!({})).unwrap();
+        let answer = if lolo {
+            guest.step("Keeper", None, "INIT", Value::Null, None, None).unwrap();
+            let begun = orbital_core::json_value::value_to_json(&guest.begin_leg(&payload, &options).map_err(|f| f.message).unwrap());
+            let id = begun["leg"].as_str().unwrap().to_string();
+            let row = begun["run"]["entityId"].as_str().map(str::to_string);
+            guest.in_leg(&id, Box::new(|| guest.step("Keeper", row.as_deref(), "READ", Value::Null, None, Some(&id)).map(|_| Value::Null))).unwrap();
+            guest.finish_leg(&id).map_err(|f| f.message).unwrap()
+        } else {
+            guest.dispatch("Keeper", "INIT", Value::Null).unwrap();
+            host.request_answer(&payload, &options).unwrap()
+        };
+        let answer = orbital_core::json_value::value_to_json(&answer);
+        answer["emittedEvents"].as_array().cloned().unwrap_or_default().iter().filter_map(|e| e["event"].as_str().map(str::to_string)).collect()
+    }
+
+    #[test]
+    fn a_leg_in_a_viewer_session_reads_what_the_programs_boot_wrote_on_both_kernels() {
+        let native = keeper_leg_emits(false);
+        assert!(!native.contains(&"ASKED".to_string()), "control: natively the leg sees the boot's words: {native:?}");
+        assert_eq!(keeper_leg_emits(true), native);
+    }
+
+    /// The keeper program opened as a `.lolo`-kernel split guest by an opener that runs it through the operators a
+    /// `.lolo` kernel uses: INIT stepped with `commit` (the boot), then a viewer's READ leg (begin, one step in the leg,
+    /// finish). The events the leg answers.
+    fn keeper_through_the_operators() -> Vec<String> {
+        let runtime = Host::new(Arc::new(DriverAdapter::memory())).shared();
+        let opener: orbital_core::OrbitalSchema = serde_json::from_value(serde_json::json!({
+            "name": "Opener", "typeContractVersion": 1,
+            "orbitals": [{
+                "name": "Opener",
+                "entity": { "name": "Box", "persistence": "runtime", "fields": [{ "name": "id", "type": "string" }, { "name": "guest", "type": "string" }, { "name": "answer", "type": "string" }, { "name": "boot", "type": "string" }, { "name": "stepped", "type": "string" }, { "name": "failures", "type": "array", "items": { "type": "string" }, "default": [] }] },
+                "osGrants": { "kernel": [{ "target": "guest", "kinds": ["spawn", "step"] }] },
+                "traits": [{ "name": "Opener", "linkedEntity": "Box", "stateMachine": {
+                    "states": [{ "name": "idle", "isInitial": true }],
+                    "events": [{ "key": "OPEN", "name": "Open", "payloadSchema": [{ "name": "program", "type": "object", "required": true }] },
+                        { "key": "OPENED", "name": "Opened" }, { "key": "BEGUN", "name": "Begun" }, { "key": "FINISHED", "name": "Finished" }, { "key": "FAILED", "name": "Failed" }],
+                    "transitions": [
+                        { "from": "idle", "to": "idle", "event": "OPEN", "effects": [["program/open", "@payload.program", { "split": true, "mount": false, "kernel": "lolo" }, { "emit": { "success": "OPENED", "failure": "FAILED" } }]] },
+                        { "from": "idle", "to": "idle", "event": "OPENED", "effects": [
+                            ["set", "@entity.guest", "@payload.result.guest"],
+                            ["set", "@entity.boot", ["json/stringify", ["kernel/step", "@payload.result.guest", { "trait": "Keeper", "from": "idle", "event": "INIT", "payload": {}, "commit": true }]]],
+                            ["program/dispatch", "", {}, { "guest": "@payload.result.guest", "wire": true, "orbital": "Keep", "targetTrait": "Keeper", "event": "READ", "clientId": "tab-k", "lolo": "begin", "emit": { "success": "BEGUN", "failure": "FAILED" } }]] },
+                        { "from": "idle", "to": "idle", "event": "BEGUN", "effects": [
+                            ["set", "@entity.stepped", ["json/stringify", ["kernel/step", "@entity.guest", { "trait": "Keeper", "from": "idle", "event": "READ", "payload": {}, "leg": "@payload.result.leg", "entityId": "@payload.result.run.entityId" }]]],
+                            ["program/dispatch", "", {}, { "guest": "@entity.guest", "lolo": "finish", "leg": "@payload.result.leg", "emit": { "success": "FINISHED", "failure": "FAILED" } }]] },
+                        { "from": "idle", "to": "idle", "event": "FINISHED", "effects": [["set", "@entity.answer", ["json/stringify", "@payload.result"]]] },
+                        { "from": "idle", "to": "idle", "event": "FAILED", "effects": [["set", "@entity.failures", ["array/concat", "@entity.failures", [["json/stringify", "@payload"]]]]] }]
+                } }]
+            }]
+        }))
+        .unwrap();
+        runtime.register_schema(opener).unwrap();
+        let args: Vec<Value> = [
+            serde_json::json!("Opener.Opener.OPEN"),
+            serde_json::json!({ "program": keeper_program() }),
+            serde_json::json!({ "wire": true, "orbital": "Opener", "targetTrait": "Opener", "event": "OPEN", "clientId": "tab-g" }),
+        ]
+        .iter()
+        .map(|a| serde_json::from_value(a.clone()).unwrap())
+        .collect();
+        orbital_core::effects::executor::SubstrateHandler::run(runtime.substrate.as_ref(), "program/dispatch", &args).map_err(|f| f.message).unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        let entity = loop {
+            let entity = {
+                let _tab = runtime.kernel.enter_session("tab-g");
+                serde_json::to_value(&runtime.kernel.snapshot_trait("Opener", Some(orbital_core::RUNTIME_SINGLETON)).entity).unwrap()
+            };
+            let done = entity["answer"].as_str().is_some_and(|a| !a.is_empty()) || entity["failures"].as_array().is_some_and(|f| !f.is_empty());
+            if done || std::time::Instant::now() > deadline {
+                break entity;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        };
+        assert!(entity["failures"].as_array().is_none_or(|f| f.is_empty()), "{entity}");
+        let answer: serde_json::Value = serde_json::from_str(entity["answer"].as_str().unwrap_or_else(|| panic!("the leg answered: {entity}"))).unwrap();
+        answer["emittedEvents"].as_array().cloned().unwrap_or_default().iter().filter_map(|e| e["event"].as_str().map(str::to_string)).collect()
+    }
+
+    #[test]
+    fn a_lolo_kernels_leg_reads_what_its_committed_boot_wrote() {
+        assert_eq!(keeper_through_the_operators(), keeper_leg_emits(false), "the .lolo path through the operators answers as native");
+    }
+
+    /// The keeper with its words written by BOOT, and READ heard on every route mount (`$MOUNT`).
+    fn mount_keeper_program() -> serde_json::Value {
+        serde_json::json!({
+            "name": "Keep", "typeContractVersion": 1,
+            "orbitals": [{
+                "name": "Keep",
+                "entity": { "name": "Cell", "persistence": "runtime", "fields": [{ "name": "id", "type": "string" }, { "name": "words", "type": "number", "default": 0 }] },
+                "traits": [{ "name": "Keeper", "linkedEntity": "Cell",
+                    "listens": [{ "event": "$MOUNT", "triggers": "READ" }],
+                    "stateMachine": {
+                    "states": [{ "name": "idle", "isInitial": true }],
+                    "events": [{ "key": "INIT", "name": "Init" }, { "key": "READ", "name": "Read" }, { "key": "ASKED", "name": "Asked" }],
+                    "transitions": [
+                        { "from": "idle", "to": "idle", "event": "INIT", "effects": [["set", "@entity.words", 3]] },
+                        { "from": "idle", "to": "idle", "event": "READ", "effects": [["when", ["=", "@entity.words", 0], ["emit", "ASKED", {}]]] },
+                        { "from": "idle", "to": "idle", "event": "ASKED" }] } },
+                    { "name": "Viewer", "linkedEntity": "Cell", "stateMachine": {
+                        "states": [{ "name": "idle", "isInitial": true }],
+                        "events": [{ "key": "INIT", "name": "Init" }],
+                        "transitions": [{ "from": "idle", "to": "idle", "event": "INIT" }] } }],
+                "pages": [{ "name": "Bg", "path": "", "protocol": "boot", "traits": [{ "ref": "Keeper" }] }, { "name": "Home", "path": "/", "traits": [{ "ref": "Viewer" }] }]
+            }]
+        })
+    }
+
+    /// The `(trait, event)` steps of a viewer's mount leg of `/` after BOOT ran in the guest's program session: natively,
+    /// or through the operators a `.lolo` kernel uses (BOOT stepped with `commit`; in the leg, the `$MOUNT` delivery
+    /// and then the INIT seed, each one committed step).
+    fn mount_keeper_steps(lolo: bool) -> Vec<(String, String)> {
+        let runtime = Host::new(Arc::new(DriverAdapter::memory())).shared();
+        let step = |guest: &str, request: serde_json::Value| serde_json::json!(["set", "@entity.boot", ["json/stringify", ["kernel/step", guest, request]]]);
+        let effects = if lolo {
+            serde_json::json!([
+                ["set", "@entity.guest", "@payload.result.guest"],
+                step("@payload.result.guest", serde_json::json!({ "trait": "Keeper", "from": "idle", "event": "INIT", "payload": {}, "commit": true })),
+                ["program/dispatch", "", {}, { "guest": "@payload.result.guest", "wire": true, "orbital": "Keep", "event": "INIT", "route": "/", "mount": [{ "trait": "Viewer", "event": "INIT" }], "clientId": "tab-k", "lolo": "begin", "emit": { "success": "BEGUN", "failure": "FAILED" } }]])
+        } else {
+            serde_json::json!([
+                ["set", "@entity.guest", "@payload.result.guest"],
+                ["program/dispatch", "", {}, { "guest": "@payload.result.guest", "wire": true, "orbital": "Keep", "event": "INIT", "route": "/", "mount": [{ "trait": "Viewer", "event": "INIT" }], "clientId": "tab-k", "emit": { "success": "FINISHED", "failure": "FAILED" } }]])
+        };
+        let opener: orbital_core::OrbitalSchema = serde_json::from_value(serde_json::json!({
+            "name": "Opener", "typeContractVersion": 1,
+            "orbitals": [{
+                "name": "Opener",
+                "entity": { "name": "Box", "persistence": "runtime", "fields": [{ "name": "id", "type": "string" }, { "name": "guest", "type": "string" }, { "name": "answer", "type": "string" }, { "name": "boot", "type": "string" }, { "name": "failures", "type": "array", "items": { "type": "string" }, "default": [] }] },
+                "osGrants": { "kernel": [{ "target": "guest", "kinds": ["spawn", "step"] }] },
+                "traits": [{ "name": "Opener", "linkedEntity": "Box", "stateMachine": {
+                    "states": [{ "name": "idle", "isInitial": true }],
+                    "events": [{ "key": "OPEN", "name": "Open", "payloadSchema": [{ "name": "program", "type": "object", "required": true }] },
+                        { "key": "OPENED", "name": "Opened" }, { "key": "BOOTED", "name": "Booted" }, { "key": "BEGUN", "name": "Begun" }, { "key": "FINISHED", "name": "Finished" }, { "key": "FAILED", "name": "Failed" }],
+                    "transitions": [
+                        { "from": "idle", "to": "idle", "event": "OPEN", "effects": [["program/open", "@payload.program", if lolo { serde_json::json!({ "split": true, "mount": false, "kernel": "lolo" }) } else { serde_json::json!({ "split": true }) }, { "emit": { "success": "OPENED", "failure": "FAILED" } }]] },
+                        { "from": "idle", "to": "idle", "event": "OPENED", "effects": effects },
+                        { "from": "idle", "to": "idle", "event": "BOOTED", "effects": [
+                            ["program/dispatch", "", {}, { "guest": "@entity.guest", "wire": true, "orbital": "Keep", "event": "INIT", "route": "/", "mount": [{ "trait": "Keeper", "event": "INIT" }], "clientId": "tab-k", "emit": { "success": "FINISHED", "failure": "FAILED" } }]] },
+                        { "from": "idle", "to": "idle", "event": "BEGUN", "effects": [
+                            step("@entity.guest", serde_json::json!({ "trait": "Keeper", "from": "idle", "delivery": { "at": 0 }, "mount": { "route": "/" }, "leg": "@payload.result.leg", "entityId": "@payload.result.run.entityId" })),
+                            step("@entity.guest", serde_json::json!({ "trait": "Viewer", "from": "idle", "event": "INIT", "payload": {}, "leg": "@payload.result.leg", "entityId": "@payload.result.run.entityId" })),
+                            ["program/dispatch", "", {}, { "guest": "@entity.guest", "lolo": "finish", "leg": "@payload.result.leg", "emit": { "success": "FINISHED", "failure": "FAILED" } }]] },
+                        { "from": "idle", "to": "idle", "event": "FINISHED", "effects": [["set", "@entity.answer", ["json/stringify", "@payload.result"]]] },
+                        { "from": "idle", "to": "idle", "event": "FAILED", "effects": [["set", "@entity.failures", ["array/concat", "@entity.failures", [["json/stringify", "@payload"]]]]] }]
+                } }]
+            }]
+        }))
+        .unwrap();
+        runtime.register_schema(opener).unwrap();
+        let args: Vec<Value> = [
+            serde_json::json!("Opener.Opener.OPEN"),
+            serde_json::json!({ "program": mount_keeper_program() }),
+            serde_json::json!({ "wire": true, "orbital": "Opener", "targetTrait": "Opener", "event": "OPEN", "clientId": "tab-g" }),
+        ]
+        .iter()
+        .map(|a| serde_json::from_value(a.clone()).unwrap())
+        .collect();
+        orbital_core::effects::executor::SubstrateHandler::run(runtime.substrate.as_ref(), "program/dispatch", &args).map_err(|f| f.message).unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        let entity = loop {
+            let entity = {
+                let _tab = runtime.kernel.enter_session("tab-g");
+                serde_json::to_value(&runtime.kernel.snapshot_trait("Opener", Some(orbital_core::RUNTIME_SINGLETON)).entity).unwrap()
+            };
+            let done = entity["answer"].as_str().is_some_and(|a| !a.is_empty()) || entity["failures"].as_array().is_some_and(|f| !f.is_empty());
+            if done || std::time::Instant::now() > deadline {
+                break entity;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        };
+        assert!(entity["failures"].as_array().is_none_or(|f| f.is_empty()), "{entity}");
+        let answer: serde_json::Value = serde_json::from_str(entity["answer"].as_str().unwrap_or_else(|| panic!("the leg answered: {entity}"))).unwrap();
+        answer["transitions"].as_array().cloned().unwrap_or_default().iter().map(|t| (t["trait"].as_str().unwrap_or_default().to_string(), t["event"].as_str().unwrap_or_default().to_string())).collect()
+    }
+
+    #[test]
+    fn a_lolo_kernels_mount_leg_reads_what_its_committed_boot_wrote() {
+        let native = mount_keeper_steps(false);
+        assert!(native.iter().any(|(t, e)| t == "Keeper" && e == "READ"), "control: natively the route mount reaches the listener: {native:?}");
+        assert!(!native.iter().any(|(_, e)| e == "ASKED"), "control: natively the mount sees the boot's words: {native:?}");
+        assert_eq!(mount_keeper_steps(true), native);
+    }
+
+    /// A boot-mounted Asker whose words arrive by a listener delivery: its INIT asks, the Answerer answers, its WORDS
+    /// (heard from the answer) writes them; a route mount's `$MOUNT` reaches its READ.
+    fn delivered_keeper_program() -> serde_json::Value {
+        let machine = |events: serde_json::Value, transitions: serde_json::Value| serde_json::json!({ "states": [{ "name": "idle", "isInitial": true }], "events": events, "transitions": transitions });
+        serde_json::json!({
+            "name": "Keep", "typeContractVersion": 1,
+            "orbitals": [{
+                "name": "Keep",
+                "entity": { "name": "Cell", "persistence": "runtime", "fields": [{ "name": "id", "type": "string" }, { "name": "words", "type": "number", "default": 0 }] },
+                "traits": [
+                    { "name": "Asker", "linkedEntity": "Cell",
+                      "listens": [{ "event": "$MOUNT", "triggers": "READ" }, { "event": "ANSWER", "triggers": "WORDS", "source": { "kind": "trait", "trait": "Answerer" } }],
+                      "stateMachine": machine(
+                        serde_json::json!([{ "key": "INIT", "name": "Init" }, { "key": "READ", "name": "Read" }, { "key": "WORDS", "name": "Words" }, { "key": "ASK", "name": "Ask" }, { "key": "ASKED", "name": "Asked" }]),
+                        serde_json::json!([
+                            { "from": "idle", "to": "idle", "event": "INIT", "effects": [["emit", "ASK", {}]] },
+                            { "from": "idle", "to": "idle", "event": "WORDS", "effects": [["set", "@entity.words", 3]] },
+                            { "from": "idle", "to": "idle", "event": "READ", "effects": [["when", ["=", "@entity.words", 0], ["emit", "ASKED", {}]]] },
+                            { "from": "idle", "to": "idle", "event": "ASKED" }])) },
+                    { "name": "Answerer", "linkedEntity": "Cell",
+                      "listens": [{ "event": "ASK", "triggers": "ANSWER_ASK", "source": { "kind": "trait", "trait": "Asker" } }],
+                      "stateMachine": machine(
+                        serde_json::json!([{ "key": "INIT", "name": "Init" }, { "key": "ANSWER_ASK", "name": "Answer ask" }, { "key": "ANSWER", "name": "Answer" }]),
+                        serde_json::json!([
+                            { "from": "idle", "to": "idle", "event": "INIT" },
+                            { "from": "idle", "to": "idle", "event": "ANSWER_ASK", "effects": [["emit", "ANSWER", {}]] }])) },
+                    { "name": "Viewer", "linkedEntity": "Cell", "stateMachine": machine(serde_json::json!([{ "key": "INIT", "name": "Init" }]), serde_json::json!([{ "from": "idle", "to": "idle", "event": "INIT" }])) }],
+                "pages": [{ "name": "Bg", "path": "", "protocol": "boot", "traits": [{ "ref": "Asker" }, { "ref": "Answerer" }] }, { "name": "Home", "path": "/", "traits": [{ "ref": "Viewer" }] }]
+            }]
+        })
+    }
+
+    /// The delivered keeper's mount leg steps after its boot: native, or the boot and the leg through the operators.
+    fn delivered_keeper_steps(lolo: bool) -> Vec<(String, String)> {
+        let runtime = Host::new(Arc::new(DriverAdapter::memory())).shared();
+        let step = |guest: &str, request: serde_json::Value| serde_json::json!(["set", "@entity.boot", ["json/stringify", ["kernel/step", guest, request]]]);
+        let leg = serde_json::json!({ "guest": "@payload.result.guest", "wire": true, "orbital": "Keep", "event": "INIT", "route": "/", "mount": [{ "trait": "Viewer", "event": "INIT" }], "clientId": "tab-k" });
+        let opened = if lolo {
+            let mut begin = leg.clone();
+            begin["lolo"] = serde_json::json!("begin");
+            begin["emit"] = serde_json::json!({ "success": "BEGUN", "failure": "FAILED" });
+            serde_json::json!([
+                ["set", "@entity.guest", "@payload.result.guest"],
+                step("@payload.result.guest", serde_json::json!({ "trait": "Asker", "from": "idle", "event": "INIT", "payload": {}, "commit": true })),
+                step("@payload.result.guest", serde_json::json!({ "trait": "Answerer", "from": "idle", "event": "INIT", "payload": {}, "commit": true })),
+                step("@payload.result.guest", serde_json::json!({ "trait": "Answerer", "from": "idle", "delivery": { "at": 0 }, "emitter": "Asker", "payload": {}, "commit": true })),
+                step("@payload.result.guest", serde_json::json!({ "trait": "Asker", "from": "idle", "delivery": { "at": 1 }, "emitter": "Answerer", "payload": {}, "commit": true })),
+                ["program/dispatch", "", {}, begin]])
+        } else {
+            let mut native = leg.clone();
+            native["emit"] = serde_json::json!({ "success": "FINISHED", "failure": "FAILED" });
+            serde_json::json!([["set", "@entity.guest", "@payload.result.guest"], ["program/dispatch", "", {}, native]])
+        };
+        let opener: orbital_core::OrbitalSchema = serde_json::from_value(serde_json::json!({
+            "name": "Opener", "typeContractVersion": 1,
+            "orbitals": [{
+                "name": "Opener",
+                "entity": { "name": "Box", "persistence": "runtime", "fields": [{ "name": "id", "type": "string" }, { "name": "guest", "type": "string" }, { "name": "answer", "type": "string" }, { "name": "boot", "type": "string" }, { "name": "failures", "type": "array", "items": { "type": "string" }, "default": [] }] },
+                "osGrants": { "kernel": [{ "target": "guest", "kinds": ["spawn", "step"] }] },
+                "traits": [{ "name": "Opener", "linkedEntity": "Box", "stateMachine": {
+                    "states": [{ "name": "idle", "isInitial": true }],
+                    "events": [{ "key": "OPEN", "name": "Open", "payloadSchema": [{ "name": "program", "type": "object", "required": true }] },
+                        { "key": "OPENED", "name": "Opened" }, { "key": "BEGUN", "name": "Begun" }, { "key": "FINISHED", "name": "Finished" }, { "key": "FAILED", "name": "Failed" }],
+                    "transitions": [
+                        { "from": "idle", "to": "idle", "event": "OPEN", "effects": [["program/open", "@payload.program", if lolo { serde_json::json!({ "split": true, "mount": false, "kernel": "lolo" }) } else { serde_json::json!({ "split": true }) }, { "emit": { "success": "OPENED", "failure": "FAILED" } }]] },
+                        { "from": "idle", "to": "idle", "event": "OPENED", "effects": opened },
+                        { "from": "idle", "to": "idle", "event": "BEGUN", "effects": [
+                            step("@entity.guest", serde_json::json!({ "trait": "Asker", "from": "idle", "delivery": { "at": 0 }, "mount": { "route": "/" }, "leg": "@payload.result.leg", "entityId": "@payload.result.run.entityId" })),
+                            step("@entity.guest", serde_json::json!({ "trait": "Viewer", "from": "idle", "event": "INIT", "payload": {}, "leg": "@payload.result.leg", "entityId": "@payload.result.run.entityId" })),
+                            ["program/dispatch", "", {}, { "guest": "@entity.guest", "lolo": "finish", "leg": "@payload.result.leg", "emit": { "success": "FINISHED", "failure": "FAILED" } }]] },
+                        { "from": "idle", "to": "idle", "event": "FINISHED", "effects": [["set", "@entity.answer", ["json/stringify", "@payload.result"]]] },
+                        { "from": "idle", "to": "idle", "event": "FAILED", "effects": [["set", "@entity.failures", ["array/concat", "@entity.failures", [["json/stringify", "@payload"]]]]] }]
+                } }]
+            }]
+        }))
+        .unwrap();
+        runtime.register_schema(opener).unwrap();
+        let args: Vec<Value> = [
+            serde_json::json!("Opener.Opener.OPEN"),
+            serde_json::json!({ "program": delivered_keeper_program() }),
+            serde_json::json!({ "wire": true, "orbital": "Opener", "targetTrait": "Opener", "event": "OPEN", "clientId": "tab-g" }),
+        ]
+        .iter()
+        .map(|a| serde_json::from_value(a.clone()).unwrap())
+        .collect();
+        orbital_core::effects::executor::SubstrateHandler::run(runtime.substrate.as_ref(), "program/dispatch", &args).map_err(|f| f.message).unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        let entity = loop {
+            let entity = {
+                let _tab = runtime.kernel.enter_session("tab-g");
+                serde_json::to_value(&runtime.kernel.snapshot_trait("Opener", Some(orbital_core::RUNTIME_SINGLETON)).entity).unwrap()
+            };
+            let done = entity["answer"].as_str().is_some_and(|a| !a.is_empty()) || entity["failures"].as_array().is_some_and(|f| !f.is_empty());
+            if done || std::time::Instant::now() > deadline {
+                break entity;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        };
+        assert!(entity["failures"].as_array().is_none_or(|f| f.is_empty()), "{entity}");
+        let answer: serde_json::Value = serde_json::from_str(entity["answer"].as_str().unwrap_or_else(|| panic!("the leg answered: {entity}"))).unwrap();
+        answer["transitions"].as_array().cloned().unwrap_or_default().iter().map(|t| (t["trait"].as_str().unwrap_or_default().to_string(), t["event"].as_str().unwrap_or_default().to_string())).collect()
+    }
+
+    #[test]
+    fn a_lolo_kernels_mount_leg_reads_what_its_boot_wrote_through_a_delivery() {
+        let native = delivered_keeper_steps(false);
+        assert!(native.iter().any(|(t, e)| t == "Asker" && e == "READ"), "control: the route mount reaches the listener: {native:?}");
+        assert!(!native.iter().any(|(_, e)| e == "ASKED"), "control: natively the mount sees the boot's words: {native:?}");
+        assert_eq!(delivered_keeper_steps(true), native);
     }
 
     #[test]
