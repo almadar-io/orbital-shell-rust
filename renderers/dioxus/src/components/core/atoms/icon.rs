@@ -19,18 +19,7 @@ static LUCIDE_ALIASES: LazyLock<HashMap<String, String>> = LazyLock::new(|| {
     serde_json::from_str(include_str!("../../../../assets/lucide-aliases.json"))
         .expect("generated web Lucide aliases must be valid JSON")
 });
-/// The web's `kebabToPascal`: each hyphen part capitalised (digit-only parts unchanged), joined.
-fn kebab_to_pascal(name: &str) -> String {
-    name.split('-')
-        .map(|part| {
-            let mut chars = part.chars();
-            match chars.next() {
-                Some(first) => first.to_ascii_uppercase().to_string() + chars.as_str(),
-                None => String::new(),
-            }
-        })
-        .collect()
-}
+use orbital_core::str_utils::kebab_to_pascal;
 
 static LUCIDE_PASCAL: LazyLock<HashMap<String, String>> = LazyLock::new(|| {
     LUCIDE_NODES

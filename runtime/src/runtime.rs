@@ -4086,6 +4086,17 @@ mod tests {
         assert_eq!(keeper_through_the_operators(), keeper_leg_emits(false), "the .lolo path through the operators answers as native");
     }
 
+    /// A leg answer's `(trait, event)` steps, then each event it emitted as `("emit", event)`.
+    fn leg_steps_and_emits(answer: &serde_json::Value) -> Vec<(String, String)> {
+        let steps = answer["transitions"].as_array().cloned().unwrap_or_default();
+        let emits = answer["emittedEvents"].as_array().cloned().unwrap_or_default();
+        steps
+            .iter()
+            .map(|t| (t["trait"].as_str().unwrap_or_default().to_string(), format!("{}>{}", t["event"].as_str().unwrap_or_default(), t["to"].as_str().unwrap_or_default())))
+            .chain(emits.iter().map(|e| ("emit".to_string(), e["event"].as_str().unwrap_or_default().to_string())))
+            .collect()
+    }
+
     /// The keeper with its words written by BOOT, and READ heard on every route mount (`$MOUNT`).
     fn mount_keeper_program() -> serde_json::Value {
         serde_json::json!({
@@ -4115,6 +4126,10 @@ mod tests {
     /// or through the operators a `.lolo` kernel uses (BOOT kept with `kernel/commit`; in the leg, the `$MOUNT` delivery
     /// and then the INIT seed, each one committed step).
     fn mount_keeper_steps(lolo: bool) -> Vec<(String, String)> {
+        mount_keeper_steps_of(mount_keeper_program(), lolo)
+    }
+
+    fn mount_keeper_steps_of(program: serde_json::Value, lolo: bool) -> Vec<(String, String)> {
         let runtime = Host::new(Arc::new(DriverAdapter::memory())).shared();
         let step = |guest: &str, request: serde_json::Value| serde_json::json!(["kernel/commit", guest, request, { "emit": { "failure": "FAILED" } }]);
         let effects = if lolo {
@@ -4155,7 +4170,7 @@ mod tests {
         runtime.register_schema(opener).unwrap();
         let args: Vec<Value> = [
             serde_json::json!("Opener.Opener.OPEN"),
-            serde_json::json!({ "program": mount_keeper_program() }),
+            serde_json::json!({ "program": program }),
             serde_json::json!({ "wire": true, "orbital": "Opener", "targetTrait": "Opener", "event": "OPEN", "clientId": "tab-g" }),
         ]
         .iter()
@@ -4185,6 +4200,73 @@ mod tests {
         assert!(native.iter().any(|(t, e)| t == "Keeper" && e == "READ"), "control: natively the route mount reaches the listener: {native:?}");
         assert!(!native.iter().any(|(_, e)| e == "ASKED"), "control: natively the mount sees the boot's words: {native:?}");
         assert_eq!(mount_keeper_steps(true), native);
+    }
+
+    /// A boot-only Keeper (as std-mock-seed's MockSeed) whose words its INIT writes, and a page's Viewer whose INIT emits
+    /// PAGE, which the Keeper hears as READ: READ moves it to `asked` when it reads no words.
+    fn page_heard_keeper_program() -> serde_json::Value {
+        let machine = |states: serde_json::Value, events: serde_json::Value, transitions: serde_json::Value| serde_json::json!({ "states": states, "events": events, "transitions": transitions });
+        serde_json::json!({
+            "name": "Keep", "typeContractVersion": 1,
+            "orbitals": [{
+                "name": "Keep",
+                "entity": { "name": "Cell", "persistence": "runtime", "fields": [{ "name": "id", "type": "string" }, { "name": "words", "type": "number", "default": 0 }, { "name": "reads", "type": "number", "default": 0 }] },
+                "auxiliaryEntities": [{ "name": "View", "persistence": "runtime", "fields": [{ "name": "id", "type": "string" }] }],
+                "traits": [
+                    { "name": "Keeper", "linkedEntity": "Cell",
+                      "listens": [{ "event": "PAGE", "triggers": "READ", "source": { "kind": "trait", "trait": "Viewer" } }],
+                      "stateMachine": machine(
+                        serde_json::json!([{ "name": "idle", "isInitial": true }, { "name": "asked" }]),
+                        serde_json::json!([{ "key": "INIT", "name": "Init" }, { "key": "READ", "name": "Read" }]),
+                        serde_json::json!([
+                            { "from": "idle", "to": "idle", "event": "INIT", "effects": [["set", "@entity.words", 3]] },
+                            { "from": "idle", "to": "asked", "event": "READ", "guard": ["=", "@entity.words", 0], "effects": [["set", "@entity.reads", 1]] },
+                            { "from": "idle", "to": "idle", "event": "READ", "effects": [["set", "@entity.reads", 1]] }])) },
+                    { "name": "Viewer", "linkedEntity": "View",
+                      "stateMachine": machine(
+                        serde_json::json!([{ "name": "idle", "isInitial": true }]),
+                        serde_json::json!([{ "key": "INIT", "name": "Init" }, { "key": "PAGE", "name": "Page" }]),
+                        serde_json::json!([{ "from": "idle", "to": "idle", "event": "INIT", "effects": [["emit", "PAGE", {}]] }])) }],
+                "pages": [{ "name": "Bg", "path": "", "protocol": "boot", "traits": [{ "ref": "Keeper" }] }, { "name": "Home", "path": "/", "traits": [{ "ref": "Viewer" }] }]
+            }]
+        })
+    }
+
+    /// The Keeper's state after a viewer's mount leg of `/`, its words written by INIT in the program session first:
+    /// natively, or as a `.lolo` kernel runs it (INIT stepped with no leg; in the leg, Viewer's INIT then the Keeper's READ
+    /// its PAGE reached, each one committed step).
+    fn page_heard_keeper_state(lolo: bool) -> String {
+        use orbital_core::runtime::kernel::guest_hosting::GuestHost as _;
+        let host = Host::new(Arc::new(DriverAdapter::memory())).shared();
+        host.register_schema(serde_json::from_value(page_heard_keeper_program()).unwrap()).unwrap();
+        let guest = GuestOf(Arc::clone(&host), Mutex::new(host.subscribe_live()));
+        let Value::Object(options) = serde_json::from_value::<Value>(serde_json::json!({ "wire": true, "orbital": "Keep", "event": "INIT", "route": "/", "mount": [{ "trait": "Viewer", "event": "INIT" }], "clientId": "tab-k" })).unwrap() else { panic!() };
+        let payload: Value = serde_json::from_value(serde_json::json!({})).unwrap();
+        let answer = if lolo {
+            guest.step("Keeper", None, "INIT", Value::Null, None, None).unwrap();
+            let begun = orbital_core::json_value::value_to_json(&guest.begin_leg(&payload, &options).map_err(|f| f.message).unwrap());
+            let id = begun["leg"].as_str().unwrap().to_string();
+            guest
+                .in_leg(&id, Box::new(|| {
+                    guest.step("Viewer", None, "INIT", Value::Null, None, Some(&id))?;
+                    guest.step("Keeper", None, "READ", Value::Null, None, Some(&id)).map(|_| Value::Null)
+                }))
+                .unwrap();
+            guest.finish_leg(&id).map_err(|f| f.message).unwrap()
+        } else {
+            guest.dispatch("Keeper", "INIT", Value::Null).unwrap();
+            host.request_answer(&payload, &options).unwrap()
+        };
+        let answer = orbital_core::json_value::value_to_json(&answer);
+        let read = answer["transitions"].as_array().cloned().unwrap_or_default().into_iter().find(|t| t["trait"] == "Keeper" && t["event"] == "READ");
+        read.and_then(|t| t["to"].as_str().map(str::to_string)).unwrap_or_else(|| panic!("the leg stepped the Keeper's READ: {answer}"))
+    }
+
+    #[test]
+    fn a_lolo_kernels_leg_step_of_a_boot_only_trait_runs_in_the_program_session() {
+        let native = page_heard_keeper_state(false);
+        assert_eq!(native, "idle", "control: natively the boot-only Keeper steps in the program session and reads its words");
+        assert_eq!(page_heard_keeper_state(true), native, "EXEC-DIST-9: a committed step of a boot-only trait from a viewer's leg runs in the program session");
     }
 
     /// A boot-mounted Asker whose words arrive by a listener delivery: its INIT asks, the Answerer answers, its WORDS

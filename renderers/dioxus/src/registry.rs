@@ -149,6 +149,7 @@ pub const STUBBED_PATTERNS: &[&str] = &[
     "data-grid",
     "data-list",
     "dialogue-bubble",
+    "draw-emitter",
     "draw-fx-layer",
     "draw-group",
     "draw-mesh",
