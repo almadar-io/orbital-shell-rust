@@ -399,40 +399,42 @@ impl orbital_core::runtime::kernel::guest_hosting::GuestHost for GuestOf {
 
     fn take_parked_runs(&self) -> Vec<Value> {
         let host = &self.0;
+        let order = |run: &String| run.strip_prefix("run-").and_then(|n| n.parse::<u64>().ok()).unwrap_or(u64::MAX);
         let ticks: Vec<Value> = host
             .lolo_ticks
             .lock()
             .as_mut()
             .map(|lolo| {
-                std::mem::take(&mut lolo.fresh)
+                for (trait_name, tick) in std::mem::take(&mut lolo.fresh) {
+                    lolo.handed.insert(format!("run-{}", host.leg_count.fetch_add(1, Ordering::SeqCst)), (trait_name, tick));
+                }
+                let mut offered: Vec<(&String, &(String, String))> = lolo.handed.iter().collect();
+                offered.sort_by_key(|(run, _)| order(run));
+                offered
                     .into_iter()
-                    .map(|(trait_name, tick)| {
-                        let run = format!("run-{}", host.leg_count.fetch_add(1, Ordering::SeqCst));
-                        let described = serde_json::json!({ "run": run, "kind": "tick", "trait": trait_name, "tick": tick });
-                        lolo.handed.insert(run, (trait_name, tick));
-                        serde_json::from_value(described).unwrap_or(Value::Null)
-                    })
+                    .map(|(run, (trait_name, tick))| serde_json::from_value(serde_json::json!({ "run": run, "kind": "tick", "trait": trait_name, "tick": tick })).unwrap_or(Value::Null))
                     .collect()
             })
             .unwrap_or_default();
-        let completions = host.sink
-            .take_parked()
-            .into_iter()
-            .map(|parked| {
-                let run = format!("run-{}", host.leg_count.fetch_add(1, Ordering::SeqCst));
-                let described = serde_json::json!({
-                    "run": run,
-                    "trait": parked.site.trait_name,
-                    "event": parked.event,
-                    "payload": orbital_core::json_value::value_to_json(&parked.payload),
-                    "entityId": parked.site.entity_id,
-                    "failure": parked.site.emit.failure.clone().filter(|failure| !parked.failed && *failure != parked.event),
-                    "key": orbital_core::runtime::resumable::program_call_key(&parked.key),
-                    "clientId": parked.requester.client_id,
-                });
-                host.parked_runs.lock().insert(run, parked);
-                serde_json::from_value(described).unwrap_or(Value::Null)
-            });
+        let mut parked_runs = host.parked_runs.lock();
+        for parked in host.sink.take_parked() {
+            parked_runs.insert(format!("run-{}", host.leg_count.fetch_add(1, Ordering::SeqCst)), parked);
+        }
+        let mut offered: Vec<(&String, &orbital_core::runtime::os_host::completion::ParkedCompletion)> = parked_runs.iter().collect();
+        offered.sort_by_key(|(run, _)| order(run));
+        let completions = offered.into_iter().map(|(run, parked)| {
+            serde_json::from_value(serde_json::json!({
+                "run": run,
+                "trait": parked.site.trait_name,
+                "event": parked.event,
+                "payload": orbital_core::json_value::value_to_json(&parked.payload),
+                "entityId": parked.site.entity_id,
+                "failure": parked.site.emit.failure.clone().filter(|failure| !parked.failed && *failure != parked.event),
+                "key": orbital_core::runtime::resumable::program_call_key(&parked.key),
+                "clientId": parked.requester.client_id,
+            }))
+            .unwrap_or(Value::Null)
+        });
         ticks.into_iter().chain(completions).collect()
     }
 
@@ -472,7 +474,7 @@ impl orbital_core::runtime::kernel::guest_hosting::GuestHost for GuestOf {
                     "entityId": orbital_core::RUNTIME_SINGLETON,
                 });
                 let leg = format!("leg-{}", host.leg_count.fetch_add(1, Ordering::SeqCst));
-                host.legs.lock().insert(leg.clone(), OpenLeg { begun: LegOf::Tick { trait_name, tick }, outcomes: Vec::new() });
+                host.legs.lock().insert(leg.clone(), OpenLeg::new(LegOf::Tick { trait_name, tick }));
                 return serde_json::from_value(serde_json::json!({ "leg": leg, "run": described, "states": states }))
                     .map_err(|e| failure((e.to_string(), "EVENT_PROCESSING_ERROR", 500)));
             }
@@ -492,7 +494,7 @@ impl orbital_core::runtime::kernel::guest_hosting::GuestHost for GuestOf {
                 "key": orbital_core::runtime::resumable::program_call_key(&parked.key),
             });
             let leg = format!("leg-{}", host.leg_count.fetch_add(1, Ordering::SeqCst));
-            host.legs.lock().insert(leg.clone(), OpenLeg { begun: LegOf::Completion(parked), outcomes: Vec::new() });
+            host.legs.lock().insert(leg.clone(), OpenLeg::new(LegOf::Completion(parked)));
             return serde_json::from_value(serde_json::json!({ "leg": leg, "run": described, "states": states }))
                 .map_err(|e| failure((e.to_string(), "EVENT_PROCESSING_ERROR", 500)));
         }
@@ -525,7 +527,7 @@ impl orbital_core::runtime::kernel::guest_hosting::GuestHost for GuestOf {
             self.0.held_states(&traits, &begun.entity_id)
         };
         let leg = format!("leg-{}", self.0.leg_count.fetch_add(1, Ordering::SeqCst));
-        self.0.legs.lock().insert(leg.clone(), OpenLeg { begun: LegOf::Request(begun), outcomes: Vec::new() });
+        self.0.legs.lock().insert(leg.clone(), OpenLeg::new(LegOf::Request(begun)));
         serde_json::from_value(serde_json::json!({ "leg": leg, "run": run, "states": states }))
             .map_err(|e| failure((e.to_string(), "EVENT_PROCESSING_ERROR", 500)))
     }
@@ -544,14 +546,14 @@ impl orbital_core::runtime::kernel::guest_hosting::GuestHost for GuestOf {
             "kind": "discover", "traits": targets, "event": event,
             "payload": orbital_core::json_value::value_to_json(&payload), "entityId": orbital_core::RUNTIME_SINGLETON,
         });
-        host.legs.lock().insert(leg.clone(), OpenLeg { begun: LegOf::Plain { targets: targets.to_vec(), event: event.to_string() }, outcomes: Vec::new() });
+        host.legs.lock().insert(leg.clone(), OpenLeg::new(LegOf::Plain { targets: targets.to_vec(), event: event.to_string() }));
         serde_json::from_value(serde_json::json!({ "leg": leg, "run": run, "states": states })).map_err(|e| e.to_string())
     }
 
     fn finish_plain(&self, leg: &str) -> Result<(DispatchOutcomes, String, String), String> {
         let mut legs = self.0.legs.lock();
         match legs.remove(leg) {
-            Some(OpenLeg { begun: LegOf::Plain { targets, event }, outcomes }) => Ok((outcomes, targets.first().cloned().unwrap_or_default(), event)),
+            Some(OpenLeg { begun: LegOf::Plain { targets, event }, outcomes, .. }) => Ok((outcomes, targets.first().cloned().unwrap_or_default(), event)),
             Some(other) => {
                 legs.insert(leg.to_string(), other);
                 Err(format!("leg {leg} is not a plain dispatch"))
@@ -561,14 +563,55 @@ impl orbital_core::runtime::kernel::guest_hosting::GuestHost for GuestOf {
     }
 
     fn in_leg(&self, leg: &str, run: Box<dyn FnOnce() -> Result<Value, String> + '_>) -> Result<Value, String> {
-        let scope = {
+        let (scope, lineage) = {
             let legs = self.0.legs.lock();
             let open = legs.get(leg).ok_or_else(|| format!("no open leg {leg}"))?;
-            self.0.enter_open_leg(&open.begun).map_err(|(message, _, _)| message)?
+            (self.0.enter_open_leg(&open.begun).map_err(|(message, _, _)| message)?, open.lineage.clone())
         };
+        let lineage = orbital_core::runtime::kernel::mount_barrier::enter_lineage(Some(lineage));
         let answered = run();
+        drop(lineage);
         drop(scope);
         answered
+    }
+
+    fn in_leg_run(&self, leg: &str, run: &str, step: Box<dyn FnOnce() -> Result<Value, String> + '_>) -> Result<Value, String> {
+        let host = &self.0;
+        let (origin, parked, lineage) = {
+            let legs = host.legs.lock();
+            let open = legs.get(leg).ok_or_else(|| format!("no open leg {leg}"))?;
+            let parked = open.adopted.get(run).ok_or_else(|| format!("leg {leg} holds no completion {run}"))?;
+            (host.enter_origin(parked.requester.client_id.as_deref()), host.sink.enter_parked(parked), open.lineage.clone())
+        };
+        let lineage = orbital_core::runtime::kernel::mount_barrier::enter_lineage(Some(lineage));
+        let answered = step();
+        drop(lineage);
+        drop(parked);
+        drop(origin);
+        answered
+    }
+
+    fn settle_leg(&self, leg: &str) -> Result<Value, String> {
+        let host = &self.0;
+        let lineage = host.legs.lock().get(leg).map(|open| open.lineage.clone()).ok_or_else(|| format!("no open leg {leg}"))?;
+        lineage.wait_until(|open| open <= host.sink.parked_in(&lineage));
+        let taken = host.sink.take_parked_in(&lineage);
+        let mut legs = host.legs.lock();
+        let open = legs.get_mut(leg).ok_or_else(|| format!("no open leg {leg}"))?;
+        let mut runs = Vec::with_capacity(taken.len());
+        for mut parked in taken {
+            let run = format!("run-{}", host.leg_count.fetch_add(1, Ordering::SeqCst));
+            runs.push(serde_json::json!({
+                "run": run,
+                "trait": parked.site.trait_name,
+                "event": parked.event,
+                "payload": orbital_core::json_value::value_to_json(&parked.payload),
+                "entityId": parked.site.entity_id,
+            }));
+            parked.ticket = None;
+            open.adopted.insert(run, parked);
+        }
+        serde_json::from_value(serde_json::json!({ "runs": runs })).map_err(|e| e.to_string())
     }
 
     fn finish_leg(&self, leg: &str) -> Result<Value, orbital_core::effects::executor::SubstrateFailure> {
@@ -1098,6 +1141,20 @@ struct LoloTicks {
 struct OpenLeg {
     begun: LegOf,
     outcomes: Vec<(String, ProcessEventResult)>,
+    /// The lineage its steps run in (EXEC-SEED-7): a held completion's own, else the leg's.
+    lineage: Arc<orbital_core::runtime::kernel::mount_barrier::MountLineage>,
+    /// The held completions settle handed the leg, by run handle, until the leg ends.
+    adopted: std::collections::HashMap<String, orbital_core::runtime::os_host::completion::ParkedCompletion>,
+}
+
+impl OpenLeg {
+    fn new(begun: LegOf) -> Self {
+        let lineage = match &begun {
+            LegOf::Completion(parked) => parked.requester.lineage.clone(),
+            _ => None,
+        };
+        Self { begun, outcomes: Vec::new(), lineage: lineage.unwrap_or_default(), adopted: std::collections::HashMap::new() }
+    }
 }
 
 /// What a `.lolo` leg answers: a viewer's events request, or a completion the guest's sink held for the kernel.
@@ -4150,6 +4207,98 @@ mod tests {
         assert_eq!(tick_answers(row_ticking_program(stored_beats(), false), &[], true).0, native.0);
     }
 
+    /// The `/shelf` mount leg of `chained_shelf_program(false)`, whose `$MOUNT` listener writes card `c1` only after two keyed
+    /// self dispatches: answered natively, or by a `.lolo` leg that steps the listener, settles the leg's lineage (each
+    /// reply it hands back stepped inside the leg) when `settle`, then steps the seed. The answer as text.
+    fn chained_mount_answer(lolo: bool, settle: bool) -> String {
+        use orbital_core::runtime::kernel::guest_hosting::GuestHost as _;
+        let host = Host::new(Arc::new(DriverAdapter::memory())).shared();
+        let mut program = chained_shelf_program(false);
+        program["orbitals"][0]["traits"][2]["stateMachine"] = serde_json::json!({
+            "states": [{ "name": "idle", "isInitial": true }],
+            "events": [{ "key": "INIT", "name": "Init" }, { "key": "L", "name": "Listed" }],
+            "transitions": [
+                { "from": "idle", "to": "idle", "event": "INIT", "effects": [["fetch", "Card", { "emit": { "success": "L" } }]] },
+                { "from": "idle", "to": "idle", "event": "L", "effects": [["set", "@entity.label", ["json/stringify", "@payload"]]] }] });
+        host.register_schema(serde_json::from_value(program).unwrap()).unwrap();
+        let guest = GuestOf(Arc::clone(&host), Mutex::new(host.subscribe_live()));
+        let Value::Object(options) = serde_json::from_value::<Value>(serde_json::json!({
+            "orbital": "Shelf", "event": "INIT", "route": "/shelf", "clientId": "tab-1", "wire": true,
+            "mount": [{ "trait": "Shelf", "event": "INIT" }] })).unwrap() else { panic!() };
+        let payload = Value::Null;
+        let answer = if !lolo {
+            host.request_answer(&payload, &options).expect("the native leg answers")
+        } else {
+            guest.drive_by_lolo().unwrap();
+            let begun = orbital_core::json_value::value_to_json(&guest.begin_leg(&payload, &options).map_err(|f| f.message).unwrap());
+            assert_eq!((begun["run"]["kind"].as_str(), begun["run"]["route"].as_str()), (Some("mount"), Some("/shelf")), "{begun}");
+            let id = begun["leg"].as_str().unwrap().to_string();
+            guest.in_leg(&id, Box::new(|| guest.step("Seeder", None, "SEED_PAGE", Value::Null, None, Some(&id)).map(|_| Value::Null))).unwrap();
+            let mut rounds = 0;
+            while settle {
+                let settled = orbital_core::json_value::value_to_json(&guest.settle_leg(&id).unwrap());
+                let runs = settled["runs"].as_array().cloned().unwrap_or_default();
+                if runs.is_empty() {
+                    break;
+                }
+                rounds += 1;
+                assert!(rounds < 10, "the lineage settles");
+                for run in runs {
+                    let (handle, trait_name, event) = (run["run"].as_str().unwrap().to_string(), run["trait"].as_str().unwrap().to_string(), run["event"].as_str().unwrap().to_string());
+                    let row = run["entityId"].as_str().map(str::to_string);
+                    let payload: Value = serde_json::from_value(run["payload"].clone()).unwrap();
+                    guest.in_leg_run(&id, &handle, Box::new(|| guest.step(&trait_name, row.as_deref(), &event, payload, None, Some(&id)).map(|_| Value::Null))).unwrap();
+                }
+            }
+            if settle {
+                assert_eq!(rounds, 2, "two keyed replies, each asked by the one before");
+            }
+            let listed = std::cell::RefCell::new(Value::Null);
+            guest.in_leg(&id, Box::new(|| guest.step("Shelf", None, "INIT", Value::Null, None, Some(&id)).map(|outcomes| {
+                for (_, result) in &outcomes {
+                    for ran in &result.effect_results {
+                        if let orbital_core::Effect::Emit { event, payload } = &ran.effect {
+                            if event.as_str() == "L" {
+                                *listed.borrow_mut() = payload.clone();
+                            }
+                        }
+                    }
+                }
+                Value::Null
+            }))).unwrap();
+            let listed = listed.into_inner();
+            guest.in_leg(&id, Box::new(|| guest.step("Shelf", None, "L", listed, None, Some(&id)).map(|_| Value::Null))).unwrap();
+            guest.finish_leg(&id).map_err(|f| f.message).unwrap()
+        };
+        let _tab = host.kernel.enter_session("tab-1");
+        let listed = serde_json::to_value(&host.kernel.snapshot_trait("Shelf", None).entity).unwrap()["label"].to_string();
+        format!("listed={listed} answer={}", orbital_core::json_value::value_to_json(&answer))
+    }
+
+    #[test]
+    fn a_lolo_mount_leg_that_settles_its_mount_listeners_work_lists_what_the_native_leg_lists() {
+        let listed = |answer: &str| answer.split(" answer=").next().unwrap_or_default().contains("c1");
+        let native = chained_mount_answer(false, false);
+        assert!(listed(&native), "control: the native leg's seed listed the card the listener wrote (EXEC-SEED-7): {native}");
+        let lolo = chained_mount_answer(true, true);
+        assert!(listed(&lolo), "the settled lolo leg's seed listed it too: {lolo}");
+    }
+
+    #[test]
+    fn control_a_lolo_mount_leg_that_does_not_settle_lists_no_card() {
+        let unsettled = chained_mount_answer(true, false);
+        assert!(unsettled.starts_with("listed=") && !unsettled.split(" answer=").next().unwrap_or_default().contains("c1"), "the seed ran before the listener's replies: {unsettled}");
+    }
+
+    #[test]
+    fn edge_settling_a_leg_whose_steps_asked_nothing_answers_no_runs_at_once() {
+        use orbital_core::runtime::kernel::guest_hosting::GuestHost as _;
+        let (guest, _host, id) = begun_tick_leg();
+        let settled = orbital_core::json_value::value_to_json(&guest.settle_leg(&id).unwrap());
+        assert_eq!(settled["runs"], serde_json::json!([]), "{settled}");
+        assert!(guest.settle_leg("leg-none").is_err(), "control: no open leg, no settle");
+    }
+
     /// A lolo-driven host with one tick of `Pulse` handed out and its leg begun: the guest, the host and the leg handle.
     fn begun_tick_leg() -> (GuestOf, Arc<Host>, String) {
         use orbital_core::runtime::kernel::guest_hosting::GuestHost as _;
@@ -4166,6 +4315,34 @@ mod tests {
         let begun = orbital_core::json_value::value_to_json(&guest.begin_leg(&Value::Null, &options).map_err(|f| f.message).unwrap());
         let id = begun["leg"].as_str().unwrap().to_string();
         (guest, host, id)
+    }
+
+    #[test]
+    fn a_held_run_not_yet_begun_is_offered_again_on_the_next_pass() {
+        use orbital_core::runtime::kernel::guest_hosting::GuestHost as _;
+        use orbital_core::runtime::os_host::completion::OsCompletionSink as _;
+        let host = Host::new(Arc::new(DriverAdapter::memory())).shared();
+        host.register_schema(serde_json::from_value(row_ticking_program(stored_beats(), false)).unwrap()).unwrap();
+        host.persistence.create("Beat", &serde_json::from_value(serde_json::json!({ "n": 1 })).unwrap()).unwrap();
+        let guest = GuestOf(Arc::clone(&host), Mutex::new(host.subscribe_live()));
+        guest.drive_by_lolo().unwrap();
+        host.tick_pass(0, noon());
+        host.tick_pass(1000, noon());
+        let site = orbital_core::runtime::resumable::CallSite {
+            orbital: Some("Clock".to_string()),
+            trait_name: "Pulse".to_string(),
+            follow_on: false,
+            entity_id: orbital_core::RUNTIME_SINGLETON.to_string(),
+            emit: orbital_core::runtime::resumable::CallRoutes { success: Some("INIT".to_string()), ..Default::default() },
+        };
+        host.sink.complete(&site, "k1", Ok(Value::Null));
+        let handles = |runs: Vec<Value>| runs.iter().map(|r| orbital_core::json_value::value_to_json(r)["run"].as_str().unwrap().to_string()).collect::<Vec<_>>();
+        let first = handles(guest.take_parked_runs());
+        assert_eq!(first.len(), 2, "the due tick and the held completion: {first:?}");
+        assert_eq!(handles(guest.take_parked_runs()), first, "a pass whose runs were never begun (its opener refused it) offers them again, in order");
+        let Value::Object(options) = serde_json::from_value::<Value>(serde_json::json!({ "run": first[0] })).unwrap() else { panic!() };
+        guest.begin_leg(&Value::Null, &options).map_err(|f| f.message).unwrap();
+        assert_eq!(handles(guest.take_parked_runs()), vec![first[1].clone()], "control: a begun run is not offered again");
     }
 
     #[test]
@@ -4197,6 +4374,7 @@ mod tests {
     #[test]
     fn a_lolo_completion_leg_abandoned_runs_nothing_and_closes() {
         use orbital_core::runtime::kernel::guest_hosting::GuestHost as _;
+        use orbital_core::runtime::os_host::completion::OsCompletionSink as _;
         let host = Host::new(Arc::new(DriverAdapter::memory())).shared();
         host.register_schema(serde_json::from_value(split_program()).unwrap()).unwrap();
         let guest = GuestOf(Arc::clone(&host), Mutex::new(host.subscribe_live()));
