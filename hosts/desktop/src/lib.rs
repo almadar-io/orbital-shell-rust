@@ -51,7 +51,7 @@ impl Renderer {
 fn client_schema(schema: &OrbitalSchema) -> Result<OrbitalSchema, String> {
     let program = orbital_core::value_serialize::to_value(schema).map_err(|e| format!("client program: {e}"))?;
     let client = orbital_core::effects::runs_on::client_program(program);
-    serde_json::from_value(orbital_core::json_value::value_to_json(&client)).map_err(|e| format!("client program: {e}"))
+    orbital_core::value_deserialize::from_value(&client).map_err(|e| format!("client program: {e}"))
 }
 
 /// An in-process kernel over the app's own rows.

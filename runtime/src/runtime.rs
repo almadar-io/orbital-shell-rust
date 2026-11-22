@@ -325,7 +325,7 @@ impl orbital_core::runtime::kernel::guest_hosting::GuestHosting for HostGuests {
         let named: Value = serde_json::from_value(serde_json::json!({ "behavior": behavior })).map_err(|e| failure(e.to_string()))?;
         let options: Value = serde_json::from_value(serde_json::json!({ "lazy": file })).map_err(|e| failure(e.to_string()))?;
         let answer = port.run("behavior/resolve", &[named, options])?;
-        serde_json::from_value(orbital_core::json_value::value_to_json(&answer))
+        orbital_core::value_deserialize::from_value(&answer)
             .map_err(|e| failure(format!("behavior/resolve: the lazy program `{file}` of `{behavior}` is not a resolved program: {e}")))
     }
 }
@@ -497,7 +497,10 @@ impl orbital_core::runtime::kernel::guest_hosting::GuestHost for GuestOf {
                 .map_err(|e| failure((e.to_string(), "EVENT_PROCESSING_ERROR", 500)));
         }
         let begun = match self.0.begin_leg(payload, options).map_err(failure)? {
-            LegStart::Answered(answered) => return Ok(serde_json::from_value(serde_json::json!({ "answered": orbital_core::json_value::value_to_json(&answered) })).unwrap_or(Value::Null)),
+            LegStart::Answered(answered) => {
+                let wrapped = Value::object(orbital_core::ValueMap::from_iter([("answered".into(), answered)]));
+                return Ok(orbital_core::value_deserialize::from_value(&wrapped).unwrap_or(Value::Null));
+            }
             LegStart::Begun(begun) => begun,
         };
         if begun.session.is_none() {
