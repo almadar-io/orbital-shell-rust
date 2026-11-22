@@ -393,12 +393,29 @@ impl orbital_core::runtime::kernel::guest_hosting::GuestHost for GuestOf {
 
     fn drive_by_lolo(&self) -> Result<(), String> {
         self.0.sink.park_completions();
+        *self.0.lolo_ticks.lock() = Some(LoloTicks::default());
         Ok(())
     }
 
     fn take_parked_runs(&self) -> Vec<Value> {
         let host = &self.0;
-        host.sink
+        let ticks: Vec<Value> = host
+            .lolo_ticks
+            .lock()
+            .as_mut()
+            .map(|lolo| {
+                std::mem::take(&mut lolo.fresh)
+                    .into_iter()
+                    .map(|(trait_name, tick)| {
+                        let run = format!("run-{}", host.leg_count.fetch_add(1, Ordering::SeqCst));
+                        let described = serde_json::json!({ "run": run, "kind": "tick", "trait": trait_name, "tick": tick });
+                        lolo.handed.insert(run, (trait_name, tick));
+                        serde_json::from_value(described).unwrap_or(Value::Null)
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        let completions = host.sink
             .take_parked()
             .into_iter()
             .map(|parked| {
@@ -415,8 +432,8 @@ impl orbital_core::runtime::kernel::guest_hosting::GuestHost for GuestOf {
                 });
                 host.parked_runs.lock().insert(run, parked);
                 serde_json::from_value(described).unwrap_or(Value::Null)
-            })
-            .collect()
+            });
+        ticks.into_iter().chain(completions).collect()
     }
 
     fn begin_leg(&self, payload: &Value, options: &ValueMap) -> Result<Value, orbital_core::effects::executor::SubstrateFailure> {
@@ -426,6 +443,39 @@ impl orbital_core::runtime::kernel::guest_hosting::GuestHost for GuestOf {
         };
         if let Some(run) = options.get("run").and_then(Value::as_str) {
             let host = &self.0;
+            let handed = host.lolo_ticks.lock().as_mut().and_then(|lolo| lolo.handed.remove(run));
+            if let Some((trait_name, tick)) = handed {
+                let rows = match host.tick_rows_listed(&trait_name) {
+                    Ok(rows) => rows,
+                    Err(message) => {
+                        if let Some(lolo) = host.lolo_ticks.lock().as_mut() {
+                            lolo.held.remove(&(trait_name.clone(), tick.clone()));
+                        }
+                        return Err(failure((format!("program/dispatch: tick {tick} of {trait_name}: {message}"), "EVENT_PROCESSING_ERROR", 500)));
+                    }
+                };
+                let mut states: std::collections::BTreeMap<String, String> = host
+                    .kernel
+                    .orbital_of_trait(&trait_name)
+                    .and_then(|orbital| host.kernel.get_orbital(&orbital))
+                    .map(|detail| host.held_states(&detail.traits, orbital_core::RUNTIME_SINGLETON).into_iter().collect())
+                    .unwrap_or_default();
+                for row in rows.iter().filter(|row| row.entity_id.as_deref() == Some(row.state_entity.as_str())) {
+                    let held = host.held_states(std::slice::from_ref(&trait_name), &row.state_entity);
+                    if let Some(state) = held.get(&trait_name) {
+                        states.insert(format!("{trait_name}#{}", row.state_entity), state.clone());
+                    }
+                }
+                let described = serde_json::json!({
+                    "kind": "tick", "trait": trait_name, "tick": tick,
+                    "rows": rows.iter().map(|row| row.entity_id.clone().unwrap_or_default()).collect::<Vec<_>>(),
+                    "entityId": orbital_core::RUNTIME_SINGLETON,
+                });
+                let leg = format!("leg-{}", host.leg_count.fetch_add(1, Ordering::SeqCst));
+                host.legs.lock().insert(leg.clone(), OpenLeg { begun: LegOf::Tick { trait_name, tick }, outcomes: Vec::new() });
+                return serde_json::from_value(serde_json::json!({ "leg": leg, "run": described, "states": states }))
+                    .map_err(|e| failure((e.to_string(), "EVENT_PROCESSING_ERROR", 500)));
+            }
             let parked = host.parked_runs.lock().remove(run).ok_or_else(|| failure((format!("program/dispatch: no held completion {run}"), "INVALID_REQUEST", 400)))?;
             let states = {
                 let _scope = host.sink.enter_parked(&parked);
@@ -531,6 +581,17 @@ impl orbital_core::runtime::kernel::guest_hosting::GuestHost for GuestOf {
                 self.0.sink.finish_parked(parked, Ok(open.outcomes));
                 Ok(serde_json::from_value(serde_json::json!({ "completed": true })).unwrap_or(Value::Null))
             }
+            LegOf::Tick { trait_name, tick } => {
+                let host = &self.0;
+                feed_inbound_waiters(&host.inbound_waiters, &open.outcomes);
+                let response = orbital_core::EventResponse::from_process_results(&open.outcomes, "", &orbital_core::tick_event_key(tick));
+                host.broadcast_persisted(&response, None);
+                if let Some(lolo) = host.lolo_ticks.lock().as_mut() {
+                    lolo.held.remove(&(trait_name.clone(), tick.clone()));
+                    lolo.ran.extend(open.outcomes);
+                }
+                Ok(serde_json::from_value(serde_json::json!({ "completed": true })).unwrap_or(Value::Null))
+            }
             LegOf::Plain { .. } => Err(failure((format!("program/dispatch: leg {leg} is a plain dispatch; finish it with plain: true"), "INVALID_REQUEST", 400))),
         }
     }
@@ -613,6 +674,9 @@ impl orbital_core::runtime::kernel::guest_hosting::GuestHost for GuestOf {
     fn tick_pass(&self) -> Result<DispatchOutcomes, String> {
         let host = &self.0;
         let mut outcomes: DispatchOutcomes = host.tick_pass_moving(host.monotonic_ms(), orbital_core::Calendar::local_now()).into_iter().flat_map(|(_, moved)| moved).collect();
+        if let Some(lolo) = host.lolo_ticks.lock().as_mut() {
+            outcomes.extend(std::mem::take(&mut lolo.ran));
+        }
         outcomes.extend(host.drain_completions().into_iter().filter_map(|completion| completion.outcomes.ok()).flatten());
         Ok(outcomes)
     }
@@ -994,6 +1058,18 @@ pub struct Host {
     leg_count: std::sync::atomic::AtomicU64,
     /// Completions the sink held for a `.lolo` kernel, by the run handle they were handed out under.
     parked_runs: Mutex<std::collections::HashMap<String, orbital_core::runtime::os_host::completion::ParkedCompletion>>,
+    /// The ticks held for a `.lolo` kernel to run (`drive_by_lolo`); none while this host runs its own.
+    lolo_ticks: Mutex<Option<LoloTicks>>,
+}
+
+/// A `.lolo`-driven guest's due ticks: each `(trait, tick)` is held once until the leg running it finishes.
+#[derive(Default)]
+struct LoloTicks {
+    fresh: Vec<(String, String)>,
+    handed: std::collections::HashMap<String, (String, String)>,
+    held: std::collections::HashSet<(String, String)>,
+    /// What finished tick legs moved, reported by the next tick pass.
+    ran: DispatchOutcomes,
 }
 
 /// A server leg open for a `.lolo` kernel's steps.
@@ -1008,6 +1084,8 @@ enum LegOf {
     Completion(orbital_core::runtime::os_host::completion::ParkedCompletion),
     /// A plain guest dispatch of `event` to each of `targets`, in the guest's program session.
     Plain { targets: Vec<String>, event: String },
+    /// One firing of a held tick, in the guest's program session.
+    Tick { trait_name: String, tick: String },
 }
 
 /// Hand a later dispatch's outcomes to the hook deliveries waiting for an answer: a delivery the outcomes answer
@@ -1272,6 +1350,7 @@ impl Host {
             legs: Mutex::default(),
             leg_count: std::sync::atomic::AtomicU64::new(0),
             parked_runs: Mutex::default(),
+            lolo_ticks: Mutex::default(),
         }
     }
 
@@ -1388,6 +1467,14 @@ impl Host {
     /// [`Self::tick_pass`], with what each tick that ran moved.
     fn tick_pass_moving(&self, now_ms: u64, calendar: orbital_core::Calendar) -> Vec<((String, String), DispatchOutcomes)> {
         let due = self.ticks.lock().due(now_ms, || calendar);
+        if let Some(lolo) = self.lolo_ticks.lock().as_mut() {
+            for (trait_name, tick) in due {
+                if self.kernel.tick_runs(&trait_name, &tick) && lolo.held.insert((trait_name.clone(), tick.clone())) {
+                    lolo.fresh.push((trait_name, tick));
+                }
+            }
+            return Vec::new();
+        }
         let mut ran = Vec::new();
         for (trait_name, tick) in due {
             if !self.kernel.tick_runs(&trait_name, &tick) {
@@ -1595,8 +1682,20 @@ impl Host {
                 let origin = self.enter_origin(parked.requester.client_id.as_deref());
                 Ok(OpenLegScope::Completion { _origin: origin, _parked: self.sink.enter_parked(parked) })
             }
-            LegOf::Plain { .. } => Ok(OpenLegScope::Plain),
+            LegOf::Plain { .. } | LegOf::Tick { .. } => Ok(OpenLegScope::Plain),
         }
+    }
+
+    /// The rows one firing of a tick of `trait_name` covers, listed through this host as a tick's run lists them.
+    fn tick_rows_listed(&self, trait_name: &str) -> Result<Vec<orbital_core::runtime::TickRow>, String> {
+        let host = self.host.read().clone();
+        let scope = self.sink.begin_dispatch_for(None);
+        let request = IoRequest::ListRows { entity_type: self.kernel.tick_entity_type(trait_name) };
+        let rows = match scope.answer(&|request| host.answer(request), &request) {
+            IoAnswer::Rows(rows) => rows?,
+            other => return Err(format!("listing the rows a tick of {trait_name} covers was answered {other:?}")),
+        };
+        Ok(self.kernel.tick_rows(trait_name, orbital_core::RUNTIME_SINGLETON, &rows))
     }
 
     /// A begun leg's dispatch, run natively.
@@ -3935,6 +4034,98 @@ mod tests {
             items.push(format!("{:?}", item.event));
         }
         (serde_json::to_value(&snapshot.entity).unwrap(), snapshot.state, items)
+    }
+
+    /// A background tick of `Pulse` that stores one Beat per row it covers, `n` read from that row. `keyed` makes Pulse
+    /// keyed (a listen with a `key`), so its state is held per row.
+    fn row_ticking_program(entity: serde_json::Value, keyed: bool) -> serde_json::Value {
+        let mut pulse = serde_json::json!({
+            "name": "Pulse", "linkedEntity": "Beat",
+            "stateMachine": { "states": [{ "name": "idle", "isInitial": true }], "events": [{ "key": "INIT", "name": "Init" }], "transitions": [{ "from": "idle", "to": "idle", "event": "INIT" }] },
+            "ticks": [{ "name": "beat", "interval": 1000, "runsInBackground": true, "effects": [["persist", "create", "Log", { "n": ["+", ["default", "@entity.n", 0], 10] }]] }]
+        });
+        if keyed {
+            pulse["listens"] = serde_json::json!([{ "event": "BEAT_SEEN", "triggers": "INIT", "key": "@payload.key" }]);
+        }
+        serde_json::json!({ "name": "Clock", "typeContractVersion": 1, "orbitals": [{ "name": "Clock", "entity": entity, "traits": [pulse] }, { "name": "Logs", "entity": { "name": "Log", "persistence": "persistent", "collection": "logs", "fields": [{ "name": "id", "type": "string" }, { "name": "n", "type": "number" }] }, "traits": [] }] })
+    }
+
+    /// The sorted `n` of every Beat row, and what the guest's next pass reports, after one due tick of `Pulse` over the
+    /// `stored` rows: run by the host, or held, handed out on a pass and run by a `.lolo` leg (begin { run } answers the
+    /// rows; one committed tick step per row; finish).
+    fn tick_answers(program: serde_json::Value, stored: &[f64], lolo: bool) -> (Vec<f64>, usize) {
+        use orbital_core::runtime::kernel::guest_hosting::GuestHost as _;
+        let host = Host::new(Arc::new(DriverAdapter::memory())).shared();
+        host.register_schema(serde_json::from_value(program).unwrap()).unwrap();
+        for n in stored {
+            host.persistence.create("Beat", &serde_json::from_value(serde_json::json!({ "n": n })).unwrap()).unwrap();
+        }
+        let guest = GuestOf(Arc::clone(&host), Mutex::new(host.subscribe_live()));
+        if lolo {
+            guest.drive_by_lolo().unwrap();
+        }
+        assert!(host.tick_pass(0, noon()).is_empty(), "the first pass only captures the clock");
+        let ran = host.tick_pass(1000, noon());
+        let mut reported = ran.len();
+        if lolo {
+            assert!(ran.is_empty(), "a .lolo-driven host runs no tick itself");
+            assert_eq!(host.tick_pass(2000, noon()), Vec::new(), "a held tick is not held again while its leg is open");
+            let runs: Vec<serde_json::Value> = guest.take_parked_runs().iter().map(orbital_core::json_value::value_to_json).collect();
+            assert_eq!(runs.len(), 1, "the due tick is handed out once: {runs:?}");
+            assert_eq!((runs[0]["kind"].as_str(), runs[0]["trait"].as_str(), runs[0]["tick"].as_str()), (Some("tick"), Some("Pulse"), Some("beat")));
+            let Value::Object(options) = serde_json::from_value::<Value>(serde_json::json!({ "run": runs[0]["run"] })).unwrap() else { panic!() };
+            let begun = orbital_core::json_value::value_to_json(&guest.begin_leg(&Value::Null, &options).map_err(|f| f.message).unwrap());
+            assert_eq!(begun["run"]["kind"], "tick", "{begun}");
+            let id = begun["leg"].as_str().unwrap().to_string();
+            let rows: Vec<String> = begun["run"]["rows"].as_array().unwrap().iter().map(|r| r.as_str().unwrap().to_string()).collect();
+            for row in &rows {
+                let row = (!row.is_empty()).then_some(row.as_str());
+                guest.in_leg(&id, Box::new(|| guest.step("Pulse", row, "", Value::Null, Some("beat"), Some(&id)).map(|_| Value::Null))).unwrap();
+            }
+            guest.finish_leg(&id).map_err(|f| f.message).unwrap();
+            reported = guest.tick_pass().unwrap().len();
+            assert!(guest.take_parked_runs().is_empty(), "control: nothing more is held");
+        }
+        let mut ns: Vec<f64> = host.persistence.list("Log").unwrap().iter().filter_map(|r| serde_json::to_value(r).unwrap()["n"].as_f64()).collect();
+        ns.sort_by(f64::total_cmp);
+        (ns, reported)
+    }
+
+    fn stored_beats() -> serde_json::Value {
+        serde_json::json!({ "name": "Beat", "persistence": "persistent", "collection": "beats", "fields": [{ "name": "id", "type": "string" }, { "name": "n", "type": "number" }] })
+    }
+
+    #[test]
+    fn a_tick_run_by_a_lolo_leg_covers_the_rows_its_native_run_covers() {
+        let native = tick_answers(row_ticking_program(stored_beats(), false), &[1.0, 2.0], false);
+        assert_eq!(native.0, vec![11.0, 12.0], "control: the native tick ran once per stored row");
+        let lolo = tick_answers(row_ticking_program(stored_beats(), false), &[1.0, 2.0], true);
+        assert_eq!(lolo.0, native.0);
+        assert_eq!(lolo.1, 2, "the next pass reports what the leg moved, one step per row");
+    }
+
+    #[test]
+    fn a_keyed_tick_run_by_a_lolo_leg_covers_the_rows_its_native_run_covers() {
+        let native = tick_answers(row_ticking_program(stored_beats(), true), &[1.0, 2.0], false);
+        assert_eq!(native.0, vec![11.0, 12.0], "control: the native keyed tick ran once per stored row");
+        let lolo = tick_answers(row_ticking_program(stored_beats(), true), &[1.0, 2.0], true);
+        assert_eq!(lolo.0, native.0);
+        assert_eq!(lolo.1, 2, "the next pass reports what the leg moved, one step per row");
+    }
+
+    #[test]
+    fn edge_a_lolo_tick_on_an_empty_runtime_entity_runs_once_as_the_native_one_does() {
+        let runtime = serde_json::json!({ "name": "Beat", "persistence": "runtime", "fields": [{ "name": "id", "type": "string" }, { "name": "n", "type": "number" }] });
+        let native = tick_answers(row_ticking_program(runtime.clone(), false), &[], false);
+        assert_eq!(native.0, vec![10.0], "control: the native tick ran once on the singleton");
+        assert_eq!(tick_answers(row_ticking_program(runtime, false), &[], true).0, native.0);
+    }
+
+    #[test]
+    fn edge_a_lolo_tick_on_an_empty_stored_entity_covers_no_row_as_the_native_one_does() {
+        let native = tick_answers(row_ticking_program(stored_beats(), false), &[], false);
+        assert!(native.0.is_empty(), "control: no row, no run");
+        assert_eq!(tick_answers(row_ticking_program(stored_beats(), false), &[], true).0, native.0);
     }
 
     #[test]
