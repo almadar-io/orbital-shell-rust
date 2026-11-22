@@ -599,6 +599,25 @@ impl orbital_core::runtime::kernel::guest_hosting::GuestHost for GuestOf {
         }
     }
 
+    fn abandon_leg(&self, leg: &str, error: &str) -> Result<(), String> {
+        let host = &self.0;
+        let open = host.legs.lock().remove(leg).ok_or_else(|| format!("no open leg {leg}"))?;
+        match &open.begun {
+            LegOf::Completion(parked) => {
+                let failed = DispatchError::Kernel(KernelError::Internal(format!("the .lolo kernel failed: {error}")));
+                host.sink.finish_parked(parked, Err(failed));
+            }
+            LegOf::Tick { trait_name, tick } => {
+                tracing::error!(target: orbital_core::logging::ns::SERVER_DATA, trait_name = %trait_name, tick = %tick, %error, "tick failed");
+                if let Some(lolo) = host.lolo_ticks.lock().as_mut() {
+                    lolo.held.remove(&(trait_name.clone(), tick.clone()));
+                }
+            }
+            LegOf::Request(_) | LegOf::Plain { .. } => {}
+        }
+        Ok(())
+    }
+
     fn dispatch(&self, trait_name: &str, event: &str, payload: Value) -> Result<DispatchOutcomes, String> {
         let host = &self.0;
         host.finish(host.kernel.start_dispatch(trait_name, None, event, payload, None, None))
@@ -4129,6 +4148,76 @@ mod tests {
         let native = tick_answers(row_ticking_program(stored_beats(), false), &[], false);
         assert!(native.0.is_empty(), "control: no row, no run");
         assert_eq!(tick_answers(row_ticking_program(stored_beats(), false), &[], true).0, native.0);
+    }
+
+    /// A lolo-driven host with one tick of `Pulse` handed out and its leg begun: the guest, the host and the leg handle.
+    fn begun_tick_leg() -> (GuestOf, Arc<Host>, String) {
+        use orbital_core::runtime::kernel::guest_hosting::GuestHost as _;
+        let host = Host::new(Arc::new(DriverAdapter::memory())).shared();
+        host.register_schema(serde_json::from_value(row_ticking_program(stored_beats(), false)).unwrap()).unwrap();
+        host.persistence.create("Beat", &serde_json::from_value(serde_json::json!({ "n": 1 })).unwrap()).unwrap();
+        let guest = GuestOf(Arc::clone(&host), Mutex::new(host.subscribe_live()));
+        guest.drive_by_lolo().unwrap();
+        host.tick_pass(0, noon());
+        host.tick_pass(1000, noon());
+        let runs: Vec<serde_json::Value> = guest.take_parked_runs().iter().map(orbital_core::json_value::value_to_json).collect();
+        assert_eq!(runs.len(), 1, "control: the due tick is handed out");
+        let Value::Object(options) = serde_json::from_value::<Value>(serde_json::json!({ "run": runs[0]["run"] })).unwrap() else { panic!() };
+        let begun = orbital_core::json_value::value_to_json(&guest.begin_leg(&Value::Null, &options).map_err(|f| f.message).unwrap());
+        let id = begun["leg"].as_str().unwrap().to_string();
+        (guest, host, id)
+    }
+
+    #[test]
+    fn a_lolo_tick_leg_abandoned_comes_due_again_as_a_failed_native_tick_does() {
+        use orbital_core::runtime::kernel::guest_hosting::GuestHost as _;
+        let (guest, host, id) = begun_tick_leg();
+        host.tick_pass(2000, noon());
+        assert!(guest.take_parked_runs().is_empty(), "control: an open tick leg holds its tick");
+        guest.abandon_leg(&id, "the .lolo kernel failed").unwrap();
+        host.tick_pass(3000, noon());
+        let runs: Vec<serde_json::Value> = guest.take_parked_runs().iter().map(orbital_core::json_value::value_to_json).collect();
+        assert_eq!(runs.len(), 1, "the abandoned tick is due again: {runs:?}");
+        assert_eq!(runs[0]["tick"], "beat");
+        assert!(host.persistence.list("Log").unwrap().is_empty(), "an abandoned tick that stepped nothing stored nothing");
+        assert_eq!(guest.tick_pass().unwrap().len(), 0, "an abandoned tick reports no moves");
+    }
+
+    #[test]
+    fn edge_an_abandoned_lolo_leg_is_closed() {
+        use orbital_core::runtime::kernel::guest_hosting::GuestHost as _;
+        let (guest, _host, id) = begun_tick_leg();
+        guest.abandon_leg(&id, "the .lolo kernel failed").unwrap();
+        let finished = guest.finish_leg(&id).map_err(|f| f.message);
+        assert!(finished.as_ref().is_err_and(|m| m.contains("no open leg")), "{finished:?}");
+        let again = guest.abandon_leg(&id, "twice");
+        assert!(again.as_ref().is_err_and(|m| m.contains("no open leg")), "{again:?}");
+    }
+
+    #[test]
+    fn a_lolo_completion_leg_abandoned_runs_nothing_and_closes() {
+        use orbital_core::runtime::kernel::guest_hosting::GuestHost as _;
+        let host = Host::new(Arc::new(DriverAdapter::memory())).shared();
+        host.register_schema(serde_json::from_value(split_program()).unwrap()).unwrap();
+        let guest = GuestOf(Arc::clone(&host), Mutex::new(host.subscribe_live()));
+        let site = orbital_core::runtime::resumable::CallSite {
+            orbital: Some("Split".to_string()),
+            trait_name: "Back".to_string(),
+            follow_on: false,
+            entity_id: orbital_core::RUNTIME_SINGLETON.to_string(),
+            emit: orbital_core::runtime::resumable::CallRoutes { success: Some("STORE".to_string()), ..Default::default() },
+        };
+        guest.drive_by_lolo().unwrap();
+        host.sink.complete(&site, "k1", Ok(Value::Null));
+        let runs: Vec<serde_json::Value> = guest.take_parked_runs().iter().map(orbital_core::json_value::value_to_json).collect();
+        let Value::Object(options) = serde_json::from_value::<Value>(serde_json::json!({ "run": runs[0]["run"] })).unwrap() else { panic!() };
+        let begun = orbital_core::json_value::value_to_json(&guest.begin_leg(&Value::Null, &options).map_err(|f| f.message).unwrap());
+        let id = begun["leg"].as_str().unwrap().to_string();
+        guest.abandon_leg(&id, "the .lolo kernel failed").unwrap();
+        let snapshot = host.kernel.snapshot_trait("Back", None);
+        assert_ne!(serde_json::to_value(&snapshot.entity).unwrap()["n"], serde_json::json!(1.0), "an abandoned completion did not run STORE");
+        assert!(guest.finish_leg(&id).is_err(), "the leg is closed");
+        assert!(guest.take_parked_runs().is_empty(), "an abandoned completion is not handed out again");
     }
 
     #[test]
