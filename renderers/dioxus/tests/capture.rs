@@ -2016,9 +2016,9 @@ fn text_overflow_ellipsis_with_nowrap_keeps_one_line_and_marks_the_ellipsis() {
 
 fn red_canvas() -> serde_json::Value {
     serde_json::json!({
-        "type": "canvas", "painter": "orbital", "width": 64, "height": 48, "projection": "flat",
-        "backgroundColor": "#ffffff",
-        "children": [{ "type": "draw-shape", "shape": "rect", "anchor": "top-left", "position": { "x": 0, "y": 0 },
+        "type": "canvas", "mode": "2d", "projection": "free", "painter": "orbital",
+        "camera": { "mode": "top-down", "zoom": 1 }, "worldWidth": 64, "worldHeight": 48,
+        "drawables": [{ "type": "draw-shape", "shape": "rect", "anchor": "top-left", "position": { "x": 0, "y": 0 },
             "width": 64, "height": 48, "fill": "#ff0000" }]
     })
 }
