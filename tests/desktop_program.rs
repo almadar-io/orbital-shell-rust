@@ -80,6 +80,23 @@ fn screenshots_write_one_png_per_orbital_and_text_for_the_terminal() {
     std::fs::remove_dir_all(&out).unwrap();
 }
 
+fn png_size(path: &Path) -> (u32, u32) {
+    let bytes = std::fs::read(path).unwrap();
+    let at = |i: usize| u32::from_be_bytes(bytes[i..i + 4].try_into().unwrap());
+    (at(16), at(20))
+}
+
+#[test]
+fn a_screenshot_without_a_route_is_captured_at_the_asked_viewport() {
+    let out = std::env::temp_dir().join(format!("orb-desktop-viewport-{}", std::process::id()));
+    let viewport = orbital_core::desktop_protocol::CaptureViewport { width: 320, height: 200, scale: 2.0 };
+    let asked = files(request(Path::new(BINARY), DesktopRequest::Screenshot { renderer: "dioxus".into(), item: "v".into(), schema: Box::new(program()), out_dir: out.clone(), route: None, server: None, viewport: Some(viewport) }).unwrap());
+    assert_eq!(png_size(&asked[0]), (320, 200));
+    let default = files(request(Path::new(BINARY), DesktopRequest::Screenshot { renderer: "dioxus".into(), item: "d".into(), schema: Box::new(program()), out_dir: out.clone(), route: None, server: None, viewport: None }).unwrap());
+    assert_eq!(png_size(&default[0]), (1280, 900), "control: no viewport is the program's default window");
+    std::fs::remove_dir_all(&out).unwrap();
+}
+
 fn route_shot(route: &str, out: &Path) -> String {
     let txt = files(request(Path::new(BINARY), DesktopRequest::Screenshot { renderer: "tui".into(), item: "r".into(), schema: Box::new(program()), out_dir: out.to_path_buf(), route: Some(route.into()), server: None, viewport: None }).unwrap());
     assert_eq!(txt, vec![out.join("r.txt")]);

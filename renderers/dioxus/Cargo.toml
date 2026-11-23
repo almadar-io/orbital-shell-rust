@@ -29,6 +29,7 @@ research-audio = []
 native = [
     "dep:dioxus-native",
     "dioxus-native/time",
+    "dep:tokio",
     "dioxus-native/svg",
     "dep:android-activity",
     "dep:blitz-shell",
@@ -137,6 +138,8 @@ dioxus-asset-resolver = { version = "0.7.9", features = ["native"], optional = t
 orbital-canvas = { git = "https://github.com/almadar-io/orbital-canvas", branch = "main", features = ["http", "system-fonts"], optional = true }
 # PNG encoding for the offscreen capture (`offscreen::capture_png`).
 png = { version = "0.17", optional = true }
+# The runtime the offscreen capture enters, as the window's launcher does (`offscreen::capture_with`).
+tokio = { version = "1.53", features = ["rt-multi-thread", "time"], optional = true }
 
 # wasm32 bridge — only built for the browser target even though the `native`
 # feature enables them (desktop builds skip this table).

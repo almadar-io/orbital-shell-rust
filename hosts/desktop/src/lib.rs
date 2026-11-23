@@ -119,7 +119,7 @@ impl Surface {
 }
 
 /// Every orbital, initialised, captured once.
-fn screenshot(renderer: Renderer, item: &str, schema: &OrbitalSchema, out_dir: &Path) -> Result<Vec<PathBuf>, String> {
+fn screenshot(renderer: Renderer, item: &str, schema: &OrbitalSchema, out_dir: &Path, viewport: CaptureViewport) -> Result<Vec<PathBuf>, String> {
     std::fs::create_dir_all(out_dir).map_err(|e| format!("{}: {e}", out_dir.display()))?;
     let mut surface = Surface::mount(renderer, schema, kernel(schema)?)?;
     let mut written = Vec::new();
@@ -129,7 +129,7 @@ fn screenshot(renderer: Renderer, item: &str, schema: &OrbitalSchema, out_dir: &
             core.init_all_traits_blocking();
             core.settle(8);
         })?;
-        written.push(surface.capture(&out_dir.join(format!("{item}.orbital{idx}")), DEFAULT_VIEWPORT)?);
+        written.push(surface.capture(&out_dir.join(format!("{item}.orbital{idx}")), viewport)?);
     }
     Ok(written)
 }
@@ -237,7 +237,9 @@ impl DesktopProgram for Desktop {
                 )
                     .map(|file| DesktopReply::Files(vec![file]))
                     .map_err(failed),
-                None => screenshot(Renderer::parse(&renderer)?, &item, &schema, &out_dir).map(DesktopReply::Files).map_err(failed),
+                None => screenshot(Renderer::parse(&renderer)?, &item, &schema, &out_dir, viewport.unwrap_or(DEFAULT_VIEWPORT))
+                    .map(DesktopReply::Files)
+                    .map_err(failed),
             },
         }
     }

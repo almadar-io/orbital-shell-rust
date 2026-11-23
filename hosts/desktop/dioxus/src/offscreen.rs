@@ -165,6 +165,18 @@ fn capture_with<R: OffscreenPaintRegistry>(
     use dioxus_core::{provide_context, ScopeId, VirtualDom};
     use dioxus_native::DioxusDocument;
 
+    // The window's launcher (vendored dioxus-native `launch`) enters this runtime; the app's timers sleep on it.
+    let own = match tokio::runtime::Handle::try_current() {
+        Ok(_) => None,
+        Err(_) => Some(
+            tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+                .map_err(|e| format!("capture runtime: {e}"))?,
+        ),
+    };
+    let _inside = own.as_ref().map(tokio::runtime::Runtime::enter);
+
     let mut renderer = R::new(width, height);
     let paint_sources = renderer.paint_source_registry();
     let ops: Rc<RefCell<VecDeque<HeadOp>>> = Rc::new(RefCell::new(VecDeque::new()));

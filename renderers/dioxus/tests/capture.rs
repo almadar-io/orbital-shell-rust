@@ -2013,3 +2013,34 @@ fn text_overflow_ellipsis_with_nowrap_keeps_one_line_and_marks_the_ellipsis() {
         "control: without nowrap/ellipsis the text wraps and carries no clamp: lines={wrapped_lines} size={wrapped_size:?}"
     );
 }
+
+fn red_canvas() -> serde_json::Value {
+    serde_json::json!({
+        "type": "canvas", "painter": "orbital", "width": 64, "height": 48, "projection": "flat",
+        "backgroundColor": "#ffffff",
+        "children": [{ "type": "draw-shape", "shape": "rect", "anchor": "top-left", "position": { "x": 0, "y": 0 },
+            "width": 64, "height": 48, "fill": "#ff0000" }]
+    })
+}
+
+#[test]
+fn a_capture_paints_a_canvas_whose_frame_loop_awaits_a_timer() {
+    let path = std::env::temp_dir().join(format!("dioxus-canvas-timer-{}.png", std::process::id()));
+    let node = orbital_canvas::mappers::scene::host_node("canvas", red_canvas(), None);
+    orbital_canvas::mappers::scene::map_scene(&node, Some((64.0, 48.0))).expect("the scene itself maps");
+    mount_core(&program(red_canvas())).unwrap();
+    capture_gpu_png(&path, 96, 72).expect("the capture runs the canvas frame loop's timer");
+    assert!(red_pixels(&path) > 0, "the canvas painted");
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn edge_a_capture_inside_a_callers_tokio_runtime_paints_the_canvas_too() {
+    let path = std::env::temp_dir().join(format!("dioxus-canvas-timer-in-rt-{}.png", std::process::id()));
+    let rt = tokio::runtime::Builder::new_multi_thread().enable_time().build().unwrap();
+    let _inside = rt.enter();
+    mount_core(&program(red_canvas())).unwrap();
+    capture_gpu_png(&path, 96, 72).expect("a caller's runtime does not break the capture");
+    assert!(red_pixels(&path) > 0);
+    let _ = std::fs::remove_file(&path);
+}
