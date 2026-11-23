@@ -139,8 +139,22 @@ impl CustomPaintSource for GamePaintSource {
         // the registered texture back over the box (`scene.rs`
         // `render_custom_source`). Do NOT multiply by `scale` again — that
         // double-scales the target (5000x3750 = 6.25× the needed pixels).
-        let phys_w = width.max(1);
-        let phys_h = height.max(1);
+        // Within the device's texture limit, as orbital-canvas sizes its own targets: the same logical box, at the
+        // density that fits (a phone-tall canvas would otherwise exceed a 2048 limit and the frame paints nothing).
+        let points = (
+            (f64::from(width.max(1)) / scale).round().max(1.0) as u32,
+            (f64::from(height.max(1)) / scale).round().max(1.0) as u32,
+        );
+        let limit = renderer.device().limits().max_texture_dimension_2d;
+        let density = orbital_canvas::render_target::density_within(points, scale as f32, limit);
+        let (phys_w, phys_h) = if density < scale as f32 {
+            (
+                ((points.0 as f32 * density).round().max(1.0) as u32).min(limit),
+                ((points.1 as f32 * density).round().max(1.0) as u32).min(limit),
+            )
+        } else {
+            (width.max(1), height.max(1))
+        };
 
         let stale = self
             .target
@@ -176,7 +190,6 @@ impl CustomPaintSource for GamePaintSource {
         let node = self.node.lock().expect("scene node poisoned").clone();
         let packet = {
             let mut host = self.host.lock().expect("scene host poisoned");
-            let density = scale as f32;
             if host.density() != density && host.set_scale(density).is_err() {
                 return None;
             }
@@ -203,11 +216,13 @@ impl CustomPaintSource for GamePaintSource {
         let (texture, handle, _, _) = self.target.as_ref()?;
         let ok = renderer.render_packet_to_texture(&packet, texture);
         self.renders += 1;
-        if self.renders <= 3 || self.renders % 600 == 0 {
+        if stale || self.renders <= 3 || self.renders % 600 == 0 {
             tracing::info!(
                 target: NS,
                 n = self.renders,
                 phys = %format_args!("{width}x{height}"),
+                texture = %format_args!("{phys_w}x{phys_h}"),
+                limit,
                 commands = packet.draw_commands.len(),
                 ok,
                 "game paint render"
@@ -335,11 +350,10 @@ fn SceneCanvas(props: SceneCanvasProps) -> Element {
         };
         size
     };
+    // As the web's OrbitalSceneCanvas: a filling canvas sits in a box that takes the slot's height (a canvas element
+    // itself would fall back to its intrinsic ratio), drawn over the whole box.
     let style = if props.fill_parent {
-        format!(
-            "display:block;width:100%;height:100%;min-height:{}px;{}",
-            props.min_height, props.inline_style
-        )
+        format!("display:block;position:absolute;inset:0;width:100%;height:100%;{}", props.inline_style)
     } else if props.fill_width {
         format!("display:block;width:100%;height:{h}px;{}", props.inline_style)
     } else {
@@ -364,7 +378,7 @@ fn SceneCanvas(props: SceneCanvasProps) -> Element {
         }
     });
     let class_name = props.class_name.clone();
-    rsx! {
+    let canvas = rsx! {
         canvas {
             class: "{class_name}",
             style: style,
@@ -483,6 +497,15 @@ fn SceneCanvas(props: SceneCanvasProps) -> Element {
                 }
             },
         }
+    };
+    if props.fill_parent {
+        let box_style = format!(
+            "position:relative;flex:1 1 0;width:100%;height:100%;min-height:{}px",
+            props.min_height
+        );
+        rsx! { div { style: box_style, {canvas} } }
+    } else {
+        canvas
     }
 }
 

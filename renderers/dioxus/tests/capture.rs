@@ -2044,3 +2044,68 @@ fn edge_a_capture_inside_a_callers_tokio_runtime_paints_the_canvas_too() {
     assert!(red_pixels(&path) > 0);
     let _ = std::fs::remove_file(&path);
 }
+
+fn sized_canvas(fill: &str) -> serde_json::Value {
+    serde_json::json!({
+        "type": "canvas", "mode": "2d", "projection": "free", "painter": "orbital",
+        "camera": { "mode": "top-down", "zoom": 1 }, "worldWidth": 64, "worldHeight": 48, "resizeEvent": "SIZED",
+        "drawables": [{ "type": "draw-shape", "shape": "rect", "anchor": "top-left", "position": { "x": 0, "y": 0 },
+            "width": 64, "height": 48, "fill": fill }]
+    })
+}
+
+#[test]
+fn a_capture_delivers_the_canvas_reports_and_paints_what_the_program_answers() {
+    let path = std::env::temp_dir().join(format!("dioxus-canvas-reports-{}.png", std::process::id()));
+    let schema = serde_json::json!({
+        "name": "t", "typeContractVersion": 1,
+        "orbitals": [{
+            "name": "Main",
+            "entity": { "name": "Row", "persistence": "runtime", "fields": [{ "name": "id", "type": "string" }] },
+            "traits": [{ "name": "View", "linkedEntity": "Row", "stateMachine": {
+                "states": [{ "name": "idle", "isInitial": true }, { "name": "sized" }],
+                "transitions": [
+                    { "from": "idle", "to": "idle", "event": "INIT", "effects": [["render-ui", "main", sized_canvas("#0000ff")]] },
+                    { "from": "idle", "to": "sized", "event": "SIZED", "effects": [["render-ui", "main", sized_canvas("#ff0000")]] }
+                ]
+            } }],
+            "pages": [{ "name": "Home", "path": "/", "traits": [{ "ref": "View" }] }]
+        }]
+    })
+    .to_string();
+    mount_core(&schema).unwrap();
+    capture_gpu_png(&path, 96, 72).unwrap();
+    assert!(red_pixels(&path) > 0, "the program heard the canvas size and repainted");
+    assert_eq!(blue_pixels(&path), 0, "control: the first paint is not what the capture shows");
+    let _ = std::fs::remove_file(&path);
+}
+
+fn red_rows(path: &std::path::Path, from_row: usize) -> usize {
+    let decoder = png::Decoder::new(std::fs::File::open(path).unwrap());
+    let mut reader = decoder.read_info().unwrap();
+    let mut buf = vec![0; reader.output_buffer_size()];
+    let info = reader.next_frame(&mut buf).unwrap();
+    let row = info.width as usize * 4;
+    buf[..info.buffer_size()]
+        .chunks_exact(row)
+        .skip(from_row)
+        .filter(|r| r.chunks_exact(4).any(|px| px[0] > 180 && px[1] < 90 && px[2] < 90))
+        .count()
+}
+
+#[test]
+fn a_fill_container_canvas_takes_its_slots_height_not_a_square_in_a_tall_viewport() {
+    let path = std::env::temp_dir().join(format!("dioxus-fill-tall-{}.png", std::process::id()));
+    orbital_client_dioxus::app::CSS_TEXT.with(|css| *css.borrow_mut() = orbital_client_dioxus::styles::stylesheets());
+    mount_core(&program(serde_json::json!({
+        "type": "canvas", "mode": "2d", "projection": "free", "painter": "orbital", "fillContainer": true,
+        "camera": { "mode": "top-down", "zoom": 1 }, "worldWidth": 60, "worldHeight": 60,
+        "drawables": [{ "type": "draw-shape", "shape": "rect", "anchor": "top-left", "position": { "x": 0, "y": 0 },
+            "width": 4000, "height": 4000, "fill": "#ff0000" }]
+    })))
+    .unwrap();
+    capture_gpu_png(&path, 80, 400).unwrap();
+    assert!(red_rows(&path, 0) > 0, "the canvas painted");
+    assert!(red_rows(&path, 200) > 0, "the canvas reaches the lower half of a tall viewport");
+    let _ = std::fs::remove_file(&path);
+}

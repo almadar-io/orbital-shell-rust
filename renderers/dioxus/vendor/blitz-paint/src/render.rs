@@ -736,6 +736,30 @@ impl ElementCx<'_> {
         if let Some(custom_paint_source) = self.element.canvas_data() {
             let width = self.frame.content_box.width() as u32;
             let height = self.frame.content_box.height() as u32;
+            if width == 0 {
+                let mut at = Some(self.node.id);
+                while let Some(id) = at {
+                    let Some(n) = self.context.dom.get_node(id) else { break };
+                    eprintln!(
+                        "DIAG053 node={} {} size={}x{} loc={},{} display={:?} minw={:?} w={:?} basis={:?} grow={} shrink={} style={:?} class={:?}",
+                        id,
+                        n.node_debug_str(),
+                        n.final_layout.size.width,
+                        n.final_layout.size.height,
+                        n.final_layout.location.x,
+                        n.final_layout.location.y,
+                        n.style.display,
+                        n.style.min_size.width,
+                        n.style.size.width,
+                        n.style.flex_basis,
+                        n.style.flex_grow,
+                        n.style.flex_shrink,
+                        n.attr(local_name!("style")),
+                        n.attr(local_name!("class")),
+                    );
+                    at = n.layout_parent.get().or(n.parent);
+                }
+            }
             let x = self.frame.content_box.origin().x;
             let y = self.frame.content_box.origin().y;
 

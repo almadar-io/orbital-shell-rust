@@ -96,6 +96,11 @@ mod tests {
             selection_start: None,
             selection_end: None,
             multiline: true,
+            level: None,
+            href: None,
+            expanded: None,
+            owner: None,
+            fixed: false,
             order: 2.0,
             rect: Rect {
                 x: 4.0,

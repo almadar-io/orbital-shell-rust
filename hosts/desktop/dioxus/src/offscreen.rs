@@ -248,6 +248,34 @@ fn capture_with<R: OffscreenPaintRegistry>(
         |painter| paint_scene(painter, &doc, scale as f64, width, height),
         &mut buffer,
     );
+    // A paint makes canvases report back (size, measured text); the window's frame loop delivers those reports and
+    // repaints what the program answers, so the capture does too until a few frames pass with nothing new.
+    const REPORT_FRAME: std::time::Duration = std::time::Duration::from_millis(20);
+    const REPORT_FRAMES_MAX: usize = 250;
+    const QUIET_FRAMES: usize = 25;
+    let mut quiet = 0;
+    for _ in 0..REPORT_FRAMES_MAX {
+        std::thread::sleep(REPORT_FRAME);
+        let mut changed = doc.poll(None);
+        while let Some(op) = ops.borrow_mut().pop_front() {
+            doc.create_head_element(&op.name, &op.attributes, &op.contents);
+            changed = true;
+        }
+        if !changed {
+            quiet += 1;
+            if quiet >= QUIET_FRAMES {
+                break;
+            }
+            continue;
+        }
+        quiet = 0;
+        doc.resolve(ANIMATION_SETTLE_SECS);
+        buffer.fill(255);
+        renderer.render(
+            |painter| paint_scene(painter, &doc, scale as f64, width, height),
+            &mut buffer,
+        );
+    }
     // The rasterizer leaves unpainted pixels transparent (premultiplied); composite onto white.
     for px in buffer.chunks_exact_mut(4) {
         let blank = 255 - px[3];

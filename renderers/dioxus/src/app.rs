@@ -50,10 +50,7 @@ fn remote_mount(version: Signal<u32>) {
         let kernel = state.core.client_kernel.clone()?;
         kernel.open_feed();
         match state.core.begin_mount_page() {
-            Ok(begun) => {
-                PAGE_MOUNTS.with(|n| n.set(n.get() + 1));
-                Some((kernel, begun))
-            }
+            Ok(begun) => Some((kernel, begun)),
             Err(error) => {
                 tracing::error!(target: "almadar::client", %error, "remote mount refused");
                 state.core.fail_mount(error.to_string());
@@ -289,8 +286,6 @@ std::thread_local! {
     /// external `web::send_event` (driven from JS, outside a Dioxus render) can
     /// invalidate the component exactly like an in-app click does.
     static VERSION: RefCell<Option<Signal<u32>>> = RefCell::new(None);
-    /// Page mounts this app has begun; each one keys the slots anew ([`slot_key`]).
-    static PAGE_MOUNTS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
     #[cfg(all(feature = "native-http", not(target_arch = "wasm32")))]
     static FRAME_CALLBACK: RefCell<Option<Callback<()>>> = RefCell::new(None);
     /// Stylesheet texts injected into the document head at mount. Set by the
@@ -573,7 +568,6 @@ pub fn App() -> Element {
         APP.with(|cell| {
             if let Some(state) = cell.borrow_mut().as_mut() {
                 if state.core.needs_page_mount() {
-                    PAGE_MOUNTS.with(|n| n.set(n.get() + 1));
                     state.core.mount_page_blocking();
                     state.core.settle(8);
                 }
@@ -681,11 +675,13 @@ pub fn App() -> Element {
         };
 
         let css_texts = CSS_TEXT.with(|c| c.borrow().clone());
-        let mount = PAGE_MOUNTS.with(std::cell::Cell::get);
         rsx! {
             for (i, css) in css_texts.iter().enumerate() {
                 document::Style { key: "almadar-css-{i}", href: "almadar-css-{i}", "{css}" }
             }
+            // The web client's root scroll box (`OrbPreview height="100dvh"`): the page's `h-full` resolves against it.
+            document::Style { href: "almadar-viewport-root", "html, body, #main {{ height: 100%; margin: 0; }}" }
+            div { style: "height:100%",
             div { class: "almadar-orbital-dioxus p-4 h-full min-h-full bg-background surface-page text-foreground", "data-state": "{core.current_state}", "data-theme": "{theme}", "data-reduced-motion": "{reduced_motion}",
                 onmousedown: move |_| {
                     #[cfg(all(feature = "native-audio", not(target_arch = "wasm32")))]
@@ -695,10 +691,10 @@ pub fn App() -> Element {
                     #[cfg(all(feature = "native-audio", not(target_arch = "wasm32")))]
                     crate::audio::user_gesture();
                 },
-                div { class: "ui-slot-renderer relative min-h-full",
-                    div { class: "flex min-h-full flex-col lg:flex-row",
+                div { class: "ui-slot-renderer relative flex h-full min-h-full flex-col",
+                    div { class: "flex min-h-full flex-1 flex-col lg:flex-row",
                         for slot_name in layout_slots.iter() {
-                            div { key: "{slot_key(slot_name, mount)}", class: "{slot_wrapper_class(slot_name)}", "data-slot": "{slot_name}",
+                            div { key: "{slot_name}", class: "{slot_wrapper_class(slot_name)}", "data-slot": "{slot_name}",
                                 for sc in painted_slot_contents_at(core, slot_name, now).iter() {
                                     {paint_slot_content(registry, sc, &view.for_source(sc.source_trait.clone(), source_sink.call(sc.source_trait.clone())))}
                                 }
@@ -714,13 +710,14 @@ pub fn App() -> Element {
                         }
                     }
                     for slot_name in overlay_slots.iter() {
-                        div { key: "{slot_key(slot_name, mount)}", class: "{slot_wrapper_class(slot_name)}", "data-slot": "{slot_name}",
+                        div { key: "{slot_name}", class: "{slot_wrapper_class(slot_name)}", "data-slot": "{slot_name}",
                             for sc in painted_slot_contents_at(core, slot_name, now).iter() {
                                 {paint_slot_content(registry, sc, &view.for_source(sc.source_trait.clone(), source_sink.call(sc.source_trait.clone())))}
                             }
                         }
                     }
                 }
+            }
             }
         }
     })
@@ -776,11 +773,6 @@ fn slot_paint_rank(slot: &str) -> (u8, u8, String) {
     (group, within, slot.to_string())
 }
 
-/// The key a slot's wrapper carries: a route mount starts the page anew, so its slots get new components.
-fn slot_key(slot: &str, mount: u64) -> String {
-    format!("{slot}#{mount}")
-}
-
 /// The wrapper classes the web's `UISlotRenderer` gives `slot`, chosen by core's `slot_role`.
 fn slot_wrapper_class(slot: &str) -> String {
     let region = match slot_role(slot) {
@@ -806,14 +798,7 @@ pub fn probe_shared_substrate() {
 
 #[cfg(test)]
 mod tests {
-    use super::{in_layout_row, slot_key, slot_paint_rank, slot_wrapper_class};
-
-    #[test]
-    fn a_route_mount_gives_every_slot_a_new_key() {
-        assert_ne!(slot_key("main", 1), slot_key("main", 2));
-        assert_eq!(slot_key("main", 2), slot_key("main", 2), "control: the same mount keeps its key");
-        assert_ne!(slot_key("main", 2), slot_key("sidebar", 2), "control: slots stay distinct within a mount");
-    }
+    use super::{in_layout_row, slot_paint_rank, slot_wrapper_class};
 
     #[test]
     fn layout_slots_get_the_web_region_classes() {
