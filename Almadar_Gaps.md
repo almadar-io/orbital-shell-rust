@@ -7,7 +7,8 @@ Every open gap this repo owns lives here. This file is the source of truth; the 
 - **Codes:** new gaps use this repo's prefix `G-ORBITAL-SHELL-RUST-`. Take the "Next code" below, then bump it in the same edit. Codes are never reused or renamed.
 - **Close by deleting.** Remove the entry in the same commit as the fix.
 
-Next code: `G-ORBITAL-SHELL-RUST-070`
+Next code: `G-ORBITAL-SHELL-RUST-072`
+
 
 - **G-ORBITAL-SHELL-RUST-067** [mechanical] — On Android native-gpu, osama-site's lazy Writing page (`/blog`) draws its canvas text in Press Start 2P, the Rasm theme layer's mono face, where the web draws the heading in Reem Kufi (display) and the body in Cairo; the home page's canvas text is right. The canvas fetches all three files (`almadar::game_renderer::asset` log), so the face a text role resolves to is wrong on the lazy page's canvas, not the download. Owner: orbital-canvas (`theme_refs` family registration, `faces` registry, `fonts.rs` URL faces) or the lazy page's theme layer; not yet narrowed. Reproduce: launch osama-site on the emulator, `adb shell input touchscreen tap 856 274`, compare the heading with https://osama.almadar.io/blog. Prevention rung: (3) the verifiers (a paired web/native capture of a lazy page). Severity: medium. Root cause: one-off.
 
