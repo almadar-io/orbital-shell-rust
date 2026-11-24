@@ -843,9 +843,7 @@ pub fn App() -> Element {
                     div { class: "flex min-h-full flex-1 flex-col lg:flex-row",
                         for slot_name in layout_slots.iter() {
                             div { key: "{slot_name}", class: "{slot_wrapper_class(slot_name)}", "data-slot": "{slot_name}",
-                                for sc in painted_slot_contents_at(core, slot_name, now).iter() {
-                                    {paint_slot_content(registry, sc, &view.for_source(sc.source_trait.clone(), source_sink.call(sc.source_trait.clone())))}
-                                }
+                                {keyed_slot_entries(slot_name, &painted_slot_contents_at(core, slot_name, now), |sc| paint_slot_content(registry, sc, &view.for_source(sc.source_trait.clone(), source_sink.call(sc.source_trait.clone()))))}
                                 if slot_name == "main" {
                                     if let Some(refusal) = core.circuit_fault_content() {
                                         {paint_slot_content(registry, &refusal, &view.for_source(refusal.source_trait.clone(), source_sink.call(refusal.source_trait.clone())))}
@@ -859,9 +857,7 @@ pub fn App() -> Element {
                     }
                     for slot_name in overlay_slots.iter() {
                         div { key: "{slot_name}", class: "{slot_wrapper_class(slot_name)}", "data-slot": "{slot_name}",
-                            for sc in painted_slot_contents_at(core, slot_name, now).iter() {
-                                {paint_slot_content(registry, sc, &view.for_source(sc.source_trait.clone(), source_sink.call(sc.source_trait.clone())))}
-                            }
+                            {keyed_slot_entries(slot_name, &painted_slot_contents_at(core, slot_name, now), |sc| paint_slot_content(registry, sc, &view.for_source(sc.source_trait.clone(), source_sink.call(sc.source_trait.clone()))))}
                         }
                     }
                 }
@@ -869,6 +865,16 @@ pub fn App() -> Element {
             }
         }
     })
+}
+
+/// Each entry of `slot` under its own key ([`SlotContent::key`]): the same trait's repaint reconciles, another trait's
+/// entry mounts afresh, so a page's canvas never inherits another page's reported size, text and origins.
+fn keyed_slot_entries(slot: &str, contents: &[SlotContent], paint: impl Fn(&SlotContent) -> Element) -> Element {
+    rsx! {
+        for (index, sc) in contents.iter().enumerate() {
+            Fragment { key: "{sc.key(slot)}-{index}", {paint(sc)} }
+        }
+    }
 }
 
 /// One slot entry: a bare `@trait.X` embed paints that trait's content, any other entry its pattern.
@@ -946,7 +952,54 @@ pub fn probe_shared_substrate() {
 
 #[cfg(test)]
 mod tests {
-    use super::{in_layout_row, slot_paint_rank, slot_wrapper_class};
+    use super::{in_layout_row, keyed_slot_entries, slot_paint_rank, slot_wrapper_class};
+    use dioxus::prelude::*;
+    use dioxus_core::{Mutations, ScopeId, VirtualDom};
+    use orbital_core::client::helpers::SlotContent;
+    use orbital_core::Value;
+    use std::cell::{Cell, RefCell};
+
+    thread_local! {
+        static SOURCE: RefCell<String> = const { RefCell::new(String::new()) };
+        static CREATED: Cell<u32> = const { Cell::new(0) };
+    }
+
+    #[component]
+    fn Probe(label: String) -> Element {
+        use_hook(|| CREATED.with(|c| c.set(c.get() + 1)));
+        rsx! { "{label}" }
+    }
+
+    fn slot_app() -> Element {
+        let source = SOURCE.with(|s| s.borrow().clone());
+        let contents = vec![SlotContent { pattern: "canvas".into(), props: Value::Null, entity: None, source_trait: Some(source) }];
+        keyed_slot_entries("main", &contents, |sc| rsx! { Probe { label: sc.source_trait.clone().unwrap_or_default() } })
+    }
+
+    fn created_after(sources: &[&str]) -> u32 {
+        CREATED.with(|c| c.set(0));
+        SOURCE.with(|s| *s.borrow_mut() = sources[0].to_string());
+        let mut dom = VirtualDom::new(slot_app);
+        dom.rebuild(&mut Mutations::default());
+        for source in &sources[1..] {
+            SOURCE.with(|s| *s.borrow_mut() = source.to_string());
+            dom.mark_dirty(ScopeId::APP);
+            dom.render_immediate(&mut Mutations::default());
+        }
+        CREATED.with(Cell::get)
+    }
+
+    /// G-ORBITAL-SHELL-RUST-069: another page's trait in the same slot gets a fresh subtree (its canvas reports its
+    /// size, text and origins to the new page), as the web's keyed slot entries do.
+    #[test]
+    fn a_slot_entry_from_another_trait_mounts_afresh() {
+        assert_eq!(created_after(&["LibraryPageSurface", "PrepPageSurface"]), 2);
+    }
+
+    #[test]
+    fn control_the_same_trait_repainting_keeps_its_subtree() {
+        assert_eq!(created_after(&["LibraryPageSurface", "LibraryPageSurface"]), 1);
+    }
 
     #[test]
     fn layout_slots_get_the_web_region_classes() {

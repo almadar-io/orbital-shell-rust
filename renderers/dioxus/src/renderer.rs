@@ -671,7 +671,12 @@ impl<'a> DioxusView<'a> {
             Value::String(text) => {
                 if let Some(source) = trait_ref_name(text) {
                     if let Some(content) = self.trait_content.get(&source) {
-                        registry.render_spec(content, None, &self.for_trait_source(source))
+                        // Keyed by the trait (the web's `TraitFrame` key): another trait's embed mounts afresh.
+                        rsx! {
+                            for source in std::iter::once(source) {
+                                Fragment { key: "{source}", {registry.render_spec(content, None, &self.for_trait_source(source.clone()))} }
+                            }
+                        }
                     } else {
                         rsx! {}
                     }
@@ -1082,5 +1087,90 @@ pub(crate) fn pattern_tile_group(variant: &str, size: f64, color: &str, stroke_w
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{DioxusPatternRenderer, DioxusView};
+    use crate::registry::DioxusPatternRegistry;
+    use dioxus::prelude::*;
+    use dioxus_core::{Mutations, ScopeId, VirtualDom};
+    use orbital_core::{Value, ValueMap};
+    use std::cell::{Cell, RefCell};
+    use std::collections::HashMap;
+
+    thread_local! {
+        static EMBEDDED: RefCell<String> = const { RefCell::new(String::new()) };
+        static CREATED: Cell<u32> = const { Cell::new(0) };
+    }
+
+    #[component]
+    fn Probe() -> Element {
+        use_hook(|| CREATED.with(|c| c.set(c.get() + 1)));
+        rsx! { "probe" }
+    }
+
+    struct ProbeRenderer;
+    impl DioxusPatternRenderer for ProbeRenderer {
+        fn pattern_name(&self) -> &str {
+            "probe"
+        }
+        fn render(&self, _: &Value, _: Option<&Value>, _: &DioxusView<'_>, _: &DioxusPatternRegistry) -> Element {
+            rsx! { Probe {} }
+        }
+    }
+
+    fn embed_app() -> Element {
+        let embedded = EMBEDDED.with(|e| e.borrow().clone());
+        let entities = HashMap::new();
+        let mut trait_content = ValueMap::new();
+        for name in ["LibraryPageSurface", "PrepPageSurface"] {
+            trait_content.insert(name.into(), orbital_core::json_value::from_json_value(&serde_json::json!({ "type": "probe" })).unwrap());
+        }
+        let sink = Callback::new(|_| {});
+        let view = DioxusView {
+            trait_name: "Page",
+            orbital_name: "Page",
+            current_state: "idle",
+            entities: &entities,
+            trait_content: &trait_content,
+            source_trait: None,
+            sink: Some(sink),
+            source_sink: Callback::new(move |_| sink),
+            navigate: None,
+            dock: None,
+            viewport_width: None,
+            canvas_theme: None,
+            theme_mode: None,
+            toggle_theme: None,
+        };
+        let mut registry = DioxusPatternRegistry::new();
+        registry.register(Box::new(ProbeRenderer));
+        view.render_node(&registry, &Value::String(format!("@trait.{embedded}").into()))
+    }
+
+    fn created_after(embeds: &[&str]) -> u32 {
+        CREATED.with(|c| c.set(0));
+        EMBEDDED.with(|e| *e.borrow_mut() = embeds[0].to_string());
+        let mut dom = VirtualDom::new(embed_app);
+        dom.rebuild(&mut Mutations::default());
+        for embed in &embeds[1..] {
+            EMBEDDED.with(|e| *e.borrow_mut() = embed.to_string());
+            dom.mark_dirty(ScopeId::APP);
+            dom.render_immediate(&mut Mutations::default());
+        }
+        CREATED.with(Cell::get)
+    }
+
+    /// G-ORBITAL-SHELL-RUST-069: an `@trait.X` embed of another trait mounts afresh (the web's `TraitFrame` key).
+    #[test]
+    fn an_embed_of_another_trait_mounts_afresh() {
+        assert_eq!(created_after(&["LibraryPageSurface", "PrepPageSurface"]), 2);
+    }
+
+    #[test]
+    fn control_an_embed_of_the_same_trait_keeps_its_subtree() {
+        assert_eq!(created_after(&["LibraryPageSurface", "LibraryPageSurface"]), 1);
     }
 }
