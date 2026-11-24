@@ -11,9 +11,9 @@ pub fn stylesheets() -> Vec<String> {
 }
 
 pub fn program_stylesheets(schema: &orbital_core::OrbitalSchema) -> Vec<String> {
-    let declared = schema.theme_definitions.as_deref().unwrap_or_default();
+    let painted = orbital_core::runtime::theme::painted_themes(schema);
     vec![
-        orbital_core::runtime::theme::program_themes_css(declared),
+        orbital_core::runtime::theme::program_themes_css(&painted),
         WEB_CLIENT.to_string(),
         BASE.to_string(),
     ]
@@ -105,23 +105,34 @@ mod tests {
     use super::{preset_stylesheets, program_stylesheets, style_with_props};
     use orbital_core::{Value, ValueMap};
 
-    fn schema_with_themes(themes: &str) -> orbital_core::OrbitalSchema {
-        orbital_core::schema::parse_schema(&format!(
-            r#"{{"name":"t","orbitals":[],"themeDefinitions":{themes}}}"#
-        ))
-        .expect("schema parses")
+    /// A resolved program: `theme` as declared (JSON, or none) with the presets it references carried.
+    fn resolved_program(theme: Option<&str>) -> orbital_core::OrbitalSchema {
+        let theme = theme.map(|t| format!(r#","theme":{t}"#)).unwrap_or_default();
+        let mut schema = orbital_core::schema::parse_schema(&format!(r#"{{"name":"t","orbitals":[]{theme}}}"#))
+            .expect("schema parses");
+        orbital_core::runtime::theme::carry_theme_definitions(
+            &mut schema,
+            orbital_core::runtime::theme::ThemePresets::installed(),
+        );
+        schema
     }
 
     #[test]
     fn a_program_paints_the_themes_it_declares() {
-        let preset = orbital_core::runtime::theme::ThemePresets::installed()
-            .get("almadar")
-            .cloned()
-            .expect("almadar preset installed");
-        let themes = serde_json::to_string(&vec![preset]).expect("theme serializes");
-        let css = &program_stylesheets(&schema_with_themes(&themes))[0];
+        let css = &program_stylesheets(&resolved_program(Some(r#""almadar-dark""#)))[0];
         assert!(css.contains(r#"[data-theme="almadar-dark"]"#));
         assert!(css.contains(r#"[data-theme="almadar-light"]"#));
+        assert!(!css.contains(r#"[data-theme="minimalist-light"]"#), "the carried default is not painted beside it");
+    }
+
+    /// G-ORBITAL-SHELL-RUST-058: an inline theme (osama-site's Taif) is painted, as on the web, not only the
+    /// presets the program carries.
+    #[test]
+    fn a_program_paints_its_inline_theme() {
+        let css = &program_stylesheets(&resolved_program(Some(
+            r##"{"name":"taif","tokens":{"colors":{"primary":"#2b4aa0"}}}"##,
+        )))[0];
+        assert!(css.contains(r#"[data-theme="taif-light"]"#), "{css}");
         assert!(!css.contains(r#"[data-theme="minimalist-light"]"#));
     }
 
@@ -130,13 +141,13 @@ mod tests {
         let css = &preset_stylesheets()[0];
         assert!(css.contains(r#"[data-theme="almadar-dark"]"#));
         assert!(css.contains(r#"[data-theme="minimalist-light"]"#));
-        let declared = &program_stylesheets(&schema_with_themes("[]"))[0];
+        let declared = &program_stylesheets(&resolved_program(None))[0];
         assert!(!declared.contains(r#"[data-theme="almadar-dark"]"#));
     }
 
     #[test]
     fn a_program_declaring_no_theme_paints_the_default_preset() {
-        let css = &program_stylesheets(&schema_with_themes("[]"))[0];
+        let css = &program_stylesheets(&resolved_program(None))[0];
         assert!(css.contains(r#"[data-theme="minimalist-light"]"#));
         assert!(!css.contains(r#"[data-theme="almadar-dark"]"#));
     }

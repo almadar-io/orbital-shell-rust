@@ -11,6 +11,7 @@
 pub mod app;
 #[cfg(all(feature = "native-audio", not(target_arch = "wasm32")))]
 pub mod audio;
+pub mod audio_timeline;
 // Generated pattern renderers: scaffold whose unused imports/params vary by
 // atom (a leaf renderer ignores `registry`/`entity`). Scoped here, not
 // crate-wide, so hand-written code keeps its dead-code signal. Mirrors the

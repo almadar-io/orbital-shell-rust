@@ -41,9 +41,28 @@ pub fn set_android_app(app: android_activity::AndroidApp) {
     blitz_shell::set_android_app(app);
 }
 
+/// Whether the window has presented its first frame (the platform splash lifts then, never over an empty surface).
+#[cfg(target_os = "android")]
+pub fn first_frame_presented() -> bool {
+    blitz_shell::first_frame_presented()
+}
+
 #[cfg(target_os = "android")]
 pub fn android_is_editable_at(x: f32, y: f32) -> bool {
     blitz_shell::android_is_editable_at(x, y)
+}
+
+/// Hand the canvas every file the app carries ([`orbital_core::native_bundle::BundledFiles`], `list` is its
+/// `bundle-files.json`) under the URL the program names it by, so it is never downloaded; `read` opens a carried
+/// file by its path in the app's bundle. Returns how many were registered.
+pub fn register_bundled_files(list: &str, read: impl Fn(&str) -> Result<Vec<u8>, String>) -> Result<usize, String> {
+    let bundled: orbital_core::native_bundle::BundledFiles =
+        orbital_core::json_value::from_json_str(list).map_err(|e| format!("bundle-files.json: {e}"))?;
+    for file in &bundled.files {
+        let bytes = read(&file.path).map_err(|e| format!("bundled {}: {e}", file.path))?;
+        orbital_canvas::asset::register_asset(&file.url, bytes.into(), None);
+    }
+    Ok(bundled.files.len())
 }
 
 /// Mount a schema and open the native window. Blocks on the winit event loop
@@ -137,4 +156,22 @@ pub fn snapshot() -> Result<String, String> {
 /// Current active state-machine state.
 pub fn current_state() -> Result<String, String> {
     shell::current_state_string()
+}
+
+#[cfg(test)]
+mod bundled_tests {
+    #[test]
+    fn a_carried_file_is_ready_under_its_url_without_a_fetch_and_a_missing_one_fails_the_boot() {
+        let url = "https://fonts.test/native-bundled-body.ttf";
+        let list = format!(r#"{{"files":[{{"url":"{url}","path":"fonts/0"}}]}}"#);
+        let carried = |path: &str| -> Result<Vec<u8>, String> {
+            (path == "fonts/0").then(|| b"carried".to_vec()).ok_or_else(|| "no such file".to_string())
+        };
+        assert_eq!(super::register_bundled_files(&list, carried), Ok(1));
+        assert_eq!(orbital_canvas::asset::asset_bytes(url).as_deref(), Some(&b"carried"[..]));
+        assert!(!orbital_canvas::asset::faces_loading(), "a carried face is not downloading");
+        let missing = |_: &str| -> Result<Vec<u8>, String> { Err("no such file".into()) };
+        assert!(super::register_bundled_files(&list, missing).is_err());
+        assert_eq!(super::register_bundled_files(r#"{"files":[]}"#, missing), Ok(0), "control: an empty list registers none");
+    }
 }

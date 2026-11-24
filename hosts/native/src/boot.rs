@@ -7,24 +7,7 @@ use orbital_core::schema::parse_schema_file;
 use std::path::Path;
 use std::sync::Arc;
 
-/// A resolved program's lazy orbitals read from the files `orb resolve` wrote beside it (EXEC-LOAD-1).
-pub struct FileLazySource {
-    dir: std::path::PathBuf,
-}
-
-impl FileLazySource {
-    pub fn beside(program: &Path) -> Self {
-        Self { dir: program.parent().unwrap_or(Path::new("")).to_path_buf() }
-    }
-}
-
-impl orbital_core::runtime::LazySource for FileLazySource {
-    fn read(&self, file: &str) -> Result<orbital_core::runtime::LazyProgram, String> {
-        let path = self.dir.join(file);
-        let schema = parse_schema_file(&path).map_err(|e| format!("{}: {e}", path.display()))?;
-        Ok(orbital_core::runtime::LazyProgram { schema })
-    }
-}
+pub use orbital_core::runtime::FileLazySource;
 
 /// Tracing is an operator's choice, and the trace holds program data (every emit's payload, never a credential):
 /// `ORBITAL_TRACE_FILE=<path>` traces and appends each dispatch to that file, `ORBITAL_TRACE=memory` keeps the last

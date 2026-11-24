@@ -232,6 +232,7 @@ impl<Rend: WindowRenderer> View<Rend> {
         // Render
         self.renderer
             .render(|scene| paint_scene(scene, &self.doc, scale, width, height));
+        crate::FIRST_FRAME_PRESENTED.store(true, std::sync::atomic::Ordering::Release);
         // Android may not compose the first present; schedule one vsync redraw.
         #[cfg(target_os = "android")]
         self.window.request_redraw();

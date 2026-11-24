@@ -123,8 +123,13 @@ fn main() {
 
     orbital_client_dioxus::app::THEME.with(|current| *current.borrow_mut() = theme);
 
-    let schema_json = orbital_client_dioxus::shell::orb_resolve(std::path::Path::new(&schema_path))
+    let resolved_dir = std::env::temp_dir().join(format!("orbital-native-preview-{}", std::process::id()));
+    std::fs::create_dir_all(&resolved_dir).unwrap_or_else(|e| panic!("{}: {e}", resolved_dir.display()));
+    let resolved_file = resolved_dir.join("program.orb");
+    let schema_json = orbital_client_dioxus::shell::orb_resolve_to(std::path::Path::new(&schema_path), &resolved_file)
         .unwrap_or_else(|e| panic!("failed to resolve {schema_path}: {e}"));
+    let lazy: std::sync::Arc<dyn orbital_core::runtime::LazySource> =
+        std::sync::Arc::new(orbital_core::runtime::FileLazySource::beside(&resolved_file));
     if let Some(path) = export_client {
         let mut program: serde_json::Value =
             serde_json::from_str(&schema_json).expect("resolved program JSON");
@@ -210,11 +215,11 @@ fn main() {
     let schema = orbital_core::schema::parse_schema(&schema_json).unwrap_or_else(|e| panic!("parse schema failed: {e}"));
     #[cfg(feature = "native-http")]
     if let Some(url) = server_url {
-        orbital_client_dioxus::native::start_server(schema, &url, None, css_texts, &title)
+        orbital_client_dioxus::native::start_server(schema, &url, Some(lazy), css_texts, &title)
             .unwrap_or_else(|e| panic!("native server start failed: {e}"));
         return;
     }
-    orbital_client_dioxus::native::start(schema, None, css_texts, &title)
+    orbital_client_dioxus::native::start(schema, Some(lazy), css_texts, &title)
         .unwrap_or_else(|e| panic!("native start failed: {e}"));
 }
 

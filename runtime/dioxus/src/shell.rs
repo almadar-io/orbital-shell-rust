@@ -188,12 +188,27 @@ pub fn drive_ticks() -> bool {
 /// JSON [`mount_core`] takes. `ORB_BIN` names the binary, else `orb` on PATH.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn orb_resolve(path: &std::path::Path) -> Result<String, String> {
+    let out = run_orb_resolve(path, None)?;
+    String::from_utf8(out).map_err(|e| format!("orb resolve printed non-UTF-8: {e}"))
+}
+
+/// [`orb_resolve`] written to `output` with the program's lazy pages beside it (EXEC-LOAD-1), for a host that opens
+/// them through [`orbital_core::runtime::FileLazySource`].
+#[cfg(not(target_arch = "wasm32"))]
+pub fn orb_resolve_to(path: &std::path::Path, output: &std::path::Path) -> Result<String, String> {
+    run_orb_resolve(path, Some(output))?;
+    std::fs::read_to_string(output).map_err(|e| format!("{}: {e}", output.display()))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn run_orb_resolve(path: &std::path::Path, output: Option<&std::path::Path>) -> Result<Vec<u8>, String> {
     let orb = std::env::var("ORB_BIN").unwrap_or_else(|_| "orb".to_string());
-    let out = std::process::Command::new(&orb)
-        .arg("resolve")
-        .arg(path)
-        .output()
-        .map_err(|e| format!("{orb} resolve {}: {e}", path.display()))?;
+    let mut command = std::process::Command::new(&orb);
+    command.arg("resolve").arg(path);
+    if let Some(output) = output {
+        command.arg("-o").arg(output);
+    }
+    let out = command.output().map_err(|e| format!("{orb} resolve {}: {e}", path.display()))?;
     if !out.status.success() {
         return Err(format!(
             "{orb} resolve {} exited {}: {}",
@@ -202,5 +217,5 @@ pub fn orb_resolve(path: &std::path::Path) -> Result<String, String> {
             String::from_utf8_lossy(&out.stderr)
         ));
     }
-    String::from_utf8(out.stdout).map_err(|e| format!("{orb} resolve printed non-UTF-8: {e}"))
+    Ok(out.stdout)
 }

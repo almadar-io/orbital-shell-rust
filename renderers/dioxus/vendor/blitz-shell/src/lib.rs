@@ -20,6 +20,13 @@ mod window;
 mod accessibility;
 
 pub use crate::application::BlitzApplication;
+
+static FIRST_FRAME_PRESENTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Whether a window has presented its first frame, so a platform splash held over the empty surface can lift.
+pub fn first_frame_presented() -> bool {
+    FIRST_FRAME_PRESENTED.load(std::sync::atomic::Ordering::Acquire)
+}
 #[cfg(target_os = "android")]
 pub use crate::android_text_bounds::contains as android_is_editable_at;
 pub use crate::event::BlitzShellEvent;
@@ -76,6 +83,7 @@ static ANDROID_APP: std::sync::RwLock<Option<android_activity::AndroidApp>> = st
 #[cfg_attr(docsrs, doc(cfg(target_os = "android")))]
 /// Set the current [`AndroidApp`](android_activity::AndroidApp).
 pub fn set_android_app(app: android_activity::AndroidApp) {
+    FIRST_FRAME_PRESENTED.store(false, std::sync::atomic::Ordering::Release);
     *ANDROID_APP.write().unwrap_or_else(|poison| poison.into_inner()) = Some(app);
 }
 

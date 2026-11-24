@@ -653,7 +653,7 @@ pub fn App() -> Element {
                             error: "native audio worker stopped before answering".into(),
                         })
                     });
-                    let result = result.map(|()| Value::Null).map_err(|failure| HostAskFailure { kind: failure.kind, error: failure.error });
+                    let result = result.map_err(|failure| HostAskFailure { kind: failure.kind, error: failure.error });
                     answer_host_ask(ask, result, version);
                 });
                 continue;

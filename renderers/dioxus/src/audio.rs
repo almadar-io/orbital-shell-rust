@@ -5,8 +5,9 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use std::io::{Cursor, Read};
 use std::sync::atomic::{AtomicU64, Ordering};
+use crate::audio_timeline as timeline;
 use std::sync::mpsc::{self, Receiver, Sender};
-use std::sync::OnceLock;
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 static NEXT_SESSION: AtomicU64 = AtomicU64::new(1);
@@ -61,6 +62,8 @@ pub enum PortAsk {
     StopSound(Option<String>),
     ChangeMusic(AudioPlay),
     StopMusic(u64),
+    Schedule(Vec<timeline::Command>),
+    Clock,
 }
 
 pub fn decode_port(op: &str, args: &[Value]) -> Result<PortAsk, AudioFailure> {
@@ -97,6 +100,16 @@ pub fn decode_port(op: &str, args: &[Value]) -> Result<PortAsk, AudioFailure> {
                 "audio/stop-music takes one fade length in milliseconds",
             )),
         },
+        "audio/schedule" => {
+            let json: Vec<serde_json::Value> = args.iter().map(orbital_core::client::helpers::to_json).collect();
+            timeline::decode_commands(&json)
+                .map(PortAsk::Schedule)
+                .map_err(AudioFailure::from)
+        }
+        "audio/clock" => match args {
+            [] => Ok(PortAsk::Clock),
+            _ => Err(AudioFailure::invalid("audio/clock takes no arguments")),
+        },
         _ => Err(AudioFailure::unavailable(format!(
             "unsupported native audio host ask `{op}`"
         ))),
@@ -117,7 +130,7 @@ enum Command {
         String,
         String,
         Vec<Value>,
-        oneshot::Sender<Result<(), AudioFailure>>,
+        oneshot::Sender<Result<Value, AudioFailure>>,
     ),
     Suspend,
     Resume,
@@ -158,6 +171,15 @@ impl AudioFailure {
     }
 }
 
+impl From<timeline::Failure> for AudioFailure {
+    fn from(failure: timeline::Failure) -> Self {
+        Self {
+            kind: failure.kind,
+            error: failure.error,
+        }
+    }
+}
+
 impl std::fmt::Display for AudioFailure {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(&self.error)
@@ -168,9 +190,15 @@ pub fn host_ask(
     source_trait: String,
     op: String,
     args: Vec<Value>,
-) -> oneshot::Receiver<Result<(), AudioFailure>> {
+) -> oneshot::Receiver<Result<Value, AudioFailure>> {
     let (answer, receiver) = oneshot::channel();
-    if let Some(sender) = COMMANDS.get() {
+    // The timeline asks need no mounted cue session: a page that only schedules clips starts the worker itself.
+    let sender = if op == "audio/schedule" || op == "audio/clock" {
+        Some(commands())
+    } else {
+        COMMANDS.get().cloned()
+    };
+    if let Some(sender) = sender {
         if sender
             .send(Command::HostAsk(source_trait, op, args, answer))
             .is_err()
@@ -183,6 +211,19 @@ pub fn host_ask(
         )));
     }
     receiver
+}
+
+fn commands() -> Sender<Command> {
+    COMMANDS
+        .get_or_init(|| {
+            let (sender, receiver) = mpsc::channel();
+            std::thread::Builder::new()
+                .name("almadar-native-audio".into())
+                .spawn(move || run_audio(receiver))
+                .expect("audio worker thread");
+            sender
+        })
+        .clone()
 }
 
 pub fn user_gesture() {
@@ -198,16 +239,7 @@ pub struct AudioSessionHandle {
 
 impl AudioSessionHandle {
     pub fn new() -> Self {
-        let sender = COMMANDS
-            .get_or_init(|| {
-                let (sender, receiver) = mpsc::channel();
-                std::thread::Builder::new()
-                    .name("almadar-native-audio".into())
-                    .spawn(move || run_audio(receiver))
-                    .expect("audio worker thread");
-                sender
-            })
-            .clone();
+        let sender = commands();
         Self {
             id: NEXT_SESSION.fetch_add(1, Ordering::Relaxed),
             sender,
@@ -420,6 +452,9 @@ impl Session {
             }
             PortAsk::ChangeMusic(plan) => self.change_music(stream, &plan),
             PortAsk::StopMusic(fade_ms) => self.change_music(stream, &music_stop(fade_ms)),
+            PortAsk::Schedule(_) | PortAsk::Clock => Err(AudioFailure::unavailable(format!(
+                "`{op}` is answered by the audio timeline, not a cue session"
+            ))),
         }
     }
 
@@ -547,10 +582,119 @@ fn load_audio(source: &str) -> Result<Vec<u8>, String> {
     Ok(response.into_body())
 }
 
+/// The timeline's voices as one source on the output mixer: it pulls a block of frames at a time under one lock.
+struct TimelineSource {
+    mixer: Arc<Mutex<timeline::Mixer>>,
+    channels: u16,
+    rate: u32,
+    block: Vec<f32>,
+    cursor: usize,
+}
+
+impl Iterator for TimelineSource {
+    type Item = f32;
+
+    fn next(&mut self) -> Option<f32> {
+        if self.cursor >= self.block.len() {
+            self.block.clear();
+            self.block.resize(1024 * self.channels as usize, 0.0);
+            if let Ok(mut mixer) = self.mixer.lock() {
+                mixer.render(&mut self.block);
+            }
+            self.cursor = 0;
+        }
+        let sample = self.block[self.cursor];
+        self.cursor += 1;
+        Some(sample)
+    }
+}
+
+impl Source for TimelineSource {
+    fn current_span_len(&self) -> Option<usize> {
+        None
+    }
+
+    fn channels(&self) -> rodio::ChannelCount {
+        self.channels
+    }
+
+    fn sample_rate(&self) -> rodio::SampleRate {
+        self.rate
+    }
+
+    fn total_duration(&self) -> Option<Duration> {
+        None
+    }
+}
+
+/// `audio/schedule` and `audio/clock` (the web host's twin is `providers/audio-scheduler.ts`): the declared commands on the
+/// output's own sample clock, each started source decoded once and kept only while an ask names it.
+fn timeline_ask(
+    stream: &OutputStream,
+    mixer: &mut Option<Arc<Mutex<timeline::Mixer>>>,
+    decoded: &mut HashMap<String, timeline::Pcm>,
+    op: &str,
+    args: &[Value],
+) -> Result<Value, AudioFailure> {
+    let shared = mixer
+        .get_or_insert_with(|| {
+            let config = stream.config();
+            let shared = Arc::new(Mutex::new(timeline::Mixer::new(
+                config.sample_rate(),
+                config.channel_count(),
+            )));
+            stream.mixer().add(TimelineSource {
+                mixer: shared.clone(),
+                channels: config.channel_count(),
+                rate: config.sample_rate(),
+                block: Vec::new(),
+                cursor: 0,
+            });
+            shared
+        })
+        .clone();
+    let poisoned = || AudioFailure::unavailable("the native audio timeline stopped");
+    match decode_port(op, args)? {
+        PortAsk::Clock => {
+            let audio = shared.lock().map_err(|_| poisoned())?.clock();
+            let wall = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|since| since.as_secs_f64() * 1000.0)
+                .map_err(|error| AudioFailure::unavailable(format!("audio/clock: {error}")))?;
+            Ok(orbital_core::client::helpers::from_json(serde_json::json!({ "audio": audio, "wall": wall })))
+        }
+        PortAsk::Schedule(commands) => {
+            shared.lock().map_err(|_| poisoned())?.check(&commands)?;
+            let named = timeline::sources(&commands);
+            for source in &named {
+                if decoded.contains_key(source) {
+                    continue;
+                }
+                let bytes = match timeline::data_url_bytes(source) {
+                    Some(bytes) => bytes,
+                    None => load_audio(source).map_err(|error| AudioFailure::unavailable(format!("audio/schedule: {error}")))?,
+                };
+                let decoder = Decoder::try_from(Cursor::new(bytes))
+                    .map_err(|error| AudioFailure::unavailable(format!("audio/schedule: a source did not decode: {error}")))?;
+                let channels = decoder.channels();
+                let rate = decoder.sample_rate();
+                let samples: Vec<f32> = decoder.collect();
+                decoded.insert(source.clone(), timeline::Pcm { samples: Arc::new(samples), channels, rate });
+            }
+            shared.lock().map_err(|_| poisoned())?.apply(&commands, decoded)?;
+            decoded.retain(|source, _| named.contains(source));
+            Ok(Value::Null)
+        }
+        _ => Err(AudioFailure::unavailable(format!("`{op}` is not an audio timeline ask"))),
+    }
+}
+
 fn run_audio(receiver: Receiver<Command>) {
     let mut stream: Option<OutputStream> = None;
     let mut sessions: HashMap<u64, Session> = HashMap::new();
     let mut suspended = false;
+    let mut timeline_mixer: Option<Arc<Mutex<timeline::Mixer>>> = None;
+    let mut timeline_sources: HashMap<String, timeline::Pcm> = HashMap::new();
     loop {
         match receiver.recv_timeout(Duration::from_millis(50)) {
             Ok(Command::Sync(id, props)) => {
@@ -582,6 +726,19 @@ fn run_audio(receiver: Receiver<Command>) {
                     }
                 }
             }
+            Ok(Command::HostAsk(_, op, args, answer)) if op == "audio/schedule" || op == "audio/clock" => {
+                if stream.is_none() {
+                    match OutputStreamBuilder::open_default_stream() {
+                        Ok(opened) => stream = Some(opened),
+                        Err(error) => tracing::error!(%error, "native audio output unavailable"),
+                    }
+                }
+                let result = match &stream {
+                    Some(stream) => timeline_ask(stream, &mut timeline_mixer, &mut timeline_sources, &op, &args),
+                    None => Err(AudioFailure::unavailable("native audio output unavailable")),
+                };
+                let _ = answer.send(result);
+            }
             Ok(Command::HostAsk(source_trait, op, args, answer)) => {
                 let result = if let Some(stream) = &stream {
                     let mut matching: Vec<_> = sessions
@@ -589,7 +746,7 @@ fn run_audio(receiver: Receiver<Command>) {
                         .filter(|session| session.props.source_trait == source_trait)
                         .collect();
                     if let [session] = matching.as_mut_slice() {
-                        session.host_ask(stream, &op, &args)
+                        session.host_ask(stream, &op, &args).map(|()| Value::Null)
                     } else {
                         Err(AudioFailure::unavailable(format!(
                             "audio host ask `{op}` needs one matching session for `{source_trait}`; found {}",
@@ -711,6 +868,18 @@ mod tests {
             decode_port("audio/stop-music", &[fade]).unwrap(),
             PortAsk::StopMusic(750)
         );
+    }
+
+    #[test]
+    fn the_timeline_asks_decode_to_their_commands_and_the_clock_takes_no_argument() {
+        let list = orbital_core::client::helpers::from_json(serde_json::json!([{ "stop": { "key": "a", "at": 2 } }]));
+        assert_eq!(
+            decode_port("audio/schedule", &[list]).unwrap(),
+            PortAsk::Schedule(vec![timeline::Command::Stop { key: "a".into(), at: 2.0 }])
+        );
+        assert_eq!(decode_port("audio/clock", &[]).unwrap(), PortAsk::Clock);
+        assert_eq!(decode_port("audio/clock", &[Value::Null]).unwrap_err().kind, "invalid");
+        assert_eq!(decode_port("audio/schedule", &[]).unwrap_err().kind, "invalid");
     }
 
     #[test]
