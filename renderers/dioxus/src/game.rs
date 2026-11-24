@@ -33,21 +33,51 @@ use web_time::Instant;
 /// Log namespace — mirrors `@almadar/logger`'s `almadar:ui-native-game`.
 const NS: &str = "almadar::ui_native_game";
 
-/// The node a scene pattern's host draws: its props under its `type`, plus the kernel's theme.
+/// The last scene node each pattern converted, with the kernel value and theme it came from.
+type Converted = (Value, Option<serde_json::Value>, Arc<serde_json::Value>);
+
+thread_local! {
+    static CONVERTED: std::cell::RefCell<std::collections::HashMap<String, Converted>> = std::cell::RefCell::new(std::collections::HashMap::new());
+}
+
+/// Whether `a` and `b` are one kernel allocation: a scene the kernel did not re-render is handed over unchanged.
+fn same_allocation(a: &Value, b: &Value) -> bool {
+    match (a, b) {
+        (Value::Object(a), Value::Object(b)) => orbital_core::Shared::ptr_eq(a, b),
+        _ => false,
+    }
+}
+
+/// The node a scene pattern's host draws: its props under its `type`, plus the kernel's theme. Every dispatch renders
+/// the page again, so a scene the kernel handed over unchanged reuses the node it was converted to.
 fn scene_node(
     pattern: &str,
     props: &Value,
     canvas_theme: Option<&serde_json::Value>,
-) -> serde_json::Value {
-    scene::host_node(
+) -> Arc<serde_json::Value> {
+    let reused = CONVERTED.with(|c| {
+        c.borrow()
+            .get(pattern)
+            .filter(|(from, theme, _)| same_allocation(from, props) && theme.as_ref() == canvas_theme)
+            .map(|(_, _, node)| Arc::clone(node))
+    });
+    if let Some(node) = reused {
+        return node;
+    }
+    let node = Arc::new(scene::host_node(
         pattern,
         serde_json::to_value(props).unwrap_or_default(),
         canvas_theme,
-    )
+    ));
+    CONVERTED.with(|c| {
+        c.borrow_mut()
+            .insert(pattern.to_string(), (props.clone(), canvas_theme.cloned(), Arc::clone(&node)))
+    });
+    node
 }
 
-/// The canvas element's size in CSS px: the scene's own size. A scene the native painter refuses
-/// (`mode: "3d"`) is logged and takes no room.
+/// The canvas element's size in CSS px: the scene's own size. A scene the native painter refuses is logged and
+/// takes no room.
 fn canvas_size(node: &serde_json::Value) -> Option<(usize, usize)> {
     match scene::scene_size(node) {
         Ok((w, h)) => Some((w.max(1.0) as usize, h.max(1.0) as usize)),
@@ -86,7 +116,7 @@ fn fills_width(node: &serde_json::Value) -> bool {
 /// The scene node the component last rendered, versioned so the paint source maps it only when it changed.
 struct SceneNode {
     version: u64,
-    node: serde_json::Value,
+    node: Arc<serde_json::Value>,
 }
 
 /// Each mounted scene canvas and whether it has drawn a frame its program marked `ready`: the web's `data-orb-ready`,
@@ -339,7 +369,7 @@ impl CustomPaintSource for GamePaintSource {
 /// shared wgpu device, and a tap routed through the scene host to the trait as an event.
 #[derive(Props, Clone, PartialEq)]
 struct SceneCanvasProps {
-    node: serde_json::Value,
+    node: Arc<serde_json::Value>,
     sink: Option<crate::renderer::EventSink>,
     fill_parent: bool,
     #[props(default)]
@@ -715,10 +745,11 @@ pub(crate) fn atlas_image(props: &Value, view: &DioxusView<'_>) -> Element {
 }
 
 pub(crate) fn atlas_panel(props: &Value, view: &DioxusView<'_>, fill_parent: bool) -> Element {
-    let mut node = scene_node("atlas-panel", props, view.canvas_theme.as_ref());
+    let mut node = (*scene_node("atlas-panel", props, view.canvas_theme.as_ref())).clone();
     if let Some(fields) = node.as_object_mut() {
         fields.remove("children");
     }
+    let node = Arc::new(node);
     let (class_name, mut a11y) = scene_presentation(props);
     if fill_parent {
         a11y.hidden = Some("true".to_string());
@@ -776,7 +807,7 @@ impl DioxusPatternRenderer for SceneCanvasRenderer {
 /// The web GraphView's root around the scene: a `relative overflow-hidden` box (a content surface
 /// unless one is already painted around it), `width` px or the full width, `height` px (400), with
 /// the scene filling it.
-fn graph_view_frame(props: &Value, node: serde_json::Value, view: &DioxusView<'_>) -> Element {
+fn graph_view_frame(props: &Value, node: Arc<serde_json::Value>, view: &DioxusView<'_>) -> Element {
     use orbital_core::client::helpers::{get_number, get_string_or};
     let paints_surface = get_string_or(props, "surface", "auto") == "auto"
         && try_consume_context::<crate::components::core::atoms::card::OnSurface>().is_none();
@@ -813,7 +844,7 @@ fn graph_view_frame(props: &Value, node: serde_json::Value, view: &DioxusView<'_
 fn learning_card(
     pattern: &str,
     props: &Value,
-    node: serde_json::Value,
+    node: Arc<serde_json::Value>,
     view: &DioxusView<'_>,
     registry: &DioxusPatternRegistry,
 ) -> Element {
@@ -931,6 +962,20 @@ mod tests {
         assert!(!box_has_area(0, 2164));
         assert!(box_has_area(1001, 2164), "control: a laid-out box is drawn");
         assert!(box_has_area(1, 1), "edge: one pixel is an area");
+    }
+
+    #[test]
+    fn the_same_kernel_value_is_converted_to_a_scene_node_once() {
+        let props: Value = serde_json::from_value(json!({ "width": 640, "height": 360, "drawables": [] })).unwrap();
+        let first = scene_node("canvas", &props, None);
+        let again = scene_node("canvas", &props.clone(), None);
+        assert!(Arc::ptr_eq(&first, &again), "an unchanged scene (the same allocation) is not converted again");
+        let changed: Value = serde_json::from_value(json!({ "width": 641, "height": 360, "drawables": [] })).unwrap();
+        let next = scene_node("canvas", &changed, None);
+        assert!(!Arc::ptr_eq(&first, &next), "control: a new scene is converted");
+        assert_eq!(next["width"], json!(641));
+        let theme = json!({ "palette": { "ink": "#000" } });
+        assert!(!Arc::ptr_eq(&next, &scene_node("canvas", &changed, Some(&theme))), "control: a new theme is converted");
     }
 
     #[test]
@@ -1053,9 +1098,9 @@ mod tests {
     }
 
     #[test]
-    fn control_a_refused_three_d_scene_takes_no_room() {
+    fn a_three_d_scene_takes_its_authored_room_now_the_painter_draws_it() {
         let props: Value = serde_json::from_value(json!({ "mode": "3d" })).unwrap();
-        assert_eq!(canvas_size(&scene_node("canvas", &props, None)), None);
+        assert_eq!(canvas_size(&scene_node("canvas", &props, None)), Some((800, 600)));
     }
 
     #[test]
