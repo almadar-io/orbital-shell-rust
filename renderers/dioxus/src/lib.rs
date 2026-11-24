@@ -30,6 +30,9 @@ pub(crate) mod timer;
 #[path = "../../../runtime/dioxus/src/shell.rs"]
 pub mod shell;
 pub mod video_overlay;
+/// The mobile native-gpu hosts' sign-in bridge to the templates' `OrbitalSignIn` (platform SDKs + Firebase Auth).
+#[cfg(all(any(target_os = "android", target_os = "ios"), feature = "native"))]
+pub mod mobile_sign_in;
 #[cfg(test)]
 pub(crate) static EVENT_CONVERTER_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 #[cfg(all(feature = "native", not(target_arch = "wasm32")))]
@@ -54,6 +57,11 @@ pub mod game;
 
 #[cfg(all(feature = "native", not(target_arch = "wasm32")))]
 pub(crate) mod canvas_access;
+
+/// The desktop host's loopback sign-in (std only; the browser, keychain and HTTPS glue sit behind the native features).
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "../../../hosts/desktop/dioxus/src/sign_in.rs"]
+pub mod sign_in;
 
 /// Native behavior catalog (desktop counterpart of the archived ui-wasm browser
 /// catalog) — sidebar of every baked behavior + event chips driving the

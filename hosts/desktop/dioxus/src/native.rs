@@ -50,8 +50,17 @@ pub fn android_is_editable_at(x: f32, y: f32) -> bool {
 /// until the window closes. `css_texts` are stylesheet contents (already read
 /// from disk by the caller — no path knowledge here); `title` labels the
 /// window.
-pub fn start(schema_json: &str, css_texts: Vec<String>, title: &str) -> Result<(), String> {
+/// `lazy`: where the program's lazy pages are read from (EXEC-LOAD-2); `None` opens no lazy page.
+pub fn start(
+    schema_json: &str,
+    lazy: Option<std::sync::Arc<dyn orbital_core::runtime::LazySource>>,
+    css_texts: Vec<String>,
+    title: &str,
+) -> Result<(), String> {
     let (orbitals, traits) = shell::mount_core(schema_json)?;
+    if let Some(source) = lazy {
+        shell::with_core(|core| core.set_lazy_source(source))?;
+    }
     tracing::info!(target: shell::NS, orbitals, traits, "native mount");
     open_window(css_texts, title);
     Ok(())
@@ -62,6 +71,7 @@ pub fn start(schema_json: &str, css_texts: Vec<String>, title: &str) -> Result<(
 pub fn start_server(
     schema_json: &str,
     server_url: &str,
+    lazy: Option<std::sync::Arc<dyn orbital_core::runtime::LazySource>>,
     css_texts: Vec<String>,
     title: &str,
 ) -> Result<(), String> {
@@ -69,6 +79,9 @@ pub fn start_server(
         .map_err(|e| format!("parse schema: {e}"))?;
     let bridge = Arc::new(orbital_core::client::SyncServerBridge::new(server_url));
     let (orbitals, traits) = shell::mount_remote(schema, bridge)?;
+    if let Some(source) = lazy {
+        shell::with_core(|core| core.set_lazy_source(source))?;
+    }
     tracing::info!(target: shell::NS, orbitals, traits, "native server mount");
     open_window(css_texts, title);
     Ok(())

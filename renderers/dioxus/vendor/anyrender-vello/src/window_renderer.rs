@@ -48,6 +48,10 @@ impl Default for VelloRendererOptions {
             features: None,
             limits: None,
             base_color: Color::WHITE,
+            // ORBITAL PATCH: Android paints with area coverage; vello's MSAA16 fine pass draws corrupt tiles on Adreno.
+            #[cfg(target_os = "android")]
+            antialiasing_method: AaConfig::Area,
+            #[cfg(not(target_os = "android"))]
             antialiasing_method: AaConfig::Msaa16,
         }
     }
@@ -214,7 +218,9 @@ impl WindowRenderer for VelloWindowRenderer {
         render_surface.maybe_blit_and_present();
         timer.record_time("present");
 
-        render_surface.device().poll(wgpu::PollType::Wait).unwrap();
+        // ORBITAL PATCH: never block on the GPU; the surface's frame latency bounds how far the CPU runs ahead, and a
+        // non-blocking poll still frees finished work. A full wait serialized CPU and GPU (31 ms of 55 on an Adreno phone).
+        render_surface.device().poll(wgpu::PollType::Poll).unwrap();
 
         timer.record_time("wait");
         timer.print_times("vello: ");

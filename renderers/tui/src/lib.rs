@@ -7,7 +7,7 @@
 pub mod components;
 
 use crossterm::event::KeyCode;
-use orbital_core::client::client_core::{host_ask_failure_payload, ClientCore};
+use orbital_core::client::client_core::{host_ask_route, ClientCore, HostAskOutcome};
 use orbital_core::client::helpers::*;
 use orbital_core::Value;
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
@@ -225,14 +225,14 @@ impl TuiApp {
                 self.core.status_message = Some((message, true));
                 continue;
             };
-            let Some(event) = completion.failure.clone() else {
+            let refused = HostAskOutcome::Refused { error: message.clone(), kind: "unavailable".to_string() };
+            let Some((event, payload)) = host_ask_route(&completion, &refused) else {
                 continue;
             };
             let Some(kernel) = self.core.client_kernel.clone() else {
                 self.core.status_message = Some((message, true));
                 continue;
             };
-            let payload = host_ask_failure_payload(&completion, &message, "unavailable");
             match self
                 .core
                 .begin_host_completion(&completion, &event, payload)

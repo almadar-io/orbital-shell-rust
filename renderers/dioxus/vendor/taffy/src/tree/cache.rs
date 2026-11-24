@@ -167,6 +167,10 @@ impl Cache {
             }
             RunMode::ComputeSize => {
                 self.is_empty = false;
+                // ORBITAL PATCH (taffy 0.9.2): a measure that ran may have laid this node's subtree out at other
+                // sizes (block width and baselines measure by performing), so a final layout cached before it no
+                // longer describes the subtree; the next final pass must lay it out again.
+                self.final_layout_entry = None;
                 let cache_slot = Self::compute_cache_slot(known_dimensions, available_space);
                 self.measure_entries[cache_slot] =
                     Some(CacheEntry { known_dimensions, available_space, content: layout_output.size });

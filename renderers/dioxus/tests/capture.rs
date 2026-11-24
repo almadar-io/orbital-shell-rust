@@ -638,6 +638,50 @@ fn pointer_events_none_overlay_passes_touch_to_checkbox_button() {
 }
 
 #[test]
+fn touch_action_decides_which_axes_a_touch_may_pan() {
+    use blitz_dom::DocumentConfig;
+    use blitz_traits::shell::{ColorScheme, Viewport};
+    use dioxus::prelude::*;
+    use dioxus_native::DioxusDocument;
+
+    fn app() -> Element {
+        rsx! {
+            div { style: "width:80px",
+                div { id: "auto", style: "height:20px" }
+                div { id: "none", style: "height:20px;touch-action:none" }
+                div { id: "pan-y", style: "height:20px;touch-action:pan-y" }
+                div { style: "touch-action:none",
+                    div { id: "under-none", style: "height:20px" }
+                }
+            }
+        }
+    }
+
+    let mut doc = DioxusDocument::new(
+        dioxus_core::VirtualDom::new(app),
+        DocumentConfig { viewport: Some(Viewport::new(80, 80, 1.0, ColorScheme::Light)), ..Default::default() },
+    );
+    doc.initial_build();
+    doc.resolve(0.0);
+    let axes = |id: &str| doc.touch_pan_axes(doc.query_selector(id).unwrap().unwrap());
+    assert_eq!(axes("#auto"), (true, true), "control: touch-action auto pans both axes");
+    assert_eq!(axes("#none"), (false, false), "touch-action none pans neither axis");
+    assert_eq!(axes("#pan-y"), (false, true), "touch-action pan-y pans only vertically");
+    assert_eq!(axes("#under-none"), (false, false), "an ancestor's touch-action none holds for its children");
+}
+
+#[test]
+fn a_fill_container_canvas_takes_every_touch_like_the_web_canvas() {
+    orbital_client_dioxus::app::CSS_TEXT.with(|css| *css.borrow_mut() = orbital_client_dioxus::styles::stylesheets());
+    mount_core(&fill_canvas_then_sidebar(false)).unwrap();
+    let on_canvas = orbital_client_dioxus::offscreen::touch_pan_axes_at(80, 400, 40.0, 200.0).unwrap();
+    assert_eq!(on_canvas, (false, false), "a swipe on the canvas reaches the scene, as touch-action none on the web");
+    mount_core(&program(serde_json::json!({ "type": "typography", "content": "a" }))).unwrap();
+    let without_canvas = orbital_client_dioxus::offscreen::touch_pan_axes_at(80, 400, 40.0, 200.0).unwrap();
+    assert_eq!(without_canvas, (true, true), "control: the same touch on a page with no canvas pans the page");
+}
+
+#[test]
 fn native_icon_uses_exact_lucide_geometry_color_and_stroke_width() {
     let source = include_str!("../assets/LUCIDE-SOURCE");
     assert!(source.contains("lucide-static 0.570.0"));
@@ -2108,4 +2152,105 @@ fn a_fill_container_canvas_takes_its_slots_height_not_a_square_in_a_tall_viewpor
     assert!(red_rows(&path, 0) > 0, "the canvas painted");
     assert!(red_rows(&path, 200) > 0, "the canvas reaches the lower half of a tall viewport");
     let _ = std::fs::remove_file(&path);
+}
+
+fn red_columns(path: &std::path::Path) -> usize {
+    let decoder = png::Decoder::new(std::fs::File::open(path).unwrap());
+    let mut reader = decoder.read_info().unwrap();
+    let mut buf = vec![0; reader.output_buffer_size()];
+    let info = reader.next_frame(&mut buf).unwrap();
+    let (w, row) = (info.width as usize, info.width as usize * 4);
+    (0..w)
+        .filter(|x| {
+            buf[..info.buffer_size()].chunks_exact(row).any(|r| {
+                let px = &r[x * 4..x * 4 + 4];
+                px[0] > 180 && px[1] < 90 && px[2] < 90
+            })
+        })
+        .count()
+}
+
+fn fill_canvas_then_sidebar(sidebar_on_sized: bool) -> String {
+    let canvas = serde_json::json!({
+        "type": "canvas", "mode": "2d", "projection": "free", "painter": "orbital", "fillContainer": true,
+        "camera": { "mode": "top-down", "zoom": 1 }, "worldWidth": 60, "worldHeight": 60, "resizeEvent": "SIZED",
+        "drawables": [{ "type": "draw-shape", "shape": "rect", "anchor": "top-left", "position": { "x": 0, "y": 0 },
+            "width": 4000, "height": 4000, "fill": "#ff0000" }]
+    });
+    let side = |text: &str| serde_json::json!(["render-ui", "sidebar", { "type": "typography", "content": text }]);
+    let init = vec![serde_json::json!(["render-ui", "main", canvas.clone()]), side("a")];
+    let mut sized = vec![serde_json::json!(["render-ui", "main", canvas.clone()])];
+    sized.push(side(if sidebar_on_sized { "b" } else { "a" }));
+    serde_json::json!({
+        "name": "t", "typeContractVersion": 1,
+        "orbitals": [{
+            "name": "Main",
+            "entity": { "name": "Row", "persistence": "runtime", "fields": [{ "name": "id", "type": "string" }] },
+            "traits": [{ "name": "View", "linkedEntity": "Row", "stateMachine": {
+                "states": [{ "name": "idle", "isInitial": true }, { "name": "sized" }],
+                "transitions": [
+                    { "from": "idle", "to": "idle", "event": "INIT", "effects": init },
+                    { "from": "idle", "to": "sized", "event": "SIZED", "effects": sized }
+                ]
+            } }],
+            "pages": [{ "name": "Home", "path": "/", "traits": [{ "ref": "View" }] }]
+        }]
+    })
+    .to_string()
+}
+
+#[test]
+fn a_fill_container_canvas_keeps_its_width_when_a_sibling_slot_changes_after_it_painted() {
+    orbital_client_dioxus::app::CSS_TEXT.with(|css| *css.borrow_mut() = orbital_client_dioxus::styles::stylesheets());
+    for (sidebar, what) in [(false, "control: the sidebar keeps its text"), (true, "the sidebar text changed after the canvas painted")] {
+        let path = std::env::temp_dir().join(format!("dioxus-fill-sibling-{sidebar}-{}.png", std::process::id()));
+        mount_core(&fill_canvas_then_sidebar(sidebar)).unwrap();
+        capture_gpu_png(&path, 80, 400).unwrap();
+        assert!(red_columns(&path) > 40, "{what}: the canvas keeps its slot's width, red in {} columns", red_columns(&path));
+        let _ = std::fs::remove_file(&path);
+    }
+}
+
+fn loader_over_canvas(ready: bool) -> String {
+    let canvas = serde_json::json!({
+        "type": "canvas", "mode": "2d", "projection": "free", "painter": "orbital", "fillContainer": true, "ready": ready,
+        "camera": { "mode": "top-down", "zoom": 1 }, "worldWidth": 60, "worldHeight": 60,
+        "drawables": [{ "type": "draw-shape", "shape": "rect", "anchor": "top-left", "position": { "x": 0, "y": 0 },
+            "width": 4000, "height": 4000, "fill": "#ff0000" }]
+    });
+    let loader = serde_json::json!({ "type": "loading-state", "untilReady": true, "messages": ["one", "two"], "messageMs": 4000,
+        "background": "#0000ff", "foreground": "#ffffff", "message": "Loading" });
+    serde_json::json!({
+        "name": "t", "typeContractVersion": 1,
+        "orbitals": [{
+            "name": "Main",
+            "entity": { "name": "Row", "persistence": "runtime", "fields": [{ "name": "id", "type": "string" }] },
+            "traits": [{ "name": "View", "linkedEntity": "Row", "stateMachine": {
+                "states": [{ "name": "idle", "isInitial": true }],
+                "transitions": [{ "from": "idle", "to": "idle", "event": "INIT", "effects": [["render-ui", "center", loader], ["render-ui", "main", canvas]] }]
+            } }],
+            "pages": [{ "name": "Home", "path": "/", "traits": [{ "ref": "View" }] }]
+        }]
+    })
+    .to_string()
+}
+
+/// As the web's boot loader: an `untilReady` loading state covers the viewport until every scene canvas has drawn a
+/// frame its program marked ready, then it goes.
+#[test]
+fn an_until_ready_loader_covers_the_page_until_every_scene_canvas_is_ready() {
+    orbital_client_dioxus::app::CSS_TEXT.with(|css| *css.borrow_mut() = orbital_client_dioxus::styles::stylesheets());
+    let shot = |ready: bool| {
+        let path = std::env::temp_dir().join(format!("dioxus-loader-{ready}-{}.png", std::process::id()));
+        mount_core(&loader_over_canvas(ready)).unwrap();
+        capture_gpu_png(&path, 80, 400).unwrap();
+        let counts = (blue_pixels(&path), red_pixels(&path));
+        let _ = std::fs::remove_file(&path);
+        counts
+    };
+    let (blue, _) = shot(false);
+    assert!(blue > 80 * 400 / 2, "a canvas not yet ready leaves the loader over the page: {blue} blue pixels");
+    let (blue, red) = shot(true);
+    assert_eq!(blue, 0, "control: once the canvas drew a ready frame the loader is gone");
+    assert!(red > 80 * 400 / 2, "control: the canvas shows once the loader is gone: {red} red pixels");
 }

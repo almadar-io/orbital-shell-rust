@@ -98,7 +98,7 @@ fn empty_pattern(props: &Value) -> Value {
     pattern("empty-state", fields)
 }
 
-fn action_pattern(action: &Value, row: &Value, on_primary: bool) -> Option<Value> {
+fn action_pattern(action: &Value, row: &Value, on_primary: bool, icon_only: bool) -> Option<Value> {
     let route = logged_row_route(action, row);
     let event = if action.get("navigatesTo").is_some() {
         None
@@ -121,10 +121,12 @@ fn action_pattern(action: &Value, row: &Value, on_primary: bool) -> Option<Value
             ""
         },
     ]);
+    let label = get_string_or(action, "label", "");
+    let icon_only = icon_only && action.get("icon").is_some();
     let mut fields = vec![
         (
             "label".to_string(),
-            Value::string(get_string_or(action, "label", "")),
+            Value::string(if icon_only { "" } else { label.as_str() }),
         ),
         ("size".to_string(), Value::string("sm")),
         ("variant".to_string(), Value::string(variant)),
@@ -145,7 +147,159 @@ fn action_pattern(action: &Value, row: &Value, on_primary: bool) -> Option<Value
     if let Some(icon) = action.get("icon") {
         fields.push(("icon".to_string(), icon.clone()));
     }
+    if icon_only {
+        fields.push(("aria-label".to_string(), Value::string(label)));
+    }
     Some(pattern("button", fields))
+}
+
+fn overflow_items(actions: &[Value], row: &Value, ri: usize, only: &[usize]) -> Vec<Value> {
+    only.iter()
+        .map(|&ai| {
+            let action = &actions[ai];
+            let mut item = vec![
+                ("id", Value::string(ai.to_string())),
+                ("label", Value::string(get_string_or(action, "label", ""))),
+                (
+                    "variant",
+                    Value::string(
+                        if get_string(action, "variant").as_deref() == Some("danger") {
+                            "danger"
+                        } else {
+                            "default"
+                        },
+                    ),
+                ),
+            ];
+            if let Some(icon) = action.get("icon") {
+                item.push(("icon", icon.clone()));
+            }
+            match logged_row_route(action, row) {
+                Some(route) => item.push(("href", Value::string(route))),
+                None => item.push(("event", Value::string(format!("__dl_act:{ri}:{ai}")))),
+            }
+            object_value(item)
+        })
+        .collect()
+}
+
+fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
+    let year = if month <= 2 { year - 1 } else { year };
+    let era = year.div_euclid(400);
+    let year_of_era = year - era * 400;
+    let month_index = (month + 9) % 12;
+    let day_of_year = (153 * month_index + 2) / 5 + day - 1;
+    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    era * 146_097 + day_of_era - 719_468
+}
+
+fn offset_seconds(sign: i64, text: &str) -> Option<i64> {
+    let (hours, minutes) = match text.split_once(':') {
+        Some(pair) => pair,
+        None if text.len() == 4 => (text.get(..2)?, text.get(2..)?),
+        None if text.len() == 2 => (text, "0"),
+        None => return None,
+    };
+    Some(sign * (hours.parse::<i64>().ok()? * 3600 + minutes.parse::<i64>().ok()? * 60))
+}
+
+/// Epoch milliseconds of an ISO date or datetime; a datetime without an offset reads as UTC.
+fn parse_millis(text: &str) -> Option<i64> {
+    let (date, rest) = match text.trim().split_once(['T', ' ']) {
+        Some((date, rest)) => (date, Some(rest)),
+        None => (text.trim(), None),
+    };
+    let mut parts = date.split('-');
+    let year: i64 = parts.next()?.parse().ok()?;
+    let month: i64 = parts.next()?.parse().ok()?;
+    let day: i64 = parts.next()?.parse().ok()?;
+    if parts.next().is_some() || !(1..=12).contains(&month) || !(1..=31).contains(&day) {
+        return None;
+    }
+    let mut millis = days_from_civil(year, month, day) * 86_400_000;
+    if let Some(rest) = rest {
+        let (clock, offset) = match rest.strip_suffix('Z') {
+            Some(clock) => (clock, 0),
+            None => match rest.rfind(['+', '-']) {
+                Some(at) if at > 0 => {
+                    let sign = if rest.as_bytes()[at] == b'-' { -1 } else { 1 };
+                    (&rest[..at], offset_seconds(sign, &rest[at + 1..])?)
+                }
+                _ => (rest, 0),
+            },
+        };
+        let mut parts = clock.split(':');
+        let hours: i64 = parts.next()?.parse().ok()?;
+        let minutes: i64 = parts.next()?.parse().ok()?;
+        let seconds: f64 = parts.next().map_or(Some(0.0), |text| text.parse().ok())?;
+        if parts.next().is_some() || hours >= 24 || minutes >= 60 || !(0.0..61.0).contains(&seconds)
+        {
+            return None;
+        }
+        millis += (hours * 3600 + minutes * 60 - offset) * 1000 + (seconds * 1000.0).round() as i64;
+    }
+    Some(millis)
+}
+
+fn group_indices(
+    rows: &[Value],
+    field: Option<&str>,
+    format: Option<&str>,
+) -> Vec<(String, Vec<usize>)> {
+    let Some(field) = field else {
+        return vec![(String::new(), (0..rows.len()).collect())];
+    };
+    let mut groups: Vec<(String, Vec<usize>)> = Vec::new();
+    for (index, row) in rows.iter().enumerate() {
+        let raw = nested_value(row, field).unwrap_or(Value::Null);
+        let key = match format {
+            Some(format) => format_display_value(&raw, Some(format)),
+            None => plain_text(&raw),
+        };
+        match groups.iter_mut().find(|(label, _)| *label == key) {
+            Some((_, members)) => members.push(index),
+            None => groups.push((key, vec![index])),
+        }
+    }
+    groups
+}
+
+/// A row continues the previous one when the sender matches and its time is 0..=window minutes after it.
+fn feed_continues(
+    previous: Option<(&str, Option<i64>)>,
+    current: (&str, Option<i64>),
+    window_minutes: f64,
+) -> bool {
+    let Some((previous_sender, previous_millis)) = previous else {
+        return false;
+    };
+    if previous_sender != current.0 {
+        return false;
+    }
+    match (previous_millis, current.1) {
+        (Some(before), Some(now)) => {
+            let gap = now - before;
+            gap >= 0 && gap as f64 <= window_minutes * 60_000.0
+        }
+        _ => false,
+    }
+}
+
+fn reply_count_of(value: Option<Value>) -> i64 {
+    match value {
+        Some(Value::Int(count)) => count,
+        Some(Value::Number(count)) => count as i64,
+        Some(Value::String(text)) => text.trim().parse::<f64>().map_or(0, |count| count as i64),
+        _ => 0,
+    }
+}
+
+fn reply_label(count: i64) -> String {
+    if count == 1 {
+        crate::i18n::t("dataList.replyOne")
+    } else {
+        crate::i18n::t_with("dataList.replyOther", &[("count", count.to_string())])
+    }
 }
 
 #[derive(Props, Clone, PartialEq)]
@@ -304,7 +458,7 @@ fn DataListBody(p: DataListBodyProps) -> Element {
         let overflow = &only[inline_count..];
         let buttons: Vec<Element> = inline
             .iter()
-            .filter_map(|&ai| action_pattern(&actions[ai], row, on_primary))
+            .filter_map(|&ai| action_pattern(&actions[ai], row, on_primary, false))
             .map(|spec| render(spec))
             .collect();
         let menu = (!overflow.is_empty()).then(|| {
@@ -551,6 +705,303 @@ fn DataListBody(p: DataListBodyProps) -> Element {
             .collect();
         return rsx! {
             div { class: "flex flex-col gap-2 items-stretch justify-start py-2 {class_name}",
+                for item in elements.iter() { {item.clone()} }
+                if let Some(more) = more { div { class: "flex justify-center py-3", {more} } }
+            }
+        };
+    }
+
+    if variant == "feed" {
+        let sender_field = get_string(props, "senderField");
+        let sender_label_field = get_string(props, "senderLabelField");
+        let sender_avatar_field = get_string(props, "senderAvatarField");
+        let reply_count_field = get_string(props, "replyCountField");
+        let repliers_field = get_string(props, "repliersField");
+        let reply_event = get_string(props, "replyEvent");
+        let window_minutes = get_number_or(props, "feedGroupMinutes", 5.0);
+        let content_field = fields
+            .iter()
+            .find(|field| is_role(field, "body"))
+            .or(title_field)
+            .map(|field| field.name.clone())
+            .unwrap_or_default();
+        let timestamp_field = fields
+            .iter()
+            .find(|field| matches!(field.format.as_deref(), Some("date" | "datetime" | "time")));
+        let text_at = |row: &Value, name: &Option<String>| -> Option<String> {
+            let value = nested_value(row, name.as_ref()?)?;
+            (!value.is_null() && !matches!(&value, Value::String(text) if text.is_empty()))
+                .then(|| plain_text(&value))
+        };
+        let sender_of = |row: &Value| -> String {
+            sender_field
+                .as_ref()
+                .and_then(|name| nested_value(row, name))
+                .map(|value| plain_text(&value))
+                .unwrap_or_default()
+        };
+        let millis_of = |row: &Value| -> Option<i64> {
+            let value = nested_value(row, &timestamp_field?.name)?;
+            parse_millis(&plain_text(&value))
+        };
+        let group_format = get_string(props, "groupFormat");
+        let groups = group_indices(
+            &rows,
+            get_string(props, "groupBy").as_deref(),
+            group_format.as_deref(),
+        );
+        let mut elements: Vec<Element> = Vec::new();
+        for (label, members) in &groups {
+            if !label.is_empty() {
+                elements.push(render(pattern(
+                    "divider",
+                    [
+                        ("label", Value::string(label.clone())),
+                        ("className", Value::string("my-3")),
+                    ],
+                )));
+            }
+            for (position, &ri) in members.iter().enumerate() {
+                let row = &rows[ri];
+                let id = row_id(ri);
+                let sender = sender_of(row);
+                let continuation = sender_field.is_some()
+                    && feed_continues(
+                        position
+                            .checked_sub(1)
+                            .map(|before| members[before])
+                            .map(|before| (sender_of(&rows[before]), millis_of(&rows[before])))
+                            .as_ref()
+                            .map(|(name, millis)| (name.as_str(), *millis)),
+                        (sender.as_str(), millis_of(row)),
+                        window_minutes,
+                    );
+                let name = text_at(row, &sender_label_field).unwrap_or_else(|| sender.clone());
+                let stamp = timestamp_field
+                    .and_then(|field| nested_value(row, &field.name))
+                    .filter(|value| {
+                        !value.is_null() && !matches!(value, Value::String(text) if text.is_empty())
+                    })
+                    .map(|value| format_display_value(&value, Some("time")));
+                let content = nested_value(row, &content_field)
+                    .filter(|value| !value.is_null())
+                    .map(|value| plain_text(&value))
+                    .unwrap_or_default();
+                let gutter = if continuation {
+                    stamp.as_ref().map(|text| {
+                        render(typography_spec(
+                            "caption",
+                            None,
+                            "block text-[10px] leading-5 text-muted-foreground text-end opacity-0 group-hover/rowactions:opacity-100",
+                            text,
+                        ))
+                    })
+                } else {
+                    let mut avatar = vec![
+                        ("name", Value::string(name.clone())),
+                        ("size", Value::string("md")),
+                    ];
+                    if let Some(src) = text_at(row, &sender_avatar_field) {
+                        avatar.push(("src", Value::string(src)));
+                    }
+                    Some(render(pattern("avatar", avatar)))
+                };
+                let header = (!continuation).then(|| {
+                    let name_el = render(typography_spec("small", None, "font-semibold", &name));
+                    let stamp_el = stamp.as_ref().map(|text| {
+                        render(typography_spec(
+                            "caption",
+                            None,
+                            "text-xs text-muted-foreground whitespace-nowrap",
+                            text,
+                        ))
+                    });
+                    rsx! {
+                        div { class: "flex flex-row gap-2 items-baseline justify-start",
+                            {name_el}
+                            if let Some(stamp_el) = stamp_el { {stamp_el} }
+                        }
+                    }
+                });
+                let body_el = render(typography_spec(
+                    "body",
+                    None,
+                    "whitespace-pre-wrap break-words",
+                    &content,
+                ));
+                let meta: Vec<Element> = fields
+                    .iter()
+                    .filter(|field| {
+                        field.name != content_field
+                            && Some(field.name.as_str()) != timestamp_field.map(|f| f.name.as_str())
+                    })
+                    .filter_map(|field| {
+                        let value = nested_value(row, &field.name)?;
+                        let empty = value.is_null()
+                            || matches!(&value, Value::String(text) if text.is_empty())
+                            || matches!(&value, Value::Array(items) if items.is_empty());
+                        if empty {
+                            return None;
+                        }
+                        let text = format_cell_text(
+                            &value,
+                            field.format.as_deref(),
+                            relation_options(props, &field.name).as_deref(),
+                        );
+                        Some(if is_role(field, "badge") {
+                            render(pattern(
+                                "badge",
+                                [
+                                    (
+                                        "variant",
+                                        Value::string(badge_variant(
+                                            &plain_text(&value),
+                                            field.color_map.as_ref(),
+                                        )),
+                                    ),
+                                    (
+                                        "label",
+                                        Value::string(label_for(text, field.labels.as_ref())),
+                                    ),
+                                ],
+                            ))
+                        } else {
+                            render(typography_spec(
+                                "caption",
+                                None,
+                                "text-xs text-muted-foreground",
+                                &text,
+                            ))
+                        })
+                    })
+                    .collect();
+                let reply_count = reply_count_of(
+                    reply_count_field
+                        .as_ref()
+                        .and_then(|name| nested_value(row, name)),
+                );
+                let replies = (reply_count > 0).then(|| {
+                    let repliers: Vec<Element> = match repliers_field.as_ref().and_then(|name| nested_value(row, name)) {
+                        Some(Value::Array(names)) => names
+                            .iter()
+                            .map(|name| {
+                                render(pattern(
+                                    "avatar",
+                                    [
+                                        ("name", Value::string(plain_text(name))),
+                                        ("size", Value::string("xs")),
+                                        ("className", Value::string("ring-2 ring-background")),
+                                    ],
+                                ))
+                            })
+                            .collect(),
+                        _ => Vec::new(),
+                    };
+                    let label = reply_label(reply_count);
+                    let emit = reply_event
+                        .clone()
+                        .and_then(|event| Some((event, logged_row_payload(&object_value::<&str>([]), row)?)));
+                    rsx! {
+                        button { r#type: "button", "data-testid": "feed-replies",
+                            class: "mt-1 -ms-2 px-2 py-1 flex flex-row gap-1.5 items-center rounded-interactive text-primary hover:bg-muted relative z-[1]",
+                            onclick: move |event| {
+                                event.stop_propagation();
+                                if let (Some(sink), Some((name, payload))) = (sink, &emit) {
+                                    sink.call((name.clone(), payload.clone()));
+                                }
+                            },
+                            if !repliers.is_empty() {
+                                div { class: "flex flex-row -space-x-1 items-center",
+                                    for avatar in repliers.iter() { {avatar.clone()} }
+                                }
+                            }
+                            span { class: "text-xs font-semibold", "{label}" }
+                        }
+                    }
+                });
+                let shown = &row_actions[ri];
+                let toolbar = (!shown.is_empty()).then(|| {
+                    let buttons: Vec<Element> = shown
+                        .iter()
+                        .filter_map(|&ai| action_pattern(&actions[ai], row, false, true))
+                        .map(|spec| render(spec))
+                        .collect();
+                    let menu = render(pattern(
+                        "menu",
+                        [
+                            ("position", Value::string("bottom-end")),
+                            (
+                                "trigger",
+                                pattern(
+                                    "button",
+                                    [
+                                        ("variant", Value::string("ghost")),
+                                        ("size", Value::string("sm")),
+                                        ("icon", Value::string("more-horizontal")),
+                                        ("label", Value::string("")),
+                                        ("aria-label", Value::string(crate::i18n::t("common.actions"))),
+                                    ],
+                                ),
+                            ),
+                            ("items", array_value(overflow_items(&actions, row, ri, shown))),
+                        ],
+                    ));
+                    rsx! {
+                        div { onclick: move |event| event.stop_propagation(),
+                            class: "absolute -top-3 end-4 z-10 opacity-0 group-hover/rowactions:opacity-100 focus-within:opacity-100 [@media(pointer:coarse)]:opacity-100 transition-opacity duration-fast",
+                            div { class: "rounded-container border border-border bg-card/95 backdrop-blur-sm shadow-elevation-popover surface-material p-0.5 [@media(pointer:coarse)]:hidden",
+                                div { class: "{HSTACK_XS}",
+                                    for button in buttons.iter() { {button.clone()} }
+                                }
+                            }
+                            div { class: "hidden [@media(pointer:coarse)]:block rounded-container border border-border bg-card/95 surface-material p-0.5", {menu} }
+                        }
+                    }
+                });
+                let open = row_open(row);
+                let has_open = open.is_some();
+                let row_class = cn(&[
+                    &enter,
+                    "relative flex gap-3 px-4 group/rowactions hover:bg-muted/60",
+                    if continuation {
+                        "py-0.5"
+                    } else {
+                        "pt-2 pb-0.5"
+                    },
+                    if has_open { "cursor-pointer" } else { "" },
+                ]);
+                elements.push(rsx! {
+                    div { key: "{id}", "data-entity-row": "", "data-entity-id": "{id}", "data-item-key": "{id}",
+                        "data-feed-continuation": continuation.then_some("true"),
+                        class: "{row_class}",
+                        onclick: move |_| {
+                            if let (Some(sink), Some((name, payload))) = (sink, &open) {
+                                sink.call((name.clone(), payload.clone()));
+                            }
+                        },
+                        div { class: "w-9 flex-shrink-0",
+                            if let Some(gutter) = gutter { {gutter} }
+                        }
+                        div { class: "flex-1 min-w-0",
+                            if let Some(header) = header { {header} }
+                            div { role: has_open.then_some("button"), tabindex: has_open.then_some("0"),
+                                class: if has_open { STRETCHED_CONTROL } else { "" },
+                                {body_el}
+                            }
+                            if !meta.is_empty() {
+                                div { class: "flex flex-row gap-1 items-center justify-start mt-1 flex-wrap relative z-[1]",
+                                    for item in meta.iter() { {item.clone()} }
+                                }
+                            }
+                            if let Some(replies) = replies { {replies} }
+                        }
+                        if let Some(toolbar) = toolbar { {toolbar} }
+                    }
+                });
+            }
+        }
+        return rsx! {
+            div { class: "flex flex-col py-2 {class_name}",
                 for item in elements.iter() { {item.clone()} }
                 if let Some(more) = more { div { class: "flex justify-center py-3", {more} } }
             }
@@ -974,5 +1425,121 @@ impl DioxusPatternRenderer for DataListRenderer {
         registry: &DioxusPatternRegistry,
     ) -> Element {
         rsx! { DataListBody { props: props.clone(), view: view.to_owned(), registry: registry.clone() } }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn row(sender: &str, at: &str) -> Value {
+        object_value([("sender", Value::string(sender)), ("at", Value::string(at))])
+    }
+
+    #[test]
+    fn same_sender_inside_the_window_continues() {
+        let first = parse_millis("2026-11-24T09:00:00Z");
+        let second = parse_millis("2026-11-24T09:03:00Z");
+        assert!(feed_continues(Some(("u1", first)), ("u1", second), 5.0));
+    }
+
+    #[test]
+    fn a_gap_past_the_window_starts_a_new_header() {
+        let first = parse_millis("2026-11-24T09:00:00Z");
+        let late = parse_millis("2026-11-24T09:30:00Z");
+        assert!(!feed_continues(Some(("u1", first)), ("u1", late), 5.0));
+        assert!(
+            feed_continues(Some(("u1", first)), ("u1", late), 30.0),
+            "control: a wider window continues"
+        );
+    }
+
+    #[test]
+    fn a_new_sender_or_an_earlier_time_or_no_time_starts_a_new_header() {
+        let first = parse_millis("2026-11-24T09:00:00Z");
+        let next = parse_millis("2026-11-24T09:01:00Z");
+        assert!(!feed_continues(Some(("u1", first)), ("u2", next), 5.0));
+        assert!(!feed_continues(Some(("u1", next)), ("u1", first), 5.0));
+        assert!(!feed_continues(Some(("u1", first)), ("u1", None), 5.0));
+        assert!(!feed_continues(None, ("u1", first), 5.0));
+    }
+
+    #[test]
+    fn datetimes_parse_with_offsets_and_reject_garbage() {
+        assert_eq!(parse_millis("1970-01-01T00:00:00Z"), Some(0));
+        assert_eq!(parse_millis("1970-01-02"), Some(86_400_000));
+        assert_eq!(
+            parse_millis("2026-11-24T10:00:00+01:00"),
+            parse_millis("2026-11-24T09:00:00Z")
+        );
+        assert_eq!(
+            parse_millis("2026-11-24 09:00:30.5"),
+            Some(parse_millis("2026-11-24T09:00:00Z").unwrap() + 30_500)
+        );
+        assert_eq!(parse_millis("09:00"), None);
+        assert_eq!(parse_millis("not a date"), None);
+        assert_eq!(parse_millis("2026-13-01"), None);
+    }
+
+    #[test]
+    fn day_grouping_buckets_by_formatted_date_in_first_seen_order() {
+        let rows = [
+            row("a", "2026-11-23T23:00:00Z"),
+            row("a", "2026-11-24T09:00:00Z"),
+            row("b", "2026-11-23T08:00:00Z"),
+        ];
+        let groups = group_indices(&rows, Some("at"), Some("date"));
+        assert_eq!(groups.len(), 2);
+        assert_eq!(groups[0].1, vec![0, 2]);
+        assert_eq!(groups[1].1, vec![1]);
+        let single = group_indices(&rows, None, None);
+        assert_eq!(
+            single,
+            vec![(String::new(), vec![0, 1, 2])],
+            "control: no groupBy is one unlabelled group"
+        );
+    }
+
+    #[test]
+    fn reply_counts_read_numbers_and_label_by_count() {
+        assert_eq!(reply_count_of(Some(Value::Int(2))), 2);
+        assert_eq!(reply_count_of(Some(Value::string("3"))), 3);
+        assert_eq!(reply_count_of(None), 0);
+        crate::i18n::set_locale(
+            None,
+            std::collections::BTreeMap::from([
+                ("dataList.replyOne".to_string(), "1 reply".to_string()),
+                (
+                    "dataList.replyOther".to_string(),
+                    "{{count}} replies".to_string(),
+                ),
+            ]),
+        );
+        assert_eq!(reply_label(1), "1 reply");
+        assert_eq!(reply_label(4), "4 replies");
+        crate::i18n::set_locale(None, std::collections::BTreeMap::new());
+    }
+
+    #[test]
+    fn icon_only_actions_carry_the_label_as_the_accessible_name() {
+        let action = object_value([
+            ("label", Value::string("Reply in thread")),
+            ("event", Value::string("REPLY")),
+            ("icon", Value::string("message-square")),
+        ]);
+        let target = object_value([("id", Value::string("a"))]);
+        let spec = action_pattern(&action, &target, false, true).unwrap();
+        assert_eq!(
+            get_string(&spec, "aria-label").as_deref(),
+            Some("Reply in thread")
+        );
+        assert_eq!(get_string(&spec, "label").as_deref(), Some(""));
+        let labelled = action_pattern(&action, &target, false, false).unwrap();
+        assert_eq!(
+            get_string(&labelled, "label").as_deref(),
+            Some("Reply in thread"),
+            "control"
+        );
+        assert!(labelled.get("aria-label").is_none());
     }
 }

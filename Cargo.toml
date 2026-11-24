@@ -23,7 +23,7 @@ tracing = "0.1"
 tokio = { version = "1.0", default-features = false, features = ["sync", "rt", "signal", "macros", "net"] }
 
 # The desktop program (`orb-desktop`): this shell's renderers as a GUI host.
-orbital-client-dioxus = { path = "renderers/dioxus", features = ["native"], optional = true }
+orbital-client-dioxus = { path = "renderers/dioxus", features = ["native", "native-sign-in"], optional = true }
 orbital-client-tui = { path = "renderers/tui", optional = true }
 tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "env-filter"], optional = true }
 

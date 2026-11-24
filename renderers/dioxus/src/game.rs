@@ -83,8 +83,90 @@ fn fills_width(node: &serde_json::Value) -> bool {
 /// Paints one scene into the Blitz scene via the shared wgpu device. The scene host is shared
 /// with the component, which feeds it taps; this side keeps its viewport, clock, assets and fonts
 /// current and draws its frame. Owns the offscreen target texture (recreated on size change).
+/// The scene node the component last rendered, versioned so the paint source maps it only when it changed.
+struct SceneNode {
+    version: u64,
+    node: serde_json::Value,
+}
+
+/// Each mounted scene canvas and whether it has drawn a frame its program marked `ready`: the web's `data-orb-ready`,
+/// which an `untilReady` loading state waits on.
+thread_local! {
+    static SCENES_READY: std::cell::RefCell<Vec<(u64, bool)>> = const { std::cell::RefCell::new(Vec::new()) };
+    /// The signals of the mounted boot loaders, bumped when readiness changes so each one renders again.
+    static READY_WATCHERS: std::cell::RefCell<Vec<Signal<u64>>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// Re-render `watcher`'s component whenever scene readiness changes, until [`unwatch_scenes_ready`].
+pub(crate) fn watch_scenes_ready(watcher: Signal<u64>) {
+    READY_WATCHERS.with(|w| w.borrow_mut().push(watcher));
+}
+
+pub(crate) fn unwatch_scenes_ready(watcher: Signal<u64>) {
+    READY_WATCHERS.with(|w| w.borrow_mut().retain(|s| *s != watcher));
+}
+static NEXT_SCENE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Whether at least one scene canvas is mounted and every one has drawn a ready frame.
+pub(crate) fn scenes_ready() -> bool {
+    SCENES_READY.with(|scenes| {
+        let scenes = scenes.borrow();
+        !scenes.is_empty() && scenes.iter().all(|(_, ready)| *ready)
+    })
+}
+
+fn set_scene_ready(key: u64, ready: Option<bool>) {
+    let changed = SCENES_READY.with(|scenes| {
+        let mut scenes = scenes.borrow_mut();
+        match (scenes.iter().position(|(k, _)| *k == key), ready) {
+            (Some(i), None) => {
+                scenes.remove(i);
+                true
+            }
+            (Some(i), Some(ready)) => std::mem::replace(&mut scenes[i].1, ready) != ready,
+            // Registering during the component's render pokes nothing: a new canvas is not ready, which is what any
+            // loader reading the list this pass sees.
+            (None, Some(ready)) => {
+                scenes.push((key, ready));
+                false
+            }
+            (None, None) => false,
+        }
+    });
+    if changed {
+        READY_WATCHERS.with(|w| {
+            for watcher in w.borrow_mut().iter_mut() {
+                let next = watcher.peek().wrapping_add(1);
+                watcher.set(next);
+            }
+        });
+    }
+}
+
+/// Whether the canvas box Blitz hands the paint source has been laid out to an area.
+fn box_has_area(width: u32, height: u32) -> bool {
+    width > 0 && height > 0
+}
+
+/// A frame counts as the program's laid-out scene once it was drawn with `ready` and nothing it asked for (a font, an
+/// image) is still downloading: the web draws its first ready frame with the page's fonts already in the browser,
+/// while a native host fetches them at run time and lays the scene out again when they land. A frame that queued
+/// events the program has not received yet (the sizes it just measured) is drawn before the program lays out again.
+fn drawn_ready(marked: bool, assets_pending: usize, unsent: bool) -> bool {
+    marked && assets_pending == 0 && !unsent
+}
+
+/// The program's `ready` on a scene node: its scene is laid out.
+fn marked_ready(node: &serde_json::Value) -> bool {
+    node.get("props").unwrap_or(node).get("ready").and_then(serde_json::Value::as_bool) == Some(true)
+}
+
 struct GamePaintSource {
-    node: Arc<Mutex<serde_json::Value>>,
+    node: Arc<Mutex<SceneNode>>,
+    /// This canvas's entry in the scene readiness list.
+    scene_key: u64,
+    /// The node version the scene host holds.
+    mapped: Option<u64>,
     host: Arc<Mutex<SceneHost>>,
     renderer: Option<SharedDeviceRenderer>,
     target: Option<(wgpu::Texture, TextureHandle, u32, u32)>,
@@ -93,9 +175,11 @@ struct GamePaintSource {
 }
 
 impl GamePaintSource {
-    fn new(node: Arc<Mutex<serde_json::Value>>, host: Arc<Mutex<SceneHost>>) -> Self {
+    fn new(node: Arc<Mutex<SceneNode>>, scene_key: u64, host: Arc<Mutex<SceneHost>>) -> Self {
         Self {
             node,
+            scene_key,
+            mapped: None,
             host,
             renderer: None,
             target: None,
@@ -132,6 +216,11 @@ impl CustomPaintSource for GamePaintSource {
         height: u32,
         scale: f64,
     ) -> Option<TextureHandle> {
+        // As the web canvas, which reports its first size once its box is laid out: a box with no area yet is not
+        // drawn, so the program never lays its scene out at a provisional size and calls that laid out (ready).
+        if !box_has_area(width, height) {
+            return None;
+        }
         let renderer = self.renderer.as_mut()?;
         // Blitz reports the canvas content box ALREADY in physical px (CSS px
         // × dpr — proven: `game paint render css=2000x1500` for an 800x600
@@ -187,8 +276,7 @@ impl CustomPaintSource for GamePaintSource {
             self.target = Some((texture, handle, phys_w, phys_h));
         }
 
-        let node = self.node.lock().expect("scene node poisoned").clone();
-        let packet = {
+        let (packet, unsent) = {
             let mut host = self.host.lock().expect("scene host poisoned");
             if host.density() != density && host.set_scale(density).is_err() {
                 return None;
@@ -200,7 +288,14 @@ impl CustomPaintSource for GamePaintSource {
             let fonts_landed = orbital_canvas::system_fonts::supply_missing_from_system() > 0;
             #[cfg(target_arch = "wasm32")]
             let fonts_landed = false;
-            if host.scene() != Some(&node) || fonts_landed {
+            // A frame maps the node only when the component handed over a new one (or fonts landed): cloning and
+            // comparing the whole scene every frame cost 3.5 ms of a phone frame.
+            let fresh = {
+                let cell = self.node.lock().expect("scene node poisoned");
+                (self.mapped != Some(cell.version) || fonts_landed).then(|| (cell.version, cell.node.clone()))
+            };
+            if let Some((version, node)) = fresh {
+                self.mapped = Some(version);
                 if let Err(err) = host.set_scene(node) {
                     tracing::warn!(target: NS, error = %err, "scene refused");
                     return None;
@@ -211,10 +306,14 @@ impl CustomPaintSource for GamePaintSource {
             if let Ok(epoch) = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
                 host.set_epoch_clock(epoch.as_secs_f64() * 1000.0);
             }
-            host.frame_packet()?
+            (host.frame_packet()?, host.has_scene_events())
         };
         let (texture, handle, _, _) = self.target.as_ref()?;
         let ok = renderer.render_packet_to_texture(&packet, texture);
+        if ok {
+            let marked = marked_ready(&self.node.lock().expect("scene node poisoned").node);
+            set_scene_ready(self.scene_key, Some(drawn_ready(marked, orbital_canvas::asset::pending(), unsent)));
+        }
         self.renders += 1;
         if stale || self.renders <= 3 || self.renders % 600 == 0 {
             tracing::info!(
@@ -318,14 +417,25 @@ fn scene_presentation(props: &Value) -> (String, SceneA11y) {
 
 #[allow(non_snake_case)] // dioxus component convention (PascalCase)
 fn SceneCanvas(props: SceneCanvasProps) -> Element {
-    let node_cell = use_hook(|| Arc::new(Mutex::new(props.node.clone())));
+    let node_cell = use_hook(|| Arc::new(Mutex::new(SceneNode { version: 0, node: props.node.clone() })));
     let host = use_hook(|| Arc::new(Mutex::new(SceneHost::new())));
     let held = use_hook(|| Arc::new(AtomicUsize::new(0)));
-    // Feed the node every vdom render; the paint source re-maps when it changes.
-    *node_cell.lock().expect("scene node poisoned") = props.node.clone();
+    // A vdom render hands over a changed node under a new version; the paint source re-maps on a new version only.
+    {
+        let mut cell = node_cell.lock().expect("scene node poisoned");
+        if cell.node != props.node {
+            cell.node = props.node.clone();
+            cell.version += 1;
+        }
+    }
+    let scene_key = use_hook(|| {
+        let key = NEXT_SCENE.fetch_add(1, Ordering::Relaxed);
+        set_scene_ready(key, Some(false));
+        key
+    });
     let id = use_wgpu({
         let (node_cell, host) = (node_cell.clone(), host.clone());
-        move || GamePaintSource::new(node_cell, host)
+        move || GamePaintSource::new(node_cell, scene_key, host)
     });
     use_hook({
         let host = host.clone();
@@ -337,6 +447,7 @@ fn SceneCanvas(props: SceneCanvasProps) -> Element {
         }
     });
     use_drop(move || blitz_traits::canvas_access::unregister_canvas_access(id));
+    use_drop(move || set_scene_ready(scene_key, None));
     let (w, h) = if props.fill_parent {
         (1, 1)
     } else if props.fill_width {
@@ -351,13 +462,13 @@ fn SceneCanvas(props: SceneCanvasProps) -> Element {
         size
     };
     // As the web's OrbitalSceneCanvas: a filling canvas sits in a box that takes the slot's height (a canvas element
-    // itself would fall back to its intrinsic ratio), drawn over the whole box.
+    // itself would fall back to its intrinsic ratio), drawn over the whole box; every touch on it is the scene's.
     let style = if props.fill_parent {
-        format!("display:block;position:absolute;inset:0;width:100%;height:100%;{}", props.inline_style)
+        format!("display:block;position:absolute;inset:0;width:100%;height:100%;touch-action:none;{}", props.inline_style)
     } else if props.fill_width {
-        format!("display:block;width:100%;height:{h}px;{}", props.inline_style)
+        format!("display:block;width:100%;height:{h}px;touch-action:none;{}", props.inline_style)
     } else {
-        props.inline_style.clone()
+        format!("touch-action:none;{}", props.inline_style)
     };
     let sink = props.sink;
     // A repaint queues events of its own (measured text); deliver them on the next UI frame, not on the next pointer move.
@@ -813,6 +924,27 @@ pub fn register_overrides(registry: &mut DioxusPatternRegistry) {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn a_canvas_box_with_no_area_is_not_drawn_and_a_laid_out_box_is() {
+        assert!(!box_has_area(1035, 0), "a box laid out to no height yet (the first frame on a phone) is not drawn");
+        assert!(!box_has_area(0, 2164));
+        assert!(box_has_area(1001, 2164), "control: a laid-out box is drawn");
+        assert!(box_has_area(1, 1), "edge: one pixel is an area");
+    }
+
+    #[test]
+    fn a_ready_frame_counts_only_once_its_assets_have_landed() {
+        assert!(!drawn_ready(true, 2, false), "a ready frame drawn while fonts download is not the laid-out scene");
+        assert!(drawn_ready(true, 0, false), "control: a ready frame with everything landed is");
+        assert!(!drawn_ready(false, 0, false), "control: a frame the program did not mark ready is not");
+    }
+
+    #[test]
+    fn a_ready_frame_that_queued_sizes_the_program_has_not_seen_is_not_ready() {
+        assert!(!drawn_ready(true, 0, true), "the frame measured new sizes: the program lays out again before the page is final");
+        assert!(drawn_ready(true, 0, false), "control: nothing left to tell the program");
+    }
 
     fn touch_scene() -> Mutex<SceneHost> {
         let mut host = SceneHost::new();

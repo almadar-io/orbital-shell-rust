@@ -576,11 +576,13 @@ ${helpers.predefined_type(
     affects="layout",
 )}
 
+// ORBITAL PATCH (stylo 0.8.0, parity): touch-action is enabled under servo so blitz-shell pans a touch only where the page allows it.
 ${helpers.predefined_type(
     "touch-action",
     "TouchAction",
     "computed::TouchAction::auto()",
-    engines="gecko",
+    engines="gecko servo",
+    servo_restyle_damage="repaint",
     animation_type="discrete",
     spec="https://compat.spec.whatwg.org/#touch-action",
     affects="paint",

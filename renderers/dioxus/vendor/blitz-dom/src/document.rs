@@ -1645,6 +1645,24 @@ impl BaseDocument {
         Some(CursorIcon::Default)
     }
 
+    /// ORBITAL PATCH: the axes (x, y) a touch that lands on `node_id` may pan, as a browser reads `touch-action`:
+    /// the intersection over the node and its ancestors, so a `none` anywhere above holds the touch for the page.
+    pub fn touch_pan_axes(&self, node_id: usize) -> (bool, bool) {
+        use style::values::computed::TouchAction;
+        let (mut x, mut y) = (true, true);
+        let mut at = self.nodes.get(node_id);
+        while let Some(node) = at {
+            if let Some(action) = node.primary_styles().map(|styles| styles.clone_touch_action()) {
+                if !action.intersects(TouchAction::AUTO | TouchAction::MANIPULATION) {
+                    x &= action.contains(TouchAction::PAN_X);
+                    y &= action.contains(TouchAction::PAN_Y);
+                }
+            }
+            at = node.parent.and_then(|parent| self.nodes.get(parent));
+        }
+        (x, y)
+    }
+
     pub fn scroll_node_by(&mut self, node_id: usize, x: f64, y: f64) {
         self.scroll_node_by_has_changed(node_id, x, y);
     }

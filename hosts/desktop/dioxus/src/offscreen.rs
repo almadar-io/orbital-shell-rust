@@ -83,7 +83,17 @@ pub fn embedded_font_context() -> parley::FontContext {
 /// it to `path` as a PNG.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn capture_png(path: &std::path::Path, width: u32, height: u32) -> Result<(), String> {
-    capture_with::<anyrender_vello_cpu::VelloCpuImageRenderer>(path, width, height, 1.0)
+    settle_with::<anyrender_vello_cpu::VelloCpuImageRenderer, _>(width, height, 1.0, |_, buffer| write_png(path, width, height, buffer))
+}
+
+/// The axes a touch at CSS point (`x`, `y`) of the settled `width` × `height` app may pan (`touch-action`); `None`
+/// when the point hits nothing.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn touch_pan_axes_at(width: u32, height: u32, x: f32, y: f32) -> Option<(bool, bool)> {
+    settle_with::<anyrender_vello_cpu::VelloCpuImageRenderer, _>(width, height, 1.0, |doc, _| {
+        Ok(doc.hit(x, y).map(|hit| doc.touch_pan_axes(hit.node_id)))
+    })
+    .expect("offscreen settle")
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -94,7 +104,7 @@ pub fn capture_gpu_png(path: &std::path::Path, width: u32, height: u32) -> Resul
 /// `width`×`height` physical pixels at device pixel ratio `scale` (CSS size = physical / `scale`).
 #[cfg(not(target_arch = "wasm32"))]
 pub fn capture_gpu_png_scaled(path: &std::path::Path, width: u32, height: u32, scale: f32) -> Result<(), String> {
-    capture_with::<anyrender_vello::VelloImageRenderer>(path, width, height, scale)
+    settle_with::<anyrender_vello::VelloImageRenderer, _>(width, height, scale, |_, buffer| write_png(path, width, height, buffer))
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -153,12 +163,12 @@ impl blitz_traits::net::NetProvider<blitz_dom::net::Resource> for CaptureNet {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn capture_with<R: OffscreenPaintRegistry>(
-    path: &std::path::Path,
+fn settle_with<R: OffscreenPaintRegistry, T>(
     width: u32,
     height: u32,
     scale: f32,
-) -> Result<(), String> {
+    finish: impl FnOnce(&dioxus_native::DioxusDocument, &[u8]) -> Result<T, String>,
+) -> Result<T, String> {
     use blitz_dom::{Document as _, DocumentConfig};
     use blitz_paint::paint_scene;
     use blitz_traits::shell::{ColorScheme, Viewport};
@@ -284,6 +294,11 @@ fn capture_with<R: OffscreenPaintRegistry>(
         }
         px[3] = 255;
     }
+    finish(&doc, &buffer)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn write_png(path: &std::path::Path, width: u32, height: u32, buffer: &[u8]) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
     }
@@ -292,5 +307,5 @@ fn capture_with<R: OffscreenPaintRegistry>(
     encoder.set_color(png::ColorType::Rgba);
     encoder.set_depth(png::BitDepth::Eight);
     let mut writer = encoder.write_header().map_err(|e| e.to_string())?;
-    writer.write_image_data(&buffer).map_err(|e| e.to_string())
+    writer.write_image_data(buffer).map_err(|e| e.to_string())
 }

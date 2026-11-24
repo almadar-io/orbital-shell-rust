@@ -200,6 +200,8 @@ fn remote_followups(version: Signal<u32>) {
 
 #[cfg(all(feature = "native-http", not(target_arch = "wasm32")))]
 fn remote_frame(version: Signal<u32>) {
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    mobile_identity_events(version);
     let heard = APP.with(|cell| {
         let mut borrow = cell.borrow_mut();
         borrow.as_mut().is_some_and(|state| state.core.drain_host_feed())
@@ -373,38 +375,33 @@ fn painted_trait_content_at(core: &ClientCore, now: web_time::Instant) -> ValueM
         .collect()
 }
 
-/// Root Orbital component. Reads [`APP`], paints `ui_slots` through the registry,
-/// and wires an [`EventSink`] so button clicks drive the shared circuit.
-#[cfg(all(feature = "native-audio", not(target_arch = "wasm32")))]
+/// Why this host could not answer an ask, as the failure route's `kind` and `error` (EXEC-DIST-13).
+#[cfg(all(any(feature = "native-audio", feature = "native-http"), not(target_arch = "wasm32")))]
+pub(crate) struct HostAskFailure {
+    pub kind: &'static str,
+    pub error: String,
+}
+
+/// Settle one of the kernel's asks with this host's answer: base's one route (`host_ask_route`) picks the event and
+/// payload, and the return runs as an ordinary client dispatch.
+#[cfg(all(any(feature = "native-audio", feature = "native-http"), not(target_arch = "wasm32")))]
 fn answer_host_ask(
     ask: orbital_core::client::client_core::PendingHostAsk,
-    answer: Result<(), crate::audio::AudioFailure>,
+    answer: Result<Value, HostAskFailure>,
     version: Signal<u32>,
 ) {
+    use orbital_core::client::client_core::{host_ask_route, HostAskOutcome};
     if let Err(error) = &answer {
         tracing::error!(op = %ask.op, source_trait = %ask.source_trait, kind = error.kind, message = %error.error, "native host ask failed");
     }
     let Some(completion) = ask.completion else {
         return;
     };
-    let event = match &answer {
-        Ok(()) => completion.success.clone(),
-        Err(_) => completion.failure.clone(),
+    let outcome = match answer {
+        Ok(ok) => HostAskOutcome::Ok { ok },
+        Err(error) => HostAskOutcome::Refused { error: error.error, kind: error.kind.to_string() },
     };
-    let Some(event) = event else { return };
-    let payload = if let Err(error) = &answer {
-        orbital_core::client::client_core::host_ask_failure_payload(
-            &completion,
-            &error.error,
-            error.kind,
-        )
-    } else {
-        let mut payload = ValueMap::new();
-        if let Some(key) = &completion.key {
-            payload.insert("key".into(), Value::string(key.as_str()));
-        }
-        Value::object(payload)
-    };
+    let Some((event, payload)) = host_ask_route(&completion, &outcome) else { return };
     let begun = APP.with(|cell| {
         let mut borrow = cell.borrow_mut();
         let state = borrow.as_mut()?;
@@ -456,6 +453,143 @@ fn answer_host_ask(
     remote_followups(version);
 }
 
+/// `auth/sign-in { method: google }` and `auth/sign-out` on the desktop host: the browser hand-off and the keychain
+/// (`sign_in::desktop`); the token goes to the transport's bearer slot and never to the program.
+#[cfg(all(feature = "native-sign-in", not(any(target_os = "android", target_os = "ios", target_arch = "wasm32"))))]
+fn desktop_identity_ask(ask: orbital_core::client::client_core::PendingHostAsk, version: Signal<u32>) {
+    use crate::sign_in::desktop;
+    let Some(site) = desktop::site().map(str::to_string) else {
+        let error = HostAskFailure { kind: "unavailable", error: "this desktop app was started with no --sign-in-site".into() };
+        return answer_host_ask(ask, Err(error), version);
+    };
+    let Some(kernel) = APP.with(|cell| cell.borrow().as_ref().and_then(|state| state.core.client_kernel.clone())) else {
+        let error = HostAskFailure { kind: "unavailable", error: "no client kernel to sign in".into() };
+        return answer_host_ask(ask, Err(error), version);
+    };
+    if ask.op == "auth/sign-out" {
+        desktop::forget(&site);
+        desktop::signed_in().store(false, std::sync::atomic::Ordering::SeqCst);
+        kernel.set_bearer(None);
+        return answer_host_ask(ask, Ok(Value::Null), version);
+    }
+    let method = ask.args.first().and_then(Value::as_object).and_then(|request| request.get("method")).and_then(Value::as_str).map(str::to_string);
+    if method.as_deref() != Some("google") {
+        let error = HostAskFailure { kind: "invalid", error: format!("the desktop host signs in with method google, not {}", method.unwrap_or_default()) };
+        return answer_host_ask(ask, Err(error), version);
+    }
+    spawn_server_leg(
+        move || desktop::sign_in(&site).map(|signed| (site, signed)),
+        move |result| match result {
+            Ok((site, (viewer, tokens))) => {
+                kernel.set_bearer(Some(tokens.id_token.clone()));
+                if let Err(error) = desktop::remember(&site, &tokens.refresh_token) {
+                    tracing::error!(%error, "sign-in: the refresh token was not kept; the next launch signs in again");
+                }
+                let flag = desktop::signed_in();
+                flag.store(true, std::sync::atomic::Ordering::SeqCst);
+                desktop::keep_fresh(site, kernel, tokens, flag);
+                answer_host_ask(ask, Ok(viewer.answer()), version);
+            }
+            Err(error) => answer_host_ask(ask, Err(HostAskFailure { kind: "cancelled", error }), version),
+        },
+    );
+}
+
+/// A viewer the keychain remembers is signed in again at launch, before the first mount: one renewal, then the bearer
+/// is held and kept fresh. With nothing remembered, or a renewal the provider refuses, the app starts signed out.
+#[cfg(all(feature = "native-sign-in", not(any(target_os = "android", target_os = "ios", target_arch = "wasm32"))))]
+fn desktop_restore_sign_in() {
+    use crate::sign_in::desktop;
+    let Some(site) = desktop::site().map(str::to_string) else { return };
+    let Some(refresh) = desktop::recall(&site) else { return };
+    let Some(kernel) = APP.with(|cell| cell.borrow().as_ref().and_then(|state| state.core.client_kernel.clone())) else { return };
+    match desktop::renew(&site, &refresh) {
+        Ok(renewed) => {
+            kernel.set_bearer(Some(renewed.tokens.id_token.clone()));
+            if let Err(error) = desktop::remember(&site, &renewed.tokens.refresh_token) {
+                tracing::error!(%error, "sign-in: the renewed refresh token was not kept");
+            }
+            let flag = desktop::signed_in();
+            flag.store(true, std::sync::atomic::Ordering::SeqCst);
+            desktop::keep_fresh(site, kernel, renewed.tokens, flag);
+        }
+        Err(error) => {
+            tracing::warn!(%error, "sign-in: the remembered viewer could not be renewed; starting signed out");
+            desktop::forget(&site);
+        }
+    }
+}
+
+#[cfg(all(any(target_os = "android", target_os = "ios"), feature = "native-http"))]
+std::thread_local! {
+    /// The `auth/sign-in` or `auth/sign-out` ask waiting on the platform side's answer.
+    static MOBILE_IDENTITY_ASK: RefCell<Option<orbital_core::client::client_core::PendingHostAsk>> = const { RefCell::new(None) };
+}
+
+/// `auth/sign-in { method: google }` and `auth/sign-out` on Android and iOS: the template's `OrbitalSignIn` answers through
+/// [`mobile_identity_events`]; a second ask while one waits is refused.
+#[cfg(all(any(target_os = "android", target_os = "ios"), feature = "native-http"))]
+fn mobile_identity_ask(ask: orbital_core::client::client_core::PendingHostAsk, version: Signal<u32>) {
+    if MOBILE_IDENTITY_ASK.with(|cell| cell.borrow().is_some()) {
+        let error = HostAskFailure { kind: "unavailable", error: "a sign-in is already in progress".into() };
+        return answer_host_ask(ask, Err(error), version);
+    }
+    if ask.op == "auth/sign-in" {
+        let method = ask.args.first().and_then(Value::as_object).and_then(|request| request.get("method")).and_then(Value::as_str).map(str::to_string);
+        if method.as_deref() != Some("google") {
+            let error = HostAskFailure { kind: "invalid", error: format!("the mobile host signs in with method google, not {}", method.unwrap_or_default()) };
+            return answer_host_ask(ask, Err(error), version);
+        }
+    }
+    let started = if ask.op == "auth/sign-in" { crate::mobile_sign_in::request_sign_in() } else { crate::mobile_sign_in::request_sign_out() };
+    match started {
+        Ok(()) => MOBILE_IDENTITY_ASK.with(|cell| *cell.borrow_mut() = Some(ask)),
+        Err(error) => answer_host_ask(ask, Err(HostAskFailure { kind: "unavailable", error }), version),
+    }
+}
+
+/// Apply what the platform side reported: the bearer follows every token, and a waiting ask is answered.
+#[cfg(all(any(target_os = "android", target_os = "ios"), feature = "native-http"))]
+fn mobile_identity_events(version: Signal<u32>) {
+    use crate::mobile_sign_in::SignInEvent;
+    let events = crate::mobile_sign_in::drain();
+    if events.is_empty() {
+        return;
+    }
+    let kernel = APP.with(|cell| cell.borrow().as_ref().and_then(|state| state.core.client_kernel.clone()));
+    for event in events {
+        match event {
+            SignInEvent::Token(token) => {
+                if let Some(kernel) = &kernel {
+                    kernel.set_bearer(token);
+                }
+            }
+            SignInEvent::SignedIn { uid, email, display_name, id_token } => {
+                if let Some(kernel) = &kernel {
+                    kernel.set_bearer(Some(id_token));
+                }
+                let viewer = crate::sign_in::Viewer { uid, email, display_name, expires_at_secs: 0 };
+                if let Some(ask) = MOBILE_IDENTITY_ASK.with(|cell| cell.borrow_mut().take()) {
+                    answer_host_ask(ask, Ok(viewer.answer()), version);
+                }
+            }
+            SignInEvent::Failed { kind, message } => {
+                if let Some(ask) = MOBILE_IDENTITY_ASK.with(|cell| cell.borrow_mut().take()) {
+                    answer_host_ask(ask, Err(HostAskFailure { kind, error: message }), version);
+                }
+            }
+            SignInEvent::SignedOut => {
+                if let Some(kernel) = &kernel {
+                    kernel.set_bearer(None);
+                }
+                if let Some(ask) = MOBILE_IDENTITY_ASK.with(|cell| cell.borrow_mut().take()) {
+                    answer_host_ask(ask, Ok(Value::Null), version);
+                }
+            }
+        }
+    }
+}
+
 fn effective_theme(core: &ClientCore, host_theme: Option<&str>) -> (String, ThemeMode) {
     if let Some(key) = host_theme {
         return (
@@ -484,6 +618,8 @@ pub fn App() -> Element {
     use_effect(move || {
         let remote = APP.with(|cell| cell.borrow().as_ref().is_some_and(|state| state.remote));
         if remote {
+            #[cfg(all(feature = "native-sign-in", not(any(target_os = "android", target_os = "ios"))))]
+            desktop_restore_sign_in();
             remote_mount(version);
         }
     });
@@ -493,7 +629,7 @@ pub fn App() -> Element {
     FRAME_CALLBACK
         .with(|cell| *cell.borrow_mut() = Some(use_callback(move |()| remote_frame(version))));
     let _tick = *version.read();
-    #[cfg(all(feature = "native-audio", not(target_arch = "wasm32")))]
+    #[cfg(all(any(feature = "native-audio", feature = "native-http"), not(target_arch = "wasm32")))]
     use_effect(move || {
         let _tick = *version.read();
         let asks = APP.with(|cell| {
@@ -503,6 +639,7 @@ pub fn App() -> Element {
                 .unwrap_or_default()
         });
         for ask in asks {
+            #[cfg(feature = "native-audio")]
             if ask.op.starts_with("audio/") {
                 let answer = crate::audio::host_ask(
                     ask.source_trait.clone(),
@@ -516,15 +653,26 @@ pub fn App() -> Element {
                             error: "native audio worker stopped before answering".into(),
                         })
                     });
+                    let result = result.map(|()| Value::Null).map_err(|failure| HostAskFailure { kind: failure.kind, error: failure.error });
                     answer_host_ask(ask, result, version);
                 });
-            } else {
-                let error = crate::audio::AudioFailure {
-                    kind: "unavailable",
-                    error: format!("native host has no action for host-ask `{}`", ask.op),
-                };
-                answer_host_ask(ask, Err(error), version);
+                continue;
             }
+            #[cfg(all(feature = "native-sign-in", not(any(target_os = "android", target_os = "ios"))))]
+            if ask.op == "auth/sign-in" || ask.op == "auth/sign-out" {
+                desktop_identity_ask(ask, version);
+                continue;
+            }
+            #[cfg(all(any(target_os = "android", target_os = "ios"), feature = "native-http"))]
+            if ask.op == "auth/sign-in" || ask.op == "auth/sign-out" {
+                mobile_identity_ask(ask, version);
+                continue;
+            }
+            let error = HostAskFailure {
+                kind: "unavailable",
+                error: format!("native host has no action for host-ask `{}`", ask.op),
+            };
+            answer_host_ask(ask, Err(error), version);
         }
     });
 

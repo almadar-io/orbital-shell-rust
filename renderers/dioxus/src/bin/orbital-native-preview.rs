@@ -1,7 +1,7 @@
 //! Desktop preview for the dioxus-native (Blitz) render path.
 //!
 //! Usage:
-//!   orbital-native-preview <schema.orb> [--css <file.css>]... [--theme NAME] [--server URL] [--events A,B,C] [--event NAME PAYLOAD_JSON]... [--capture-gpu PNG WIDTH HEIGHT]
+//!   orbital-native-preview <schema.orb> [--css <file.css>]... [--theme NAME] [--server URL] [--sign-in-site URL] [--events A,B,C] [--event NAME PAYLOAD_JSON]... [--capture-gpu PNG WIDTH HEIGHT]
 //!
 //! Resolves the schema with `orb resolve` (the pipeline `orb verify` runs),
 //! seeds singleton entities, opens a Blitz window, and optionally fires a
@@ -86,6 +86,16 @@ fn main() {
             }
             "--theme" => {
                 theme = Some(args.next().expect("--theme requires a name"));
+            }
+            "--sign-in-site" => {
+                let site = args.next().expect("--sign-in-site requires the app's web site URL");
+                #[cfg(feature = "native-sign-in")]
+                orbital_client_dioxus::sign_in::desktop::set_site(site);
+                #[cfg(not(feature = "native-sign-in"))]
+                {
+                    eprintln!("--sign-in-site requires the native-sign-in feature: {site}");
+                    std::process::exit(2);
+                }
             }
             "--server" => {
                 let url = args.next().expect("--server requires a URL");
@@ -199,11 +209,11 @@ fn main() {
     );
     #[cfg(feature = "native-http")]
     if let Some(url) = server_url {
-        orbital_client_dioxus::native::start_server(&schema_json, &url, css_texts, &title)
+        orbital_client_dioxus::native::start_server(&schema_json, &url, None, css_texts, &title)
             .unwrap_or_else(|e| panic!("native server start failed: {e}"));
         return;
     }
-    orbital_client_dioxus::native::start(&schema_json, css_texts, &title)
+    orbital_client_dioxus::native::start(&schema_json, None, css_texts, &title)
         .unwrap_or_else(|e| panic!("native start failed: {e}"));
 }
 

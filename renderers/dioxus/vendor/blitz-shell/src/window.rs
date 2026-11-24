@@ -87,6 +87,9 @@ pub struct View<Rend: WindowRenderer> {
     pub touch_last: Option<(f32, f32)>,
     #[cfg(any(target_os = "android", target_os = "ios"))]
     pub touch_scrolling: bool,
+    /// ORBITAL PATCH: the axes the active touch may pan, read from `touch-action` where it landed.
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    pub touch_pan: (bool, bool),
     pub animation_timer: Option<Instant>,
     pub is_visible: bool,
     /// ORBITAL PATCH: the input-method cursor area last sent for a focused canvas text box.
@@ -154,6 +157,8 @@ impl<Rend: WindowRenderer> View<Rend> {
             touch_last: None,
             #[cfg(any(target_os = "android", target_os = "ios"))]
             touch_scrolling: false,
+            #[cfg(any(target_os = "android", target_os = "ios"))]
+            touch_pan: (true, true),
             is_visible: winit_window.is_visible().unwrap_or(true),
             ime_area: None,
             #[cfg(feature = "accessibility")]
@@ -474,6 +479,7 @@ impl<Rend: WindowRenderer> View<Rend> {
                         self.touch_start = Some((x, y));
                         self.touch_last = Some((x, y));
                         self.touch_scrolling = false;
+                        self.touch_pan = self.doc.get_hover_node_id().map_or((true, true), |node_id| self.doc.touch_pan_axes(node_id));
                         self.button_pointer(MouseEventButton::Main, ElementState::Pressed);
                     }
                     TouchPhase::Moved => {
@@ -482,15 +488,18 @@ impl<Rend: WindowRenderer> View<Rend> {
                             return;
                         }
                         if let (Some((start_x, start_y)), Some((last_x, last_y))) = (self.touch_start, self.touch_last) {
-                            if !self.touch_scrolling && (x - start_x).hypot(y - start_y) > 8.0 {
+                            let (pan_x, pan_y) = self.touch_pan;
+                            if !self.touch_scrolling && (pan_x || pan_y) && (x - start_x).hypot(y - start_y) > 8.0 {
                                 self.touch_scrolling = true;
                                 self.leave_pointer();
                             }
                             if self.touch_scrolling {
+                                let dx = if pan_x { (x - last_x) as f64 } else { 0.0 };
+                                let dy = if pan_y { (y - last_y) as f64 } else { 0.0 };
                                 let changed = if let Some(node_id) = self.doc.get_hover_node_id() {
-                                    self.doc.scroll_node_by_has_changed(node_id, (x - last_x) as f64, (y - last_y) as f64)
+                                    self.doc.scroll_node_by_has_changed(node_id, dx, dy)
                                 } else {
-                                    self.doc.scroll_viewport_by_has_changed((x - last_x) as f64, (y - last_y) as f64)
+                                    self.doc.scroll_viewport_by_has_changed(dx, dy)
                                 };
                                 if changed {
                                     self.request_redraw();
