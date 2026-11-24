@@ -52,12 +52,12 @@ pub fn android_is_editable_at(x: f32, y: f32) -> bool {
 /// window.
 /// `lazy`: where the program's lazy pages are read from (EXEC-LOAD-2); `None` opens no lazy page.
 pub fn start(
-    schema_json: &str,
+    schema: orbital_core::schema::OrbitalSchema,
     lazy: Option<std::sync::Arc<dyn orbital_core::runtime::LazySource>>,
     css_texts: Vec<String>,
     title: &str,
 ) -> Result<(), String> {
-    let (orbitals, traits) = shell::mount_core(schema_json)?;
+    let (orbitals, traits) = shell::mount_schema(schema)?;
     if let Some(source) = lazy {
         shell::with_core(|core| core.set_lazy_source(source))?;
     }
@@ -69,14 +69,12 @@ pub fn start(
 /// Mount the same client circuit with a server bridge supplied by the host.
 #[cfg(feature = "native-http")]
 pub fn start_server(
-    schema_json: &str,
+    schema: orbital_core::schema::OrbitalSchema,
     server_url: &str,
     lazy: Option<std::sync::Arc<dyn orbital_core::runtime::LazySource>>,
     css_texts: Vec<String>,
     title: &str,
 ) -> Result<(), String> {
-    let schema = orbital_core::schema::parse_schema(schema_json)
-        .map_err(|e| format!("parse schema: {e}"))?;
     let bridge = Arc::new(orbital_core::client::SyncServerBridge::new(server_url));
     let (orbitals, traits) = shell::mount_remote(schema, bridge)?;
     if let Some(source) = lazy {

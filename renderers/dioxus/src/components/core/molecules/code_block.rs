@@ -558,6 +558,7 @@ fn buffer_surface(
 #[allow(non_snake_case)]
 fn Block(input: BlockProps) -> Element {
     let view = input.view.as_view();
+    let caller_sink = view.sink;
     let props = &input.props;
     let registry = &input.registry;
     let mut wrap = use_signal(|| get_bool_or(props, "wordWrap", false));
@@ -619,8 +620,8 @@ fn Block(input: BlockProps) -> Element {
         .get("cursor")
         .is_some_and(|cursor| cursor.as_object().is_some())
     {
-        let sink = view.sink;
-        return buffer_surface(props, sink, surface, hovered);
+        // The buffer's events are the caller's; `view` here carries the block's own toolbar relay.
+        return buffer_surface(props, caller_sink, surface, hovered);
     }
 
     let language = get_string_or(props, "language", "text");
@@ -1149,14 +1150,34 @@ mod buffer_dom_tests {
         doc.resolve(0.0);
     }
 
+    /// A point Blitz's own hit test resolves to the node `id`: a cell is an inline span with no layout box of its own,
+    /// so the point is found along its line instead of at the span's (unlaid) box.
+    fn point_on(doc: &DioxusDocument, id: usize) -> (f32, f32) {
+        let line = doc.get_node(id).unwrap().parent.unwrap();
+        let line = doc.get_node(line).unwrap();
+        let origin = line.absolute_position(0.0, 0.0);
+        let y = origin.y + line.final_layout.size.height / 2.0;
+        (0..(line.final_layout.size.width as i32))
+            .map(|dx| origin.x + dx as f32 + 0.5)
+            .find(|x| doc.hit(*x, y).is_some_and(|hit| hit.node_id == id))
+            .map(|x| (x, y))
+            .expect("the cell is hit somewhere on its line")
+    }
+
     fn mouse_at(doc: &mut DioxusDocument, selector: &str, down: bool) {
         let id = doc.query_selector(selector).unwrap().unwrap();
+        let (x, y) = point_on(doc, id);
         let mut mouse = doc
             .get_node(id)
             .unwrap()
             .synthetic_click_event_data(Modifiers::default());
+        mouse.x = x;
+        mouse.y = y;
         mouse.buttons = MouseEventButtons::None;
         if down {
+            // A press lands on the hovered node, so the pointer reaches the cell first, as a real one does.
+            doc.handle_ui_event(UiEvent::MouseMove(mouse.clone()));
+            EVENTS.with(|events| events.borrow_mut().clear());
             mouse.buttons = MouseEventButtons::Primary;
             doc.handle_ui_event(UiEvent::MouseDown(mouse));
         } else {

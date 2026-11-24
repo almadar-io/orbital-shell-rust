@@ -207,13 +207,14 @@ fn main() {
             .and_then(|n| n.to_str())
             .unwrap_or("schema")
     );
+    let schema = orbital_core::schema::parse_schema(&schema_json).unwrap_or_else(|e| panic!("parse schema failed: {e}"));
     #[cfg(feature = "native-http")]
     if let Some(url) = server_url {
-        orbital_client_dioxus::native::start_server(&schema_json, &url, None, css_texts, &title)
+        orbital_client_dioxus::native::start_server(schema, &url, None, css_texts, &title)
             .unwrap_or_else(|e| panic!("native server start failed: {e}"));
         return;
     }
-    orbital_client_dioxus::native::start(&schema_json, None, css_texts, &title)
+    orbital_client_dioxus::native::start(schema, None, css_texts, &title)
         .unwrap_or_else(|e| panic!("native start failed: {e}"));
 }
 

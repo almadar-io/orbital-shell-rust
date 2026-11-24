@@ -25,6 +25,11 @@ pub const NS: &str = "almadar::ui_wasm_dioxus";
 pub fn mount_core(schema_json: &str) -> Result<(usize, usize), String> {
     let schema = orbital_core::schema::parse_schema(schema_json)
         .map_err(|e| format!("parse schema: {e}"))?;
+    mount_schema(schema)
+}
+
+/// [`mount_core`] of a program the host already parsed.
+pub fn mount_schema(schema: OrbitalSchema) -> Result<(usize, usize), String> {
     let server = KernelBridge::new(schema.clone()).map_err(|e| format!("server bridge: {e}"))?;
     Ok(mount_circuit(client_circuit(schema, Arc::new(server))?))
 }

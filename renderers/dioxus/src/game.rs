@@ -25,6 +25,7 @@ use dioxus::prelude::*;
 use dioxus_native::use_wgpu;
 use orbital_canvas::mappers::{learning, scene};
 use orbital_canvas::{SceneHost, SharedDeviceRenderer};
+use orbital_canvas::scene_doc::SceneDoc;
 use orbital_core::Value;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -33,8 +34,11 @@ use web_time::Instant;
 /// Log namespace — mirrors `@almadar/logger`'s `almadar:ui-native-game`.
 const NS: &str = "almadar::ui_native_game";
 
-/// The last scene node each pattern converted, with the kernel value and theme it came from.
-type Converted = (Value, Option<serde_json::Value>, Arc<serde_json::Value>);
+/// The last scene each pattern converted, with the kernel value and theme it came from and each top-level drawable's
+/// conversion by the kernel allocation it came from (valid while that value is held here).
+type Converted = (Value, Option<serde_json::Value>, SceneDoc, DrawableJson);
+
+type DrawableJson = std::collections::HashMap<usize, Arc<serde_json::Value>>;
 
 thread_local! {
     static CONVERTED: std::cell::RefCell<std::collections::HashMap<String, Converted>> = std::cell::RefCell::new(std::collections::HashMap::new());
@@ -48,32 +52,81 @@ fn same_allocation(a: &Value, b: &Value) -> bool {
     }
 }
 
-/// The node a scene pattern's host draws: its props under its `type`, plus the kernel's theme. Every dispatch renders
-/// the page again, so a scene the kernel handed over unchanged reuses the node it was converted to.
+/// The node a scene pattern's host draws: its props under its `type`, plus the kernel's theme.
 fn scene_node(
     pattern: &str,
     props: &Value,
     canvas_theme: Option<&serde_json::Value>,
 ) -> Arc<serde_json::Value> {
+    Arc::clone(&scene_doc(pattern, props, canvas_theme, false).frame)
+}
+
+/// [`scene_node`] as the host takes it. Every dispatch renders the page again: a scene the kernel handed over
+/// unchanged reuses its conversion, and with `split` a scene the 2D walk draws keeps its drawables apart, each converted
+/// once per kernel allocation (an unchanged drawable is the previous paint's allocation) and shared from then on.
+fn scene_doc(pattern: &str, props: &Value, canvas_theme: Option<&serde_json::Value>, split: bool) -> SceneDoc {
     let reused = CONVERTED.with(|c| {
         c.borrow()
             .get(pattern)
-            .filter(|(from, theme, _)| same_allocation(from, props) && theme.as_ref() == canvas_theme)
-            .map(|(_, _, node)| Arc::clone(node))
+            .filter(|(from, theme, doc, _)| {
+                same_allocation(from, props) && theme.as_ref() == canvas_theme && doc.drawables.is_some() == split
+            })
+            .map(|(_, _, doc, _)| doc.clone())
     });
-    if let Some(node) = reused {
-        return node;
+    if let Some(doc) = reused {
+        return doc;
     }
-    let node = Arc::new(scene::host_node(
-        pattern,
-        serde_json::to_value(props).unwrap_or_default(),
-        canvas_theme,
-    ));
+    let listed = match props.get("drawables") {
+        Some(Value::Array(items)) if split => Some(items),
+        _ => None,
+    };
+    let mode = props.get("mode").and_then(Value::as_str);
+    let Some(listed) = listed.filter(|_| scene::pattern_walks_drawables(Some(pattern), mode)) else {
+        let node = Arc::new(scene::host_node(pattern, serde_json::to_value(props).unwrap_or_default(), canvas_theme));
+        let doc = SceneDoc::whole(node);
+        CONVERTED.with(|c| c.borrow_mut().insert(pattern.to_string(), (props.clone(), canvas_theme.cloned(), doc.clone(), DrawableJson::new())));
+        return doc;
+    };
     CONVERTED.with(|c| {
-        c.borrow_mut()
-            .insert(pattern.to_string(), (props.clone(), canvas_theme.cloned(), Arc::clone(&node)))
-    });
-    node
+        let mut converted = c.borrow_mut();
+        let mut before = converted.get_mut(pattern).map(|(_, _, _, kept)| std::mem::take(kept)).unwrap_or_default();
+        let mut now = DrawableJson::with_capacity(listed.len());
+        let drawables = listed
+            .iter()
+            .map(|item| {
+                let at = match item {
+                    Value::Object(fields) => Some(orbital_core::Shared::as_ptr(fields) as usize),
+                    _ => None,
+                };
+                let kept = at.and_then(|at| before.remove(&at));
+                let json = kept.unwrap_or_else(|| {
+                    Arc::new(orbital_canvas::exact_ints::exact_ints(serde_json::to_value(item).unwrap_or_default()))
+                });
+                if let Some(at) = at {
+                    now.insert(at, Arc::clone(&json));
+                }
+                json
+            })
+            .collect();
+        let frame = match props {
+            Value::Object(fields) => serde_json::Value::Object(
+                fields
+                    .iter()
+                    .filter(|(key, _)| key.as_str() != "drawables")
+                    .map(|(key, field)| (key.to_string(), serde_json::to_value(field).unwrap_or_default()))
+                    .collect(),
+            ),
+            _ => serde_json::Value::Object(Default::default()),
+        };
+        let doc = SceneDoc {
+            frame: Arc::new(scene::host_node(pattern, frame, canvas_theme)),
+            drawables: Some(Arc::new(drawables)),
+        };
+        let previous = converted.insert(pattern.to_string(), (props.clone(), canvas_theme.cloned(), doc.clone(), now));
+        drop(before);
+        drop(previous);
+        doc
+    })
 }
 
 /// The canvas element's size in CSS px: the scene's own size. A scene the native painter refuses is logged and
@@ -116,7 +169,7 @@ fn fills_width(node: &serde_json::Value) -> bool {
 /// The scene node the component last rendered, versioned so the paint source maps it only when it changed.
 struct SceneNode {
     version: u64,
-    node: Arc<serde_json::Value>,
+    node: SceneDoc,
 }
 
 /// Each mounted scene canvas and whether it has drawn a frame its program marked `ready`: the web's `data-orb-ready`,
@@ -326,7 +379,7 @@ impl CustomPaintSource for GamePaintSource {
             };
             if let Some((version, node)) = fresh {
                 self.mapped = Some(version);
-                if let Err(err) = host.set_scene(node) {
+                if let Err(err) = host.set_scene_doc(node) {
                     tracing::warn!(target: NS, error = %err, "scene refused");
                     return None;
                 }
@@ -341,7 +394,7 @@ impl CustomPaintSource for GamePaintSource {
         let (texture, handle, _, _) = self.target.as_ref()?;
         let ok = renderer.render_packet_to_texture(&packet, texture);
         if ok {
-            let marked = marked_ready(&self.node.lock().expect("scene node poisoned").node);
+            let marked = marked_ready(&self.node.lock().expect("scene node poisoned").node.frame);
             set_scene_ready(self.scene_key, Some(drawn_ready(marked, orbital_canvas::asset::pending(), unsent)));
         }
         self.renders += 1;
@@ -369,7 +422,8 @@ impl CustomPaintSource for GamePaintSource {
 /// shared wgpu device, and a tap routed through the scene host to the trait as an event.
 #[derive(Props, Clone, PartialEq)]
 struct SceneCanvasProps {
-    node: Arc<serde_json::Value>,
+    #[props(into)]
+    node: SceneDoc,
     sink: Option<crate::renderer::EventSink>,
     fill_parent: bool,
     #[props(default)]
@@ -481,12 +535,12 @@ fn SceneCanvas(props: SceneCanvasProps) -> Element {
     let (w, h) = if props.fill_parent {
         (1, 1)
     } else if props.fill_width {
-        let Some((_, h)) = canvas_size(&props.node) else {
+        let Some((_, h)) = canvas_size(&props.node.frame) else {
             return rsx! {};
         };
         (1, h)
     } else {
-        let Some(size) = canvas_size(&props.node) else {
+        let Some(size) = canvas_size(&props.node.frame) else {
             return rsx! {};
         };
         size
@@ -788,18 +842,18 @@ impl DioxusPatternRenderer for SceneCanvasRenderer {
         view: &DioxusView<'_>,
         registry: &DioxusPatternRegistry,
     ) -> Element {
-        let node = scene_node(self.name, props, view.canvas_theme.as_ref());
+        let node = scene_doc(self.name, props, view.canvas_theme.as_ref(), true);
         if learning::CARD_PATTERNS.contains(&self.name) {
-            return learning_card(self.name, props, node, view, registry);
+            return learning_card(self.name, props, Arc::clone(&node.frame), view, registry);
         }
         if self.name == "graph-view" {
-            return graph_view_frame(props, node, view);
+            return graph_view_frame(props, Arc::clone(&node.frame), view);
         }
         let (class_name, a11y) = scene_presentation(props);
         let inline_style = style_with_props("", props);
-        let fill_parent = fills_container(&node);
-        let fill_width = fills_width(&node);
-        let min_height = min_height(&node);
+        let fill_parent = fills_container(&node.frame);
+        let fill_width = fills_width(&node.frame);
+        let min_height = min_height(&node.frame);
         rsx! { SceneCanvas { node, sink: view.sink, fill_parent, fill_width, min_height, a11y, class_name, inline_style } }
     }
 }
@@ -976,6 +1030,32 @@ mod tests {
         assert_eq!(next["width"], json!(641));
         let theme = json!({ "palette": { "ink": "#000" } });
         assert!(!Arc::ptr_eq(&next, &scene_node("canvas", &changed, Some(&theme))), "control: a new theme is converted");
+    }
+
+    #[test]
+    fn a_split_scene_is_the_whole_conversion_and_shares_every_drawable_the_kernel_kept() {
+        let first: Value = serde_json::from_value(json!({ "mode": "2d", "width": 2.0,
+            "drawables": [{ "id": "a", "x": 1.0 }, { "id": "b", "x": 2 }] })).unwrap();
+        let shown = scene_doc("split-reuse", &first, None, true);
+        let whole = scene::host_node("split-reuse", serde_json::to_value(&first).unwrap(), None);
+        assert_eq!(shown.node(), whole, "the split scene is exactly the whole conversion, ints and type included");
+        let changed: Value = serde_json::from_value(json!({ "mode": "2d", "width": 2.0,
+            "drawables": [{ "id": "a", "x": 1.0 }, { "id": "b", "x": 3 }] })).unwrap();
+        let next = scene_doc("split-reuse", &changed.clone().shared_with(&first), None, true);
+        let (before, after) = (shown.drawables.as_ref().unwrap(), next.drawables.as_ref().unwrap());
+        assert!(Arc::ptr_eq(&before[0], &after[0]), "the drawable the kernel kept is the previous conversion");
+        assert!(!Arc::ptr_eq(&before[1], &after[1]), "control: the changed drawable is converted anew");
+        assert_eq!(after[1]["x"], json!(3));
+        let unshared = scene_doc("split-reuse", &changed, None, true);
+        assert!(!Arc::ptr_eq(&after[0], &unshared.drawables.as_ref().unwrap()[0]), "control: an equal but new allocation is converted");
+    }
+
+    #[test]
+    fn a_scene_the_two_d_walk_does_not_draw_is_kept_whole() {
+        let props: Value = serde_json::from_value(json!({ "mode": "3d", "drawables": [{ "id": "a" }] })).unwrap();
+        assert!(scene_doc("canvas", &props, None, true).drawables.is_none(), "a 3D canvas keeps its drawables inside");
+        let flat: Value = serde_json::from_value(json!({ "mode": "2d", "drawables": [{ "id": "a" }] })).unwrap();
+        assert!(scene_doc("canvas", &flat, None, true).drawables.is_some(), "control: a 2D canvas splits");
     }
 
     #[test]
