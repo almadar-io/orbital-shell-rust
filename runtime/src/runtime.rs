@@ -909,7 +909,8 @@ fn stamp_hops(response: &mut orbital_core::EventResponse, outcomes: &[(String, P
 }
 
 /// Send the tab whose request caused `ran` the client view of its sealed `response`, as a dispatch it folds
-/// (EXEC-QUEUE-10, EXEC-AGENT-1). With no asking tab, a trait of no orbital, or a trait no browser runs, nothing is sent.
+/// (EXEC-QUEUE-10, EXEC-AGENT-1). With no asking tab, a trait of no orbital, or a completion that stepped nothing a browser
+/// runs ([`RuntimeKernel::completion_push`]), nothing is sent.
 fn push_host_dispatch(
     tx: &broadcast::Sender<LiveBroadcastItem>,
     kernel: Option<&RuntimeKernel>,
@@ -921,9 +922,13 @@ fn push_host_dispatch(
     let (Some(client_id), Some(orbital)) = (client_id, orbital) else {
         return;
     };
-    if kernel.is_some_and(|k| !k.browser_runs(ran.trait_name)) {
-        return;
-    }
+    let response = match kernel {
+        Some(kernel) => match kernel.completion_push(ran.trait_name, response) {
+            Some(response) => response,
+            None => return,
+        },
+        None => response,
+    };
     let (response, payload) = match kernel {
         Some(kernel) => (kernel.client_view(response), kernel.browser_completion_payload(ran.trait_name, ran.payload)),
         None => (response, ran.payload.clone()),
@@ -6741,6 +6746,74 @@ mod tests {
             }]
         }))
         .expect("the program parses")
+    }
+
+    /// A page trait `Panel` forwards `GO` to the boot-only `Bg`, which reads a file under a key; the read's completion makes
+    /// `Bg` emit `UPLOADED`, which `Panel` hears and answers with `SHOWN`, an emit the browser-run `Viewer` listens to.
+    fn boot_upload_to_a_page_trait(dir: &std::path::Path) -> orbital_core::OrbitalSchema {
+        let path = dir.join("photo.bin");
+        std::fs::write(&path, "bytes").unwrap();
+        serde_json::from_value(serde_json::json!({
+            "name": "Upload",
+            "osGrants": { "fs": [{ "glob": format!("{}/**", dir.display()), "modes": ["read"] }] },
+            "typeContractVersion": 1,
+            "orbitals": [{
+                "name": "Main",
+                "entity": { "name": "View", "persistence": "runtime", "fields": [{ "name": "id", "type": "string" }] },
+                "traits": [{
+                    "name": "Panel", "linkedEntity": "View",
+                    "listens": [{ "event": "UPLOADED", "triggers": "GOT", "source": { "kind": "orbital", "orbital": "Jobs", "trait": "Bg" } }],
+                    "emits": [{ "event": "FWD", "scope": "external" }, { "event": "SHOWN", "scope": "external" }],
+                    "stateMachine": { "states": [{ "name": "idle", "isInitial": true }], "transitions": [
+                        { "from": "idle", "to": "idle", "event": "GO", "effects": [["emit", "FWD", {}]] },
+                        { "from": "idle", "to": "idle", "event": "GOT", "effects": [["emit", "SHOWN", {}]] }] }
+                }, {
+                    "name": "Viewer", "linkedEntity": "View", "dispatch": "client",
+                    "listens": [{ "event": "SHOWN", "triggers": "SHOW", "source": { "kind": "trait", "trait": "Panel" } }],
+                    "stateMachine": { "states": [{ "name": "idle", "isInitial": true }], "transitions": [{ "from": "idle", "to": "idle", "event": "SHOW" }] }
+                }],
+                "pages": [{ "name": "Home", "path": "/", "traits": [{ "ref": "Panel" }, { "ref": "Viewer" }] }]
+            }, {
+                "name": "Jobs",
+                "entity": { "name": "Job", "persistence": "runtime", "fields": [{ "name": "id", "type": "string" }] },
+                "traits": [{
+                    "name": "Bg", "linkedEntity": "Job",
+                    "listens": [{ "event": "FWD", "triggers": "WORK", "source": { "kind": "orbital", "orbital": "Main", "trait": "Panel" } }],
+                    "emits": [{ "event": "UPLOADED", "scope": "external" }],
+                    "stateMachine": { "states": [{ "name": "idle", "isInitial": true }], "transitions": [
+                        { "from": "idle", "to": "idle", "event": "WORK", "effects": [["os/read-file", path.to_str().unwrap(), { "key": "up-1", "emit": { "success": "DONE" } }]] },
+                        { "from": "idle", "to": "idle", "event": "DONE", "effects": [["emit", "UPLOADED", {}]] }] }
+                }],
+                "pages": [{ "name": "Boot", "path": "", "protocol": "boot", "traits": [{ "ref": "Bg" }] }]
+            }]
+        }))
+        .expect("the program parses")
+    }
+
+    // G-ORBITAL-CORE-240, EXEC-DIST-9 (owner ruling 2026-11-25): a boot trait's completion that a tab asked for steps that
+    // tab's page trait, and the tab is sent that step, so its browser-run listener hears the page trait's emit.
+    #[test]
+    fn a_boot_traits_completion_pushes_the_askers_page_trait_step_to_the_asking_tab() {
+        let dir = scratch_dir();
+        let runtime = Host::new(Arc::new(DriverAdapter::memory())).shared();
+        runtime.register_schema(boot_upload_to_a_page_trait(&dir)).unwrap();
+        let mut live = runtime.subscribe_live();
+        dispatch_request(&runtime, serde_json::json!({ "orbital": "Main", "targetTrait": "Panel", "event": "GO", "clientId": "tab-1" })).unwrap();
+        let pushed = items_of(&mut live, "DONE");
+        assert_eq!(pushed.len(), 1, "the asking tab is sent the completion: {pushed:?}");
+        let frame = serde_json::to_value(live_item_value(&pushed[0])).unwrap();
+        let emitted: Vec<&str> = frame["response"]["emittedEvents"].as_array().map(|e| e.iter().filter_map(|e| e["event"].as_str()).collect()).unwrap_or_default();
+        assert!(emitted.contains(&"SHOWN"), "the page trait's emit for the browser rides the push: {frame}");
+    }
+
+    #[test]
+    fn control_a_boot_traits_completion_no_tab_asked_for_pushes_no_dispatch() {
+        let dir = scratch_dir();
+        let runtime = Host::new(Arc::new(DriverAdapter::memory())).shared();
+        runtime.register_schema(boot_upload_to_a_page_trait(&dir)).unwrap();
+        let mut live = runtime.subscribe_live();
+        dispatch_request(&runtime, serde_json::json!({ "orbital": "Main", "targetTrait": "Panel", "event": "GO" })).unwrap();
+        assert!(items_of(&mut live, "DONE").iter().all(|item| item.dispatch.is_none()), "no tab asked: no dispatch is pushed");
     }
 
     fn items_of(live: &mut broadcast::Receiver<LiveBroadcastItem>, event: &str) -> Vec<LiveBroadcastItem> {

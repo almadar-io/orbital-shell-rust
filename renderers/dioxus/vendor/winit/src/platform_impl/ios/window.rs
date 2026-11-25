@@ -6,7 +6,7 @@ use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, NSObject};
 use objc2::{class, declare_class, msg_send, msg_send_id, mutability, ClassType, DeclaredClass};
 use objc2_foundation::{
-    CGFloat, CGPoint, CGRect, CGSize, MainThreadBound, MainThreadMarker, NSObjectProtocol,
+    CGFloat, CGPoint, CGRect, CGSize, MainThreadBound, MainThreadMarker,
 };
 use objc2_ui_kit::{
     UIApplication, UICoordinateSpace, UIResponder, UIScreen, UIScreenOverscanCompensation,
@@ -116,7 +116,6 @@ pub struct Inner {
     window: Retained<WinitUIWindow>,
     view_controller: Retained<WinitViewController>,
     view: Retained<WinitView>,
-    gl_or_metal_backed: bool,
 }
 
 impl Inner {
@@ -142,7 +141,9 @@ impl Inner {
     }
 
     pub fn request_redraw(&self) {
-        if self.gl_or_metal_backed {
+        // ORBITAL PATCH: the view draws only through the Metal layer the GPU renderer attaches, and `setNeedsDisplay`
+        // asked from inside `drawRect:` (where an animating frame asks for the next) is dropped, so every redraw is queued.
+        {
             let mtm = MainThreadMarker::new().unwrap();
             // `setNeedsDisplay` does nothing on UIViews which are directly backed by CAEAGLLayer or
             // CAMetalLayer. Ordinarily the OS sets up a bunch of UIKit state before
@@ -154,8 +155,6 @@ impl Inner {
             //
             // https://developer.apple.com/documentation/uikit/uiview/1622437-setneedsdisplay?language=objc
             app_state::queue_gl_or_metal_redraw(mtm, self.window.clone());
-        } else {
-            self.view.setNeedsDisplay();
         }
     }
 
@@ -528,9 +527,6 @@ impl Window {
 
         let view = WinitView::new(mtm, &window_attributes, frame);
 
-        let gl_or_metal_backed =
-            view.isKindOfClass(class!(CAMetalLayer)) || view.isKindOfClass(class!(CAEAGLLayer));
-
         let view_controller = WinitViewController::new(mtm, &window_attributes, &view);
         let window = WinitUIWindow::new(mtm, &window_attributes, frame, &view_controller);
 
@@ -566,7 +562,7 @@ impl Window {
             );
         }
 
-        let inner = Inner { window, view_controller, view, gl_or_metal_backed };
+        let inner = Inner { window, view_controller, view };
         Ok(Window { inner: MainThreadBound::new(inner, mtm) })
     }
 

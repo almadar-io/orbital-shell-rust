@@ -25,6 +25,8 @@ pub mod renderer;
 #[path = "../../../hosts/desktop/dioxus/src/offscreen.rs"]
 pub mod offscreen;
 pub mod probe_target;
+#[cfg(test)]
+mod ios_host_patches;
 pub mod styles;
 pub mod tw_merge;
 pub(crate) mod timer;

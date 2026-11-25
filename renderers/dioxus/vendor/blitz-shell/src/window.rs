@@ -77,7 +77,7 @@ pub struct View<Rend: WindowRenderer> {
     pub mouse_pos: (f32, f32),
     /// ORBITAL PATCH: multi-touch. Every finger on the screen, by its winit id.
     pub touches: Vec<BlitzTouchPoint>,
-    #[cfg(target_os = "android")]
+    #[cfg(any(target_os = "android", target_os = "ios"))]
     pub ime_allowed: bool,
     #[cfg(any(target_os = "android", target_os = "ios"))]
     pub active_touch_id: Option<u64>,
@@ -110,7 +110,8 @@ impl<Rend: WindowRenderer> View<Rend> {
     ) -> Self {
         let winit_window = Arc::from(event_loop.create_window(config.attributes).unwrap());
 
-        #[cfg(not(target_os = "android"))]
+        // ORBITAL PATCH: on iOS allowing the IME raises the keyboard, so it follows focus (sync_ime_to_focus).
+        #[cfg(not(any(target_os = "android", target_os = "ios")))]
         winit_window.set_ime_allowed(true);
 
         // Create viewport
@@ -147,7 +148,7 @@ impl<Rend: WindowRenderer> View<Rend> {
             buttons: MouseEventButtons::None,
             mouse_pos: Default::default(),
             touches: Vec::new(),
-            #[cfg(target_os = "android")]
+            #[cfg(any(target_os = "android", target_os = "ios"))]
             ime_allowed: false,
             #[cfg(any(target_os = "android", target_os = "ios"))]
             active_touch_id: None,
@@ -274,6 +275,8 @@ impl<Rend: WindowRenderer> View<Rend> {
         let animation_time = self.current_animation_time();
         self.doc.resolve(animation_time);
         self.sync_canvas_ime();
+        #[cfg(target_os = "ios")]
+        self.sync_ime_to_focus();
         #[cfg(feature = "accessibility")]
         if self.accessibility_dirty.replace(false) {
             self.accessibility.update_tree(&self.doc);
@@ -362,7 +365,7 @@ impl<Rend: WindowRenderer> View<Rend> {
         }
         if request.action == accesskit::Action::Focus {
             self.doc.set_focus_to(request.target_node.0 as usize);
-            #[cfg(target_os = "android")]
+            #[cfg(any(target_os = "android", target_os = "ios"))]
             self.sync_ime_to_focus();
             self.request_redraw();
             return;
@@ -404,6 +407,23 @@ impl<Rend: WindowRenderer> View<Rend> {
             }));
         self.buttons = MouseEventButtons::None;
         self.request_redraw();
+    }
+
+    /// ORBITAL PATCH: the keyboard is up only while a text input or a canvas text box holds focus.
+    #[cfg(target_os = "ios")]
+    fn sync_ime_to_focus(&mut self) {
+        let text_input_focused = self
+            .doc
+            .get_focussed_node_id()
+            .and_then(|id| self.doc.get_node(id))
+            .and_then(|node| node.element_data())
+            .and_then(|element| element.text_input_data())
+            .is_some();
+        let allowed = text_input_focused || self.canvas_input().is_some();
+        if allowed != self.ime_allowed {
+            self.window.set_ime_allowed(allowed);
+            self.ime_allowed = allowed;
+        }
     }
 
     #[cfg(target_os = "android")]
@@ -457,7 +477,7 @@ impl<Rend: WindowRenderer> View<Rend> {
             ElementState::Pressed => UiEvent::MouseDown(event),
             ElementState::Released => UiEvent::MouseUp(event),
         });
-        #[cfg(target_os = "android")]
+        #[cfg(any(target_os = "android", target_os = "ios"))]
         self.sync_ime_to_focus();
         self.request_redraw();
     }
@@ -578,6 +598,8 @@ impl<Rend: WindowRenderer> View<Rend> {
                 if !full_state_from_ime {
                     self.sync_ime_to_focus();
                 }
+                #[cfg(target_os = "ios")]
+                self.sync_ime_to_focus();
                 self.request_redraw();
             },
             WindowEvent::ModifiersChanged(new_state) => {
@@ -639,7 +661,7 @@ impl<Rend: WindowRenderer> View<Rend> {
                 };
 
                 self.doc.handle_ui_event(event);
-                #[cfg(target_os = "android")]
+                #[cfg(any(target_os = "android", target_os = "ios"))]
                 self.sync_ime_to_focus();
                 self.request_redraw();
             }

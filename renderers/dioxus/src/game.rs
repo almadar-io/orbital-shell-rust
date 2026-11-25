@@ -1283,6 +1283,13 @@ mod tests {
     }
 
     #[test]
+    fn every_window_paints_with_the_area_coverage_the_captures_check() {
+        let window = anyrender_vello::VelloRendererOptions::default().antialiasing_method;
+        assert_eq!(window, vello::AaConfig::Area);
+        assert_ne!(window, vello::AaConfig::Msaa16);
+    }
+
+    #[test]
     fn the_page_compositor_draws_the_same_pixels_without_indirect_dispatch() {
         let indirect = vello_pixels(true);
         let direct = vello_pixels(false);

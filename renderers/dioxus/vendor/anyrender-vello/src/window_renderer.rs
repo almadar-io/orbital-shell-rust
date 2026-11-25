@@ -48,11 +48,9 @@ impl Default for VelloRendererOptions {
             features: None,
             limits: None,
             base_color: Color::WHITE,
-            // ORBITAL PATCH: Android paints with area coverage; vello's MSAA16 fine pass draws corrupt tiles on Adreno.
-            #[cfg(target_os = "android")]
+            // ORBITAL PATCH: every window paints with area coverage, as the web host and the GPU captures do;
+            // vello's MSAA16 fine pass draws corrupt tiles on Adreno and on Apple's iOS GPUs.
             antialiasing_method: AaConfig::Area,
-            #[cfg(not(target_os = "android"))]
-            antialiasing_method: AaConfig::Msaa16,
         }
     }
 }

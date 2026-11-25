@@ -1,7 +1,7 @@
 //! Desktop preview for the dioxus-native (Blitz) render path.
 //!
 //! Usage:
-//!   orbital-native-preview <schema.orb> [--css <file.css>]... [--theme NAME] [--server URL] [--sign-in-site URL] [--events A,B,C] [--event NAME PAYLOAD_JSON]... [--capture-gpu PNG WIDTH HEIGHT]
+//!   orbital-native-preview <schema.orb> [--css <file.css>]... [--theme NAME] [--server URL] [--sign-in-site URL] [--events A,B,C] [--event NAME PAYLOAD_JSON]... [--capture-gpu PNG WIDTH HEIGHT] [--capture-scale DPR]
 //!
 //! Resolves the schema with `orb resolve` (the pipeline `orb verify` runs),
 //! seeds singleton entities, opens a Blitz window, and optionally fires a
@@ -29,6 +29,7 @@ fn main() {
     let mut css_paths: Vec<String> = Vec::new();
     let mut events: Vec<(String, String)> = Vec::new();
     let mut gpu_capture: Option<(String, u32, u32)> = None;
+    let mut capture_scale: f32 = 1.0;
     let mut export_client: Option<String> = None;
     let mut theme: Option<String> = None;
     #[cfg(feature = "native-http")]
@@ -81,6 +82,13 @@ fn main() {
                     .expect("positive capture height");
                 gpu_capture = Some((path, width, height));
             }
+            "--capture-scale" => {
+                capture_scale = args
+                    .next()
+                    .and_then(|v| v.parse::<f32>().ok())
+                    .filter(|n| *n > 0.0)
+                    .expect("--capture-scale requires a positive device pixel ratio");
+            }
             "--export-client" => {
                 export_client = Some(args.next().expect("--export-client requires a path"));
             }
@@ -117,7 +125,7 @@ fn main() {
         }
     }
     let Some(schema_path) = schema_path else {
-        eprintln!("usage: orbital-native-preview <schema.orb> [--css <file.css>]... [--theme NAME] [--server URL] [--events A,B,C] [--event NAME PAYLOAD_JSON]... [--capture-gpu PNG WIDTH HEIGHT]");
+        eprintln!("usage: orbital-native-preview <schema.orb> [--css <file.css>]... [--theme NAME] [--server URL] [--events A,B,C] [--event NAME PAYLOAD_JSON]... [--capture-gpu PNG WIDTH HEIGHT] [--capture-scale DPR]");
         std::process::exit(2);
     };
 
@@ -193,10 +201,11 @@ fn main() {
         }
         if let Some((path, width, height)) = gpu_capture {
             orbital_client_dioxus::app::CSS_TEXT.with(|cell| *cell.borrow_mut() = css_texts);
-            orbital_client_dioxus::offscreen::capture_gpu_png(
+            orbital_client_dioxus::offscreen::capture_gpu_png_scaled(
                 std::path::Path::new(&path),
                 width,
                 height,
+                capture_scale,
             )
             .unwrap_or_else(|e| panic!("GPU capture {path} failed: {e}"));
         }
