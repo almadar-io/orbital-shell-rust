@@ -987,6 +987,7 @@ impl WebHandle {
                                             use_cpu: false,
                                             num_init_threads: std::num::NonZeroUsize::new(1),
                                             pipeline_cache: None,
+                                            indirect_dispatch: vello::indirect_dispatch_supported(&surface.device_handle.adapter),
                                         },
                                     ) {
                                         Ok(v) => {

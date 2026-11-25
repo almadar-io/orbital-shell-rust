@@ -21,6 +21,19 @@ use crate::platform_impl::platform::DEVICE_ID;
 use crate::platform_impl::KeyEventExtra;
 use crate::window::{WindowAttributes, WindowId as RootWindowId};
 
+/// ORBITAL PATCH: the part of `window`'s bounds its safe-area insets leave, in the window's space.
+fn safe_area(window: &objc2_ui_kit::UIWindow) -> CGRect {
+    let bounds = window.bounds();
+    let insets = window.safeAreaInsets();
+    CGRect {
+        origin: CGPoint { x: bounds.origin.x + insets.left, y: bounds.origin.y + insets.top },
+        size: objc2_foundation::CGSize {
+            width: bounds.size.width - insets.left - insets.right,
+            height: bounds.size.height - insets.top - insets.bottom,
+        },
+    }
+}
+
 pub struct WinitViewState {
     pinch_gesture_recognizer: RefCell<Option<Retained<UIPinchGestureRecognizer>>>,
     doubletap_gesture_recognizer: RefCell<Option<Retained<UITapGestureRecognizer>>>,
@@ -68,10 +81,12 @@ declare_class!(
             let _: () = unsafe { msg_send![super(self), layoutSubviews] };
 
             let window = self.window().unwrap();
-            let window_bounds = window.bounds();
+            // ORBITAL PATCH: the view (its Metal layer, layout and touches) covers the window's safe area, as a
+            // mobile browser lays a page out below the status bar and above the home indicator.
+            let window_bounds = safe_area(&window);
             let screen = window.screen();
             let screen_space = screen.coordinateSpace();
-            let screen_frame = self.convertRect_toCoordinateSpace(window_bounds, &screen_space);
+            let screen_frame = window.convertRect_toCoordinateSpace(window_bounds, &screen_space);
             let scale_factor = screen.scale();
             let size = crate::dpi::LogicalSize {
                 width: screen_frame.size.width as f64,
@@ -479,7 +494,8 @@ impl WinitView {
         let mut touch_events = Vec::new();
         let os_supports_force = app_state::os_capabilities().force_touch;
         for touch in touches {
-            let logical_location = touch.locationInView(None);
+            // ORBITAL PATCH: the view is inset to the safe area, so a touch is read in its own space.
+            let logical_location = touch.locationInView(Some(self));
             let touch_type = touch.r#type();
             let force = if os_supports_force {
                 let trait_collection = self.traitCollection();

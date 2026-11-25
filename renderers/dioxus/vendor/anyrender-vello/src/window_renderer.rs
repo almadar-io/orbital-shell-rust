@@ -149,6 +149,8 @@ impl WindowRenderer for VelloWindowRenderer {
                 num_init_threads: DEFAULT_THREADS,
                 // TODO: add pipeline cache
                 pipeline_cache: None,
+                // ORBITAL PATCH: the iOS simulator's Metal has no indirect dispatch.
+                indirect_dispatch: vello::indirect_dispatch_supported(&render_surface.device_handle.adapter),
             },
         )
         .unwrap();

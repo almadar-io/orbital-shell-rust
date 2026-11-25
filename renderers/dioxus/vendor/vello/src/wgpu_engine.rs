@@ -41,6 +41,8 @@ pub(crate) struct WgpuEngine {
     /// The `Texture` should have the same size as the `Image`.
     pub(crate) image_overrides: HashMap<u64, wgpu::TexelCopyTextureInfoBase<Texture>>,
     pipeline_cache: Option<PipelineCache>,
+    /// ORBITAL PATCH: the device cannot dispatch indirectly; see `RendererOptions::indirect_dispatch`.
+    direct_dispatch: bool,
 }
 
 enum PipelineState {
@@ -147,11 +149,64 @@ enum TransientBuf<'a> {
     Gpu(&'a Buffer),
 }
 
+/// ORBITAL PATCH: the usages of a storage buffer a shader binds; `INDIRECT` only on a device that dispatches from it.
+fn storage_usage(direct_dispatch: bool) -> BufferUsages {
+    let usage = BufferUsages::COPY_SRC | BufferUsages::COPY_DST | BufferUsages::STORAGE;
+    if direct_dispatch {
+        usage
+    } else {
+        usage | BufferUsages::INDIRECT
+    }
+}
+
+/// ORBITAL PATCH: submit what `encoder` recorded, read the three workgroup counts at `offset` in `args` back, and
+/// leave a fresh encoder in its place: the direct stand-in for an indirect dispatch.
+fn read_workgroups(
+    device: &Device,
+    queue: &Queue,
+    encoder: &mut CommandEncoder,
+    args: &Buffer,
+    offset: u64,
+    label: &'static str,
+) -> (u32, u32, u32) {
+    let readback = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("vello.indirect_readback"),
+        size: 12,
+        usage: BufferUsages::MAP_READ | BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+    encoder.copy_buffer_to_buffer(args, offset, &readback, 0, 12);
+    let recorded = std::mem::replace(
+        encoder,
+        device.create_command_encoder(&CommandEncoderDescriptor { label: Some(label) }),
+    );
+    queue.submit(Some(recorded.finish()));
+    let (sender, receiver) = std::sync::mpsc::channel();
+    readback
+        .slice(..)
+        .map_async(wgpu::MapMode::Read, move |mapped| drop(sender.send(mapped)));
+    device
+        .poll(wgpu::PollType::Wait)
+        .expect("wait for the indirect dispatch arguments");
+    receiver
+        .recv()
+        .expect("the readback map completes")
+        .expect("map the indirect dispatch arguments");
+    let counts = {
+        let bytes = readback.slice(..).get_mapped_range();
+        let words: &[u32] = bytemuck::cast_slice(&bytes);
+        (words[0], words[1], words[2])
+    };
+    readback.unmap();
+    counts
+}
+
 impl WgpuEngine {
-    pub fn new(use_cpu: bool, pipeline_cache: Option<PipelineCache>) -> Self {
+    pub fn new(use_cpu: bool, pipeline_cache: Option<PipelineCache>, direct_dispatch: bool) -> Self {
         Self {
             use_cpu,
             pipeline_cache,
+            direct_dispatch,
             ..Default::default()
         }
     }
@@ -571,6 +626,7 @@ impl WgpuEngine {
                                 &mut encoder,
                                 &wgpu_shader.bind_group_layout,
                                 bindings,
+                                self.direct_dispatch,
                             );
                             let mut cpass =
                                 encoder.begin_compute_pass(&ComputePassDescriptor::default());
@@ -622,6 +678,7 @@ impl WgpuEngine {
                                 &mut encoder,
                                 &wgpu_shader.bind_group_layout,
                                 bindings,
+                                self.direct_dispatch,
                             );
                             transient_map.materialize_gpu_buf_for_indirect(
                                 &mut self.bind_map,
@@ -629,6 +686,7 @@ impl WgpuEngine {
                                 device,
                                 queue,
                                 proxy,
+                                self.direct_dispatch,
                             );
                             let mut cpass =
                                 encoder.begin_compute_pass(&ComputePassDescriptor::default());
@@ -651,7 +709,20 @@ impl WgpuEngine {
                             let buf = self.bind_map.get_gpu_buf(proxy.id).ok_or(
                                 Error::UnavailableBufferUsed(proxy.name, "indirect dispatch"),
                             )?;
-                            cpass.dispatch_workgroups_indirect(buf, *offset);
+                            if self.direct_dispatch {
+                                drop(cpass);
+                                let (x, y, z) = read_workgroups(device, queue, &mut encoder, buf, *offset, label);
+                                if x == 0 || y == 0 || z == 0 {
+                                    continue;
+                                }
+                                let mut cpass =
+                                    encoder.begin_compute_pass(&ComputePassDescriptor::default());
+                                cpass.set_pipeline(pipeline);
+                                cpass.set_bind_group(0, &bind_group, &[]);
+                                cpass.dispatch_workgroups(x, y, z);
+                            } else {
+                                cpass.dispatch_workgroups_indirect(buf, *offset);
+                            }
                             #[cfg(feature = "wgpu-profiler")]
                             profiler.end_query(&mut cpass, query);
                         }
@@ -673,6 +744,7 @@ impl WgpuEngine {
                         &mut encoder,
                         &shader.bind_group_layout,
                         &draw_params.resources,
+                        self.direct_dispatch,
                     );
                     let render_target = transient_map
                         .materialize_external_image_for_render_pass(&draw_params.target);
@@ -1036,12 +1108,10 @@ impl BindMapBuffer {
         device: &Device,
         queue: &Queue,
         pool: &mut ResourcePool,
+        direct_dispatch: bool,
     ) {
         if let MaterializedBuffer::Cpu(cpu_buf) = &self.buffer {
-            let usage = BufferUsages::COPY_SRC
-                | BufferUsages::COPY_DST
-                | BufferUsages::STORAGE
-                | BufferUsages::INDIRECT;
+            let usage = storage_usage(direct_dispatch);
             let buf = pool.get_buf(proxy.size, proxy.name, usage, device);
             queue.write_buffer(&buf, 0, &cpu_buf.borrow());
             self.buffer = MaterializedBuffer::Gpu(buf);
@@ -1074,10 +1144,11 @@ impl<'a> TransientBindMap<'a> {
         device: &Device,
         queue: &Queue,
         buf: &BufferProxy,
+        direct_dispatch: bool,
     ) {
         if !self.bufs.contains_key(&buf.id) {
             if let Some(b) = bind_map.buf_map.get_mut(&buf.id) {
-                b.upload_if_needed(buf, device, queue, pool);
+                b.upload_if_needed(buf, device, queue, pool, direct_dispatch);
             }
         }
     }
@@ -1100,6 +1171,7 @@ impl<'a> TransientBindMap<'a> {
         encoder: &mut CommandEncoder,
         layout: &BindGroupLayout,
         bindings: &[ResourceProxy],
+        direct_dispatch: bool,
     ) -> BindGroup {
         for proxy in bindings {
             match proxy {
@@ -1115,11 +1187,7 @@ impl<'a> TransientBindMap<'a> {
                     match bind_map.buf_map.entry(proxy.id) {
                         Entry::Vacant(v) => {
                             // TODO: only some buffers will need indirect & vertex, but does it hurt?
-                            let usage = BufferUsages::COPY_SRC
-                                | BufferUsages::COPY_DST
-                                | BufferUsages::STORAGE
-                                | BufferUsages::INDIRECT
-                                | BufferUsages::VERTEX;
+                            let usage = storage_usage(direct_dispatch) | BufferUsages::VERTEX;
                             let buf = pool.get_buf(proxy.size, proxy.name, usage, device);
                             if bind_map.pending_clears.remove(&proxy.id) {
                                 encoder.clear_buffer(&buf, 0, None);
@@ -1130,7 +1198,7 @@ impl<'a> TransientBindMap<'a> {
                             });
                         }
                         Entry::Occupied(mut o) => {
-                            o.get_mut().upload_if_needed(proxy, device, queue, pool);
+                            o.get_mut().upload_if_needed(proxy, device, queue, pool, direct_dispatch);
                         }
                     }
                 }

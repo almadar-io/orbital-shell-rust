@@ -51,6 +51,8 @@ impl ImageRenderer for VelloImageRenderer {
                 num_init_threads: DEFAULT_THREADS,
                 antialiasing_support: vello::AaSupport::area_only(),
                 pipeline_cache: None,
+                // ORBITAL PATCH: the iOS simulator's Metal has no indirect dispatch.
+                indirect_dispatch: vello::indirect_dispatch_supported(&buffer_renderer.device_handle.adapter),
             },
         )
         .expect("Got non-Send/Sync error from creating renderer");

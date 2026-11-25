@@ -81,6 +81,12 @@ impl WinitUIWindow {
         view_controller: &UIViewController,
     ) -> Retained<Self> {
         let this: Retained<Self> = unsafe { msg_send_id![mtm.alloc(), initWithFrame: frame] };
+        // ORBITAL PATCH: the bands outside the safe-area view take the system background, so the status bar stays
+        // legible in light and dark mode.
+        unsafe {
+            let background: *mut AnyObject = msg_send![class!(UIColor), systemBackgroundColor];
+            let _: () = msg_send![&*this, setBackgroundColor: background];
+        }
 
         this.setRootViewController(Some(view_controller));
 

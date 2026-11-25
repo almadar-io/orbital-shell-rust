@@ -1222,4 +1222,77 @@ mod tests {
             }
         );
     }
+
+    /// The page compositor without indirect dispatch (the iOS simulator's Metal) draws what it draws with it.
+    fn vello_pixels(indirect_dispatch: bool) -> Vec<u8> {
+        use vello::{kurbo, peniko, wgpu as vw};
+        let runtime = tokio::runtime::Builder::new_current_thread().build().unwrap();
+        let instance = vw::Instance::default();
+        let adapter = runtime.block_on(instance.request_adapter(&vw::RequestAdapterOptions::default())).expect("a GPU adapter");
+        assert!(vello::indirect_dispatch_supported(&adapter), "control: this Mac's GPU dispatches indirectly");
+        let (device, queue) = runtime.block_on(adapter.request_device(&vw::DeviceDescriptor::default())).unwrap();
+        let options = vello::RendererOptions { indirect_dispatch, antialiasing_support: vello::AaSupport::area_only(), ..Default::default() };
+        let mut renderer = vello::Renderer::new(&device, options).unwrap();
+        let mut scene = vello::Scene::new();
+        let red = peniko::Color::from_rgba8(200, 40, 40, 255);
+        scene.fill(peniko::Fill::NonZero, kurbo::Affine::IDENTITY, red, None, &kurbo::Circle::new((32.0, 32.0), 20.0));
+        let blue = peniko::Color::from_rgba8(30, 60, 220, 255);
+        scene.fill(peniko::Fill::NonZero, kurbo::Affine::IDENTITY, blue, None, &kurbo::Rect::new(4.0, 44.0, 60.0, 60.0));
+        for layer in 0..6u32 {
+            let clip = kurbo::RoundedRect::new(70.0 + f64::from(layer) * 30.0, 4.0, 250.0, 250.0, 9.0);
+            scene.push_layer(peniko::Mix::Normal, 0.9, kurbo::Affine::IDENTITY, &clip);
+            for i in 0..700u32 {
+                let (x, y) = (f64::from((i * 37 + layer * 11) % 190) + 64.0, f64::from((i * 53 + layer * 7) % 250));
+                let color = peniko::Color::from_rgba8((i * 7 % 255) as u8, (layer * 40 % 255) as u8, (i * 13 % 255) as u8, 200);
+                let stroke = kurbo::Stroke::new(1.0 + f64::from(i % 3));
+                scene.stroke(&stroke, kurbo::Affine::rotate(f64::from(i) * 0.01), color, None, &kurbo::Circle::new((x, y), 2.0 + f64::from(i % 9)));
+            }
+            scene.pop_layer();
+        }
+        let extent = vw::Extent3d { width: 256, height: 256, depth_or_array_layers: 1 };
+        let texture = device.create_texture(&vw::TextureDescriptor {
+            label: None,
+            size: extent,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: vw::TextureDimension::D2,
+            format: vw::TextureFormat::Rgba8Unorm,
+            usage: vw::TextureUsages::STORAGE_BINDING | vw::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let view = texture.create_view(&vw::TextureViewDescriptor::default());
+        let params = vello::RenderParams { base_color: peniko::Color::WHITE, width: 256, height: 256, antialiasing_method: vello::AaConfig::Area };
+        renderer.render_to_texture(&device, &queue, &scene, &view, &params).unwrap();
+        let readback = device.create_buffer(&vw::BufferDescriptor {
+            label: None,
+            size: 1024 * 256,
+            usage: vw::BufferUsages::MAP_READ | vw::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let mut encoder = device.create_command_encoder(&vw::CommandEncoderDescriptor::default());
+        encoder.copy_texture_to_buffer(
+            texture.as_image_copy(),
+            vw::TexelCopyBufferInfo { buffer: &readback, layout: vw::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(1024), rows_per_image: None } },
+            extent,
+        );
+        queue.submit(Some(encoder.finish()));
+        readback.slice(..).map_async(vw::MapMode::Read, |mapped| mapped.unwrap());
+        device.poll(vw::PollType::Wait).unwrap();
+        let pixels = readback.slice(..).get_mapped_range().to_vec();
+        pixels
+    }
+
+    #[test]
+    fn the_page_compositor_draws_the_same_pixels_without_indirect_dispatch() {
+        let indirect = vello_pixels(true);
+        let direct = vello_pixels(false);
+        let at = |pixels: &[u8], x: usize, y: usize| pixels[y * 1024 + x * 4..y * 1024 + x * 4 + 4].to_vec();
+        assert_eq!(at(&indirect, 32, 32), [200, 40, 40, 255], "control: the indirect path draws the circle");
+        assert_eq!(at(&indirect, 32, 52), [30, 60, 220, 255], "control: and the bar");
+        assert_eq!(at(&indirect, 1, 1), [255, 255, 255, 255], "control: over the base colour");
+        // Overlapping translucent strokes blend in GPU order, so two runs of the same path differ by a level or two.
+        let off = |a: &[u8], b: &[u8]| a.chunks(4).zip(b.chunks(4)).filter(|(p, q)| p.iter().zip(q.iter()).any(|(x, y)| x.abs_diff(*y) > 4)).count();
+        assert_eq!(off(&vello_pixels(true), &indirect), 0, "control: the indirect path draws the same picture twice");
+        assert_eq!(off(&direct, &indirect), 0, "the direct-dispatch path draws the picture the indirect path draws, thousands of clipped paths included");
+    }
 }

@@ -402,6 +402,21 @@ pub struct RendererOptions {
     ///
     /// For much more discussion of expected usage patterns, see the documentation on that type.
     pub pipeline_cache: Option<wgpu::PipelineCache>,
+
+    /// ORBITAL PATCH: false on a device without wgpu's `INDIRECT_EXECUTION` downlevel flag (the iOS simulator's
+    /// Metal): an indirect dispatch reads its workgroup counts back and dispatches them directly. See
+    /// [`indirect_dispatch_supported`].
+    pub indirect_dispatch: bool,
+}
+
+/// ORBITAL PATCH: whether `adapter` can dispatch compute work from a GPU buffer, the value
+/// [`RendererOptions::indirect_dispatch`] takes for its device.
+#[cfg(feature = "wgpu")]
+pub fn indirect_dispatch_supported(adapter: &wgpu::Adapter) -> bool {
+    adapter
+        .get_downlevel_capabilities()
+        .flags
+        .contains(wgpu::DownlevelFlags::INDIRECT_EXECUTION)
 }
 
 #[cfg(feature = "wgpu")]
@@ -415,6 +430,7 @@ impl Default for RendererOptions {
             #[cfg(not(target_os = "macos"))]
             num_init_threads: None,
             pipeline_cache: None,
+            indirect_dispatch: true,
         }
     }
 }
@@ -430,7 +446,7 @@ struct RenderResult {
 impl Renderer {
     /// Creates a new renderer for the specified device.
     pub fn new(device: &Device, options: RendererOptions) -> Result<Self> {
-        let mut engine = WgpuEngine::new(options.use_cpu, options.pipeline_cache.clone());
+        let mut engine = WgpuEngine::new(options.use_cpu, options.pipeline_cache.clone(), !options.indirect_dispatch);
         // If we are running in parallel (i.e. the number of threads is not 1)
         if options.num_init_threads != NonZeroUsize::new(1) {
             #[cfg(not(target_arch = "wasm32"))]
@@ -593,7 +609,7 @@ impl Renderer {
     #[doc(hidden)] // End-users of Vello should not have `hot_reload` enabled.
     pub async fn reload_shaders(&mut self, device: &Device) -> Result<(), Error> {
         device.push_error_scope(wgpu::ErrorFilter::Validation);
-        let mut engine = WgpuEngine::new(self.options.use_cpu, self.options.pipeline_cache.clone());
+        let mut engine = WgpuEngine::new(self.options.use_cpu, self.options.pipeline_cache.clone(), !self.options.indirect_dispatch);
         // We choose not to initialise these shaders in parallel, to ensure the error scope works correctly
         let shaders = shaders::full_shaders(device, &mut engine, &self.options)?;
         #[cfg(feature = "debug_layers")]
