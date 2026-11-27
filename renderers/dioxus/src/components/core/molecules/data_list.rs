@@ -71,6 +71,14 @@ fn label_for(text: String, labels: Option<&Value>) -> String {
         .unwrap_or(text)
 }
 
+/// `emptyMessage: ""` declares a list that says nothing when empty; a declared title, description or action still shows.
+fn says_nothing_when_empty(props: &Value) -> bool {
+    get_string(props, "emptyMessage").is_some_and(|text| text.is_empty())
+        && get_string(props, "emptyTitle").is_none_or(|text| text.is_empty())
+        && props.get("emptyDescription").is_none()
+        && props.get("emptyAction").is_none()
+}
+
 fn empty_pattern(props: &Value) -> Value {
     let mut fields = vec![(
         "title".to_string(),
@@ -386,6 +394,9 @@ fn DataListBody(p: DataListBodyProps) -> Element {
         return rsx! { div { class: "text-center py-8", {text} } };
     }
     if rows.is_empty() {
+        if says_nothing_when_empty(props) {
+            return rsx! {};
+        }
         return render(empty_pattern(props));
     }
 
@@ -1434,6 +1445,21 @@ mod tests {
 
     fn row(sender: &str, at: &str) -> Value {
         object_value([("sender", Value::string(sender)), ("at", Value::string(at))])
+    }
+
+    #[test]
+    fn an_empty_string_message_says_nothing_when_the_list_is_empty() {
+        let quiet = object_value([("emptyMessage", Value::string(""))]);
+        assert!(says_nothing_when_empty(&quiet));
+        assert!(!says_nothing_when_empty(&object_value::<&str>([])), "control: no message shows the default");
+        assert!(
+            !says_nothing_when_empty(&object_value([("emptyMessage", Value::string("No channels"))])),
+            "control: a declared message shows"
+        );
+        assert!(
+            !says_nothing_when_empty(&object_value([("emptyMessage", Value::string("")), ("emptyTitle", Value::string("Nothing yet"))])),
+            "edge: a declared title still shows"
+        );
     }
 
     #[test]
