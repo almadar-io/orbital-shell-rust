@@ -1,6 +1,8 @@
 //! The native program host: one `orbital_core::RuntimeKernel` with the native ports a program asks for, the host every
 //! native consumer boots a program on (`orb run`, `cli-*` programs, `orb mcp --program`, the add-ons, the generated Rust app).
 
+#[path = "live_replay.rs"]
+mod live_replay;
 #[path = "trace.rs"]
 mod trace;
 use trace::TraceJournal;
@@ -63,6 +65,9 @@ pub struct HostConfig {
     pub clock: Option<orbital_core::runtime::DispatchClock>,
     /// Where the program's `cwd`/`home`/`exe-dir`/`env` grants and paths are anchored; `None` is this process's.
     pub anchors: Option<orbital_core::runtime::os_host::OsAnchors>,
+    /// How long a session whose live stream never opened may stay quiet before the kernel frees it (EXEC-DIST-9);
+    /// `None` never frees one. The guests this host opens get the same.
+    pub unconnected_session_expiry: Option<std::time::Duration>,
 }
 
 impl std::fmt::Debug for HostConfig {
@@ -75,6 +80,7 @@ impl std::fmt::Debug for HostConfig {
             .field("substrate", &self.substrate)
             .field("clock", &self.clock.as_ref().map(|_| "pinned"))
             .field("anchors", &self.anchors)
+            .field("unconnected_session_expiry", &self.unconnected_session_expiry)
             .finish()
     }
 }
@@ -153,15 +159,19 @@ impl SelfSubstrate {
         if let Some(guest) = options.get("guest").and_then(Value::as_str) {
             return Some(runtime.kernel.guest_live_source(guest, &options).unwrap_or_else(|| Box::new(|| StreamPoll::Ended)));
         }
-        Some(host_live_stream(&runtime, client_id))
+        let since = options.get("since").and_then(Value::as_str).map(str::to_string);
+        Some(host_live_stream(&runtime, client_id, since))
     }
 }
 
 /// `host`'s live broadcast for the connection `client_id`, as `orb serve`'s `/api/events` carries it: an item goes to the
 /// stream when it would go to that connection (`LiveBroadcastItem::delivered_to`), a peer's row only when the identity bound to
 /// the `client_id` session (the anonymous viewer when none is) may read it, never the stream's own `client_id`'s.
-fn host_live_stream(runtime: &Arc<Host>, client_id: Option<String>) -> orbital_core::runtime::native_host::SubstrateSource {
+fn host_live_stream(runtime: &Arc<Host>, client_id: Option<String>, since: Option<String>) -> orbital_core::runtime::native_host::SubstrateSource {
     use orbital_core::runtime::os_host::completion::StreamPoll;
+    if let Some(client) = client_id.clone() {
+        return client_live_stream(runtime, client, since);
+    }
     let mut receiver = runtime.subscribe_live();
     let host = Arc::downgrade(runtime);
     let _stream = client_id.as_deref().map(|session| runtime.kernel.open_session_stream(session));
@@ -183,6 +193,35 @@ fn host_live_stream(runtime: &Arc<Host>, client_id: Option<String>) -> orbital_c
         };
         if item.delivered_to(client_id.as_deref(), readable) {
             return StreamPoll::Item(live_item_value(&item));
+        }
+    })
+}
+
+/// [`host_live_stream`] for a named client, from its mailbox: every frame carries its `id` (`<boot>-<n>`), and a stream
+/// opened with `since` resumes after that frame, so what was made while the client had no stream is not lost.
+fn client_live_stream(runtime: &Arc<Host>, client: String, since: Option<String>) -> orbital_core::runtime::native_host::SubstrateSource {
+    use orbital_core::runtime::os_host::completion::StreamPoll;
+    let mut mail = runtime.live_mail.open(&client, since.as_deref(), || runtime.subscribe_live(), |session| runtime.kernel.session_ended(session));
+    let host = Arc::downgrade(runtime);
+    let _stream = runtime.kernel.open_session_stream(&client);
+    Box::new(move || {
+        let _held = &_stream;
+        let Some(runtime) = host.upgrade() else { return StreamPoll::Ended };
+        let admit = |item: &LiveBroadcastItem| {
+            item.delivered_to(Some(&client), |item| {
+                let _session = runtime.kernel.enter_session(&client);
+                runtime.kernel.session_viewer().is_ok_and(|viewer| runtime.live_item_visible_to(item, &viewer))
+            })
+        };
+        match mail.poll(admit) {
+            live_replay::MailPoll::Frame(id, item) => {
+                let Value::Object(fields) = live_item_value(&item) else { return StreamPoll::Idle };
+                let mut fields = ValueMap::clone(&fields);
+                fields.insert("id".to_string().into(), Value::string(id));
+                StreamPoll::Item(Value::object(fields))
+            }
+            live_replay::MailPoll::Idle => StreamPoll::Idle,
+            live_replay::MailPoll::Ended => StreamPoll::Ended,
         }
     })
 }
@@ -278,6 +317,7 @@ impl orbital_core::effects::executor::SubstrateHandler for SelfSubstrate {
 /// A guest opened with `program: true` is answered by `substrate`, this host's own program port.
 struct HostGuests {
     substrate: Option<SubstratePort>,
+    unconnected_session_expiry: Option<std::time::Duration>,
 }
 
 impl orbital_core::runtime::kernel::guest_hosting::GuestHosting for HostGuests {
@@ -287,6 +327,7 @@ impl orbital_core::runtime::kernel::guest_hosting::GuestHosting for HostGuests {
             config.substrate = self.substrate.clone();
         }
         config.anchors = guest_anchors(cwd, env);
+        config.unconnected_session_expiry = self.unconnected_session_expiry;
         let host = Host::with_config(Arc::new(super::store::DriverAdapter::memory()), config);
         let host = match integrations {
             GuestIntegrations::Live => host,
@@ -350,6 +391,14 @@ fn guest_anchors(cwd: Option<&str>, env: &[(String, Option<String>)]) -> Option<
 
 /// A guest's host, and its live stream: the dispatches it ran on its own for a viewer wait there for the next tick pass.
 struct GuestOf(Arc<Host>, Mutex<broadcast::Receiver<LiveBroadcastItem>>);
+
+/// A guest ends with its host's handles (EXEC-CONC-7): its files and sockets close and its children, detached ones
+/// included, are killed, so a closed release leaves no browser or server process behind.
+impl Drop for GuestOf {
+    fn drop(&mut self) {
+        self.0.handles.close_all();
+    }
+}
 
 impl orbital_core::runtime::kernel::guest_hosting::GuestHost for GuestOf {
     fn kernel(&self) -> Arc<RuntimeKernel> {
@@ -692,7 +741,8 @@ impl orbital_core::runtime::kernel::guest_hosting::GuestHost for GuestOf {
 
     fn live_source(&self, options: &ValueMap) -> Option<orbital_core::runtime::native_host::SubstrateSource> {
         let client_id = options.get("clientId").and_then(Value::as_str).map(str::to_string);
-        Some(host_live_stream(&self.0, client_id))
+        let since = options.get("since").and_then(Value::as_str).map(str::to_string);
+        Some(host_live_stream(&self.0, client_id, since))
     }
 
     fn take_host_dispatches(&self) -> Vec<Value> {
@@ -757,6 +807,7 @@ impl Default for HostConfig {
             substrate: None,
             clock: None,
             anchors: None,
+            unconnected_session_expiry: None,
         }
     }
 }
@@ -1110,6 +1161,8 @@ pub struct Host {
     /// shared by every subscriber connection; dropped receivers are pruned by `tokio`
     /// on the next send.
     live_tx: broadcast::Sender<LiveBroadcastItem>,
+    /// Each client's numbered live frames, kept across its streams so a reopened stream resumes (`program/live { since }`).
+    live_mail: live_replay::LiveMailboxes,
     /// Hook deliveries waiting for an answer a later completion dispatch carries ([`Self::deliver_inbound_awaiting`]).
     inbound_waiters: InboundWaiters,
     /// Background ticks between their dispatch and the hand-off of their outcomes to `inbound_waiters`: a delivery waiting on a tick is not unanswered while its answer is in flight.
@@ -1277,7 +1330,8 @@ impl Host {
             kernel_config,
         ));
         kernel.set_stateful(true);
-        kernel.set_guest_hosting(Arc::new(HostGuests { substrate: config.substrate.clone() }));
+        kernel.set_guest_hosting(Arc::new(HostGuests { substrate: config.substrate.clone(), unconnected_session_expiry: config.unconnected_session_expiry }));
+        kernel.set_unconnected_session_expiry(config.unconnected_session_expiry);
         kernel.set_memory_settler(Arc::new(|| {
             orbital_core::runtime::memory_release::release_freed_memory();
         }));
@@ -1424,6 +1478,7 @@ impl Host {
             persistence,
             entity_source,
             live_tx,
+            live_mail: live_replay::LiveMailboxes::new(LIVE_BROADCAST_CAPACITY),
             inbound_waiters,
             ticks_in_flight: std::sync::atomic::AtomicUsize::new(0),
             substrate,
@@ -1550,6 +1605,7 @@ impl Host {
 
     /// [`Self::tick_pass`], with what each tick that ran moved.
     fn tick_pass_moving(&self, now_ms: u64, calendar: orbital_core::Calendar) -> Vec<((String, String), DispatchOutcomes)> {
+        self.kernel.free_quiet_sessions();
         let due = self.ticks.lock().due(now_ms, || calendar);
         if let Some(lolo) = self.lolo_ticks.lock().as_mut() {
             for (trait_name, tick) in due {
@@ -2391,6 +2447,81 @@ mod tests {
         }
     }
 
+    fn expiring_guest(expiry: Option<std::time::Duration>) -> Arc<dyn orbital_core::runtime::kernel::guest_hosting::GuestHost> {
+        use orbital_core::runtime::kernel::guest_hosting::GuestHosting as _;
+        let guest = HostGuests { substrate: None, unconnected_session_expiry: expiry }.open(GuestIntegrations::Live, None, &[], false);
+        drop(guest.kernel().admit_request(Some("tab-a"), false, false).expect("a fresh session is admitted"));
+        std::thread::sleep(std::time::Duration::from_millis(60));
+        guest.tick_pass().expect("the guest's tick pass");
+        guest
+    }
+
+    /// A guest this host opens frees its stream-less sessions on the expiry its opener declared (EXEC-DIST-9).
+    #[test]
+    fn a_guest_frees_a_stream_less_session_past_its_openers_declared_expiry() {
+        let guest = expiring_guest(Some(std::time::Duration::from_millis(30)));
+        assert!(guest.kernel().admit_request(Some("tab-a"), false, false).is_err(), "the expired session still admits a request");
+    }
+
+    #[test]
+    fn control_a_guest_whose_opener_declared_no_expiry_keeps_the_session() {
+        let guest = expiring_guest(None);
+        assert!(guest.kernel().admit_request(Some("tab-a"), false, false).is_ok());
+    }
+
+    fn guest_with_a_detached_child() -> (Arc<dyn orbital_core::runtime::kernel::guest_hosting::GuestHost>, i32) {
+        use orbital_core::runtime::kernel::guest_hosting::GuestHosting as _;
+        let guest = HostGuests { substrate: None, unconnected_session_expiry: None }.open(GuestIntegrations::Live, None, &[], false);
+        let schema: orbital_core::OrbitalSchema = serde_json::from_value(serde_json::json!({
+            "name": "Spawner", "typeContractVersion": 1,
+            "orbitals": [{
+                "name": "Spawner",
+                "entity": { "name": "Job", "persistence": "runtime", "fields": [{ "name": "id", "type": "string" }, { "name": "pid", "type": "number" }, { "name": "failed", "type": "string" }] },
+                "osGrants": { "exec": ["/bin/sleep"] },
+                "traits": [{
+                    "name": "Spawn", "linkedEntity": "Job",
+                    "stateMachine": {
+                        "states": [{ "name": "idle", "isInitial": true }],
+                        "events": [{ "key": "INIT", "name": "Init" }, { "key": "GO", "name": "Go" }, { "key": "SPAWNED", "name": "Spawned" }, { "key": "BAD", "name": "Bad" }],
+                        "transitions": [
+                            { "from": "idle", "to": "idle", "event": "INIT", "effects": [] },
+                            { "from": "idle", "to": "idle", "event": "GO", "effects": [["os/spawn", "/bin/sleep", ["30"], { "stdin": "null", "stdout": "null", "stderr": "null", "detached": true }, { "emit": { "success": "SPAWNED", "failure": "BAD" } }]] },
+                            { "from": "idle", "to": "idle", "event": "SPAWNED", "effects": [["set", "@entity.pid", "@payload.pid"]] },
+                            { "from": "idle", "to": "idle", "event": "BAD", "effects": [["set", "@entity.failed", "@payload.error"]] }
+                        ]
+                    }
+                }]
+            }]
+        }))
+        .unwrap();
+        guest.register(schema).unwrap();
+        guest.dispatch("Spawn", "GO", Value::Null).unwrap();
+        let entity = serde_json::to_value(&guest.kernel().snapshot_trait("Spawn", None).entity).unwrap();
+        let pid = entity["pid"].as_f64().unwrap_or_else(|| panic!("the guest spawned no child: {entity}")) as i32;
+        (guest, pid)
+    }
+
+    #[cfg(unix)]
+    fn process_runs(pid: i32) -> bool {
+        std::process::Command::new("/bin/kill").args(["-0", &pid.to_string()]).stderr(std::process::Stdio::null()).status().is_ok_and(|s| s.success())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_closed_guest_kills_the_detached_child_it_spawned() {
+        let (guest, pid) = guest_with_a_detached_child();
+        drop(guest);
+        assert!(!process_runs(pid), "the detached child {pid} outlived its closed guest");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn control_an_open_guests_detached_child_keeps_running() {
+        let (guest, pid) = guest_with_a_detached_child();
+        assert!(process_runs(pid), "the detached child {pid} is not running while its guest is open");
+        drop(guest);
+    }
+
     #[test]
     fn a_guest_dispatch_waiting_on_a_reply_answers_when_a_later_dispatch_emits_it_for_the_same_request() {
         let entity = reply_guest(serde_json::json!({ "requestId": 7 }), serde_json::json!({ "reply": { "events": ["BOUND"], "match": "requestId", "timeoutMs": 3000 } }), Some(7));
@@ -2436,6 +2567,28 @@ mod tests {
         host.broadcast_live(LiveBroadcastItem::call_message("REPLIED".to_string(), Value::Null, "Conversation".to_string(), Some("c1".to_string())));
         let item = poll_item(&mut source).expect("the viewer's item arrives");
         assert_eq!(item["event"], "REPLIED", "control: another viewer's item is not this viewer's: {item}");
+    }
+
+    #[test]
+    fn g_cross_853_an_item_made_while_a_viewers_stream_is_closed_arrives_on_the_stream_reopened_after_its_last_frame() {
+        use orbital_core::runtime::kernel::guest_hosting::GuestHost as _;
+        let host = Host::new(Arc::new(DriverAdapter::memory())).shared();
+        let guest = GuestOf(Arc::clone(&host), Mutex::new(host.subscribe_live()));
+        let Value::Object(options) = live_options(serde_json::json!({ "clientId": "c1" })) else { panic!("options") };
+        let mut source = guest.live_source(&options).expect("a stream");
+        host.broadcast_live(LiveBroadcastItem::call_message("FIRST".to_string(), Value::Null, "Conversation".to_string(), Some("c1".to_string())));
+        let first = poll_item(&mut source).expect("the open stream carries it");
+        let id = first["id"].as_str().expect("a frame carries its id").to_string();
+        drop(source);
+        host.broadcast_live(LiveBroadcastItem::call_message("MISSED".to_string(), Value::Null, "Conversation".to_string(), Some("c1".to_string())));
+        host.broadcast_live(LiveBroadcastItem::call_message("OTHER_TAB".to_string(), Value::Null, "Conversation".to_string(), Some("c2".to_string())));
+        let Value::Object(resumed) = live_options(serde_json::json!({ "clientId": "c1", "since": id })) else { panic!("options") };
+        let mut again = guest.live_source(&resumed).expect("a stream");
+        let missed = poll_item(&mut again).expect("the item made while the stream was closed arrives");
+        assert_eq!(missed["event"], "MISSED", "{missed}");
+        assert_ne!(missed["id"], first["id"]);
+        host.broadcast_live(LiveBroadcastItem::call_message("LATER".to_string(), Value::Null, "Conversation".to_string(), Some("c1".to_string())));
+        assert_eq!(poll_item(&mut again).map(|i| i["event"].clone()), Some(serde_json::json!("LATER")), "control: the first frame is not sent again and another viewer's item never is");
     }
 
     #[test]
@@ -7700,6 +7853,35 @@ mod tests {
         let (_, errors) = session_dispatch(&runtime, "Viewer", "READ_BACK", None, as_tab("tab-a")).unwrap_err();
         assert_eq!(errors[0]["code"], "SESSION_ENDED", "{errors}");
         assert_eq!(errors[0]["status"], 409, "{errors}");
+    }
+
+    fn expiring_session_host(expiry: Option<std::time::Duration>) -> Arc<Host> {
+        let config = HostConfig { unconnected_session_expiry: expiry, ..HostConfig::default() };
+        let runtime = Host::with_config(Arc::new(DriverAdapter::memory()), config).shared();
+        runtime.register_schema(session_program(false)).unwrap();
+        runtime
+    }
+
+    /// The native twin of `exec_dist_9_a_session_whose_stream_never_opened_is_freed_once_quiet_past_the_hosts_expiry`
+    /// (G-CROSS-590): the host's declared expiry frees a stream-less session on its tick pass.
+    #[test]
+    fn a_session_whose_stream_never_opened_is_freed_on_the_tick_pass_past_the_declared_expiry() {
+        let runtime = expiring_session_host(Some(std::time::Duration::from_millis(30)));
+        session_dispatch(&runtime, "Viewer", "SET_TOPIC", Some("app"), as_tab("tab-a")).unwrap();
+        assert!(runtime.kernel.frame_sessions().contains(&"tab-a".to_string()), "kept inside the expiry");
+        std::thread::sleep(std::time::Duration::from_millis(60));
+        runtime.tick_pass(1000, orbital_core::Calendar::local_now());
+        let (_, errors) = session_dispatch(&runtime, "Viewer", "READ_BACK", None, as_tab("tab-a")).unwrap_err();
+        assert_eq!(errors[0]["code"], "SESSION_ENDED", "{errors}");
+    }
+
+    #[test]
+    fn control_without_a_declared_expiry_a_stream_less_session_is_kept() {
+        let runtime = expiring_session_host(None);
+        session_dispatch(&runtime, "Viewer", "SET_TOPIC", Some("app"), as_tab("tab-a")).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(60));
+        runtime.tick_pass(1000, orbital_core::Calendar::local_now());
+        assert!(runtime.kernel.frame_sessions().contains(&"tab-a".to_string()));
     }
 
     #[test]

@@ -57,13 +57,15 @@ pub fn boot_file_with(
 }
 
 /// A composed app booted with the substrate `port` installed and its ticks driven (`orb serve`, and a cli program's
-/// `orb-run: server` hand-off): the store is the kernel's in-memory store.
+/// `orb-run: server` hand-off): the store is the kernel's in-memory store. `unconnected_session_expiry` is the hand-off's
+/// `orb-session-expiry-minutes` (`HostConfig::unconnected_session_expiry`).
 pub fn boot_app(
     schema: orbital_core::OrbitalSchema,
     schema_path: &Path,
     port: SubstratePort,
     env: &BootEnv,
     trace_by_default: bool,
+    unconnected_session_expiry: Option<std::time::Duration>,
 ) -> anyhow::Result<Arc<Host>> {
     let runtime = boot(
         schema,
@@ -71,7 +73,7 @@ pub fn boot_app(
         Arc::new(DriverAdapter::memory()),
         env,
         trace_by_default,
-        HostConfig { substrate: Some(port), ..HostConfig::default() },
+        HostConfig { substrate: Some(port), unconnected_session_expiry, ..HostConfig::default() },
     )?;
     release_boot_memory();
     start_tick_driver(&runtime);
@@ -370,7 +372,7 @@ mod composed_tests {
     #[test]
     fn the_composed_boot_drives_its_background_ticks() {
         let ticks = serde_json::json!([{ "name": "beat", "interval": 10, "runsInBackground": true, "effects": [["persist", "create", "Memo", { "n": 1 }]] }]);
-        let host = boot_app(schema_of(persistent_program(ticks)), Path::new("app.orb"), port(), &Default::default(), true).unwrap();
+        let host = boot_app(schema_of(persistent_program(ticks)), Path::new("app.orb"), port(), &Default::default(), true, None).unwrap();
         let first: orbital_core::Value = serde_json::from_value(serde_json::json!({ "id": "m0", "n": 0 })).unwrap();
         host.persistence().create("Memo", &first).unwrap();
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
@@ -433,7 +435,7 @@ mod composed_tests {
         let dir = lazy_files("app", true);
         let app = dir.join("app.orb");
         let schema = orbital_core::schema::parse_schema_file(&app).unwrap();
-        let host = boot_app(schema, &app, port(), &Default::default(), false).unwrap();
+        let host = boot_app(schema, &app, port(), &Default::default(), false, None).unwrap();
         host.kernel().dispatch("Hear", None, "HEARD", orbital_core::Value::Null).unwrap();
         assert_eq!(host.kernel().get_state("Hear", None).unwrap().current_state, "heard");
     }
