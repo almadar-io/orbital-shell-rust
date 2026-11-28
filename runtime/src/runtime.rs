@@ -1340,7 +1340,11 @@ impl Host {
             Arc::new(orbital_core::runtime::credential_store::StoreCredentialRows(persistence.clone()))
                 as Arc<dyn orbital_core::runtime::credential_store::CredentialRows>
         });
-        let (secrets, credential_store_failure) = credentials_with_rows(rows);
+        let environment = match &config.anchors {
+            Some(anchors) => Credentials::from_env(anchors.env.pairs().map(|(name, value)| (name.to_string(), value.to_string())).collect()),
+            None => Credentials::from_process_env(),
+        };
+        let (secrets, credential_store_failure) = credentials_with_rows(environment, rows);
         let egress_of = Arc::clone(&kernel);
         let secrets = Arc::new(secrets.with_grant_transport(Arc::new(
             orbital_core::runtime::credential_transport::TlsFormTransport::new(Arc::new(move || egress_of.egress())),
@@ -2467,6 +2471,39 @@ mod tests {
     fn control_a_guest_whose_opener_declared_no_expiry_keeps_the_session() {
         let guest = expiring_guest(None);
         assert!(guest.kernel().admit_request(Some("tab-a"), false, false).is_ok());
+    }
+
+    fn guest_opened_with_env(env: &[(String, Option<String>)]) -> Arc<dyn orbital_core::runtime::kernel::guest_hosting::GuestHost> {
+        use orbital_core::runtime::kernel::guest_hosting::GuestHosting as _;
+        HostGuests { substrate: None, unconnected_session_expiry: None }.open(GuestIntegrations::Live, None, env, false)
+    }
+
+    /// A guest's credentials are the env it was opened with over the host's, the one environment its `os/getenv` reads
+    /// (EXEC-CONC-7): a name the host also holds answers the guest's value, so an app never signs with its host's secret.
+    #[test]
+    fn a_guest_credential_reads_the_env_it_was_opened_with_over_the_hosts() {
+        let host_home = std::env::var("HOME").expect("the test process holds HOME");
+        let guest = guest_opened_with_env(&[
+            ("HOME".to_string(), Some("guest-home".to_string())),
+            ("ORB_GUEST_ONLY_CREDENTIAL".to_string(), Some("guest-only".to_string())),
+        ]);
+        assert_ne!(host_home, "guest-home");
+        assert_eq!(guest.credential_of("HOME").as_deref(), Some("guest-home"), "the host's HOME shadowed the guest's");
+        assert_eq!(guest.credential_of("ORB_GUEST_ONLY_CREDENTIAL").as_deref(), Some("guest-only"));
+        assert_eq!(guest.credential_of("HOME"), guest.environment_of("HOME"));
+    }
+
+    #[test]
+    fn edge_a_guest_opened_with_a_name_unset_holds_no_credential_by_it() {
+        let guest = guest_opened_with_env(&[("HOME".to_string(), None)]);
+        assert_eq!(guest.credential_of("HOME"), None);
+        assert_eq!(guest.environment_of("HOME"), None);
+    }
+
+    #[test]
+    fn control_a_guest_opened_with_no_env_reads_the_hosts_credentials() {
+        let guest = guest_opened_with_env(&[]);
+        assert_eq!(guest.credential_of("HOME"), std::env::var("HOME").ok());
     }
 
     fn guest_with_a_detached_child() -> (Arc<dyn orbital_core::runtime::kernel::guest_hosting::GuestHost>, i32) {
@@ -4393,19 +4430,21 @@ mod tests {
             let id = begun["leg"].as_str().unwrap().to_string();
             guest.in_leg(&id, Box::new(|| guest.step("Seeder", None, "SEED_PAGE", Value::Null, None, Some(&id)).map(|_| Value::Null))).unwrap();
             let mut rounds = 0;
-            while settle {
-                let settled = orbital_core::json_value::value_to_json(&guest.settle_leg(&id).unwrap());
-                let runs = settled["runs"].as_array().cloned().unwrap_or_default();
-                if runs.is_empty() {
-                    break;
-                }
-                rounds += 1;
-                assert!(rounds < 10, "the lineage settles");
-                for run in runs {
-                    let (handle, trait_name, event) = (run["run"].as_str().unwrap().to_string(), run["trait"].as_str().unwrap().to_string(), run["event"].as_str().unwrap().to_string());
-                    let row = run["entityId"].as_str().map(str::to_string);
-                    let payload: Value = serde_json::from_value(run["payload"].clone()).unwrap();
-                    guest.in_leg_run(&id, &handle, Box::new(|| guest.step(&trait_name, row.as_deref(), &event, payload, None, Some(&id)).map(|_| Value::Null))).unwrap();
+            if settle {
+                loop {
+                    let settled = orbital_core::json_value::value_to_json(&guest.settle_leg(&id).unwrap());
+                    let runs = settled["runs"].as_array().cloned().unwrap_or_default();
+                    if runs.is_empty() {
+                        break;
+                    }
+                    rounds += 1;
+                    assert!(rounds < 10, "the lineage settles");
+                    for run in runs {
+                        let (handle, trait_name, event) = (run["run"].as_str().unwrap().to_string(), run["trait"].as_str().unwrap().to_string(), run["event"].as_str().unwrap().to_string());
+                        let row = run["entityId"].as_str().map(str::to_string);
+                        let payload: Value = serde_json::from_value(run["payload"].clone()).unwrap();
+                        guest.in_leg_run(&id, &handle, Box::new(|| guest.step(&trait_name, row.as_deref(), &event, payload, None, Some(&id)).map(|_| Value::Null))).unwrap();
+                    }
                 }
             }
             if settle {

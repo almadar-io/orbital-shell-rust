@@ -7,7 +7,9 @@ Every open gap this repo owns lives here. This file is the source of truth; the 
 - **Codes:** new gaps use this repo's prefix `G-ORBITAL-SHELL-RUST-`. Take the "Next code" below, then bump it in the same edit. Codes are never reused or renamed.
 - **Close by deleting.** Remove the entry in the same commit as the fix.
 
-Next code: `G-ORBITAL-SHELL-RUST-074`
+Next code: `G-ORBITAL-SHELL-RUST-076`
+
+- **G-ORBITAL-SHELL-RUST-075** [mechanical] — The Dioxus audio host loads an `audio/schedule` source only from http(s), `file://` or a bundled asset (`renderers/dioxus/src/audio.rs` `load_audio`); a `data:` URL, which the web host plays through fetch, is refused, so a voice note cannot be heard before it is uploaded (std-voice-recorder's preview). Not reachable today because the native host has no `os/audio-in` answer either (P-052 compromises); it must land with the native microphone. Prevention rung: (3) the verifiers (a twin test of a `data:` source on both hosts). Severity: medium. Root cause: one-off.
 
 
 - **G-ORBITAL-SHELL-RUST-072** [mechanical] — On Android native-gpu a Rasm page is drawn inside a white margin: a white band under the status bar and a white strip down the left and right edges (about 16 dp), with the page's own ground starting inside it. Seen 2026-11-24 and 2026-11-25 on the `orbital-test` emulator with dj-set, under both a light and a dark system (with Ghost HUD's near-black ground the white frame is the brightest thing on screen); the page declares padding 0 and one `fill` section, and the web host draws the same page edge to edge. Not traced in source: either the activity window's background shows around an inset surface, or the surface is sized inside the system-bar insets and never told to fill them. Owner: orbital-shell-rust dioxus renderer (Android window and surface sizing) or the Android template. Reproduction: compile `dj/organisms/dj-set.lolo` with `--shell android --renderer native-gpu`, open it, screenshot. Prevention rung: (3) the verifiers (the native render probe compares the first frame's edge pixels with the page ground). Severity: medium. Root cause: one-off.
